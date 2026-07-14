@@ -1,0 +1,22 @@
+[Unit]
+Description=BambuDiagnosticData service
+After=network.target
+
+[Service]
+Type=simple
+# Change User/Group to a non-root user on your Raspberry Pi (e.g. 'pi' or a dedicated 'bambu' user)
+User=__USER__
+Group=__GROUP__
+WorkingDirectory=__WORKDIR__
+Environment=PYTHONUNBUFFERED=1
+# ExecStart runs the project with system python3; adjust path to virtualenv python if used
+ExecStart=/usr/bin/env bash -lc 'cd __WORKDIR__ && /usr/bin/env python3 -u main.py'
+Restart=on-failure
+RestartSec=5
+# Log to journal; use journalctl -u bambudiagnostic.service to view logs
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=BambuDiagnosticData
+
+[Install]
+WantedBy=multi-user.target

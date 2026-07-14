@@ -1,0 +1,27 @@
+# Runtime dependencies (curated from actual top-level imports).
+# Pinned to versions from the working .venv where available.
+# NOT a `pip freeze` dump on purpose: PyInstaller/Windows-only packages
+# (pywin32-ctypes, pefile, altgraph) would break `pip install` on the Linux Pi.
+
+# --- Web / API ---
+fastapi==0.136.1
+uvicorn==0.46.0
+starlette==1.0.0
+pydantic==2.12.5
+
+# --- Auth (not present in local .venv — required on the deploy target) ---
+bcrypt>=4.1,<5
+PyJWT>=2.8,<3
+
+# --- Printer protocols ---
+pybambu==1.0.1           # Bambu Lab (MQTT); pulls paho-mqtt
+websocket-client==1.9.0  # Creality + Klipper/Moonraker WebSocket clients
+
+# --- Telegram bot + proxy ---
+aiogram==3.24.0
+aiohttp>=3.13.4,<4
+aiohttp-socks==0.11.0
+
+# --- Dev / build (install manually, not on the Pi) ---
+# pytest==9.0.2
+# pyinstaller==6.19.0

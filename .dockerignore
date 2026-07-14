@@ -1,0 +1,29 @@
+# Keep the build context small and never bake local state / secrets into the image.
+.git
+.gitignore
+.venv
+venv
+__pycache__
+*.pyc
+*.pyo
+
+# Local runtime state — must NOT be copied into the image (mount at runtime).
+*.db
+*.db-journal
+*.db-wal
+.env
+*.log
+*.pem
+*.key
+*.crt
+
+# Editor / OS cruft
+.vscode
+.idea
+.DS_Store
+Thumbs.db
+
+# Docs/build artifacts not needed at runtime
+build
+dist
+*.spec

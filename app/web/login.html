@@ -1,0 +1,139 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="robots" content="noindex, nofollow" />
+  <title>Кузница</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='7' fill='%231e293b'/><polygon points='16,3 29,12 29,24 16,30 3,24 3,12' fill='none' stroke='%2360a5fa' stroke-width='2.5'/><circle cx='16' cy='16' r='3' fill='%2360a5fa'/></svg>">
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body { height: 100%; }
+    body {
+      font-family: 'IBM Plex Sans', sans-serif;
+      color: #e2eaf3;
+      background:
+        radial-gradient(ellipse 90% 70% at 50% -10%, rgba(96, 165, 250, 0.10), transparent 60%),
+        #0f172a;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 24px;
+      position: relative;
+    }
+    body::before {
+      content: "";
+      position: fixed;
+      inset: 0;
+      background-image: radial-gradient(rgba(255, 255, 255, 0.05) 1px, transparent 1px);
+      background-size: 26px 26px;
+      -webkit-mask-image: linear-gradient(180deg, rgba(0, 0, 0, 0.7), transparent 70%);
+      mask-image: linear-gradient(180deg, rgba(0, 0, 0, 0.7), transparent 70%);
+      pointer-events: none;
+    }
+    .card {
+      position: relative;
+      width: 340px;
+      background-color: #1e293b;
+      background-image: linear-gradient(180deg, rgba(255, 255, 255, 0.03), transparent);
+      border: 1px solid rgba(255, 255, 255, 0.14);
+      border-radius: 18px;
+      padding: 34px 30px 26px;
+      box-shadow: 0 24px 60px rgba(0, 0, 0, 0.45);
+    }
+    .emblem {
+      width: 54px; height: 54px;
+      margin: 0 auto 14px;
+      border-radius: 14px;
+      background: linear-gradient(160deg, #263548, #0f172a);
+      border: 1px solid rgba(255, 255, 255, 0.14);
+      display: flex; align-items: center; justify-content: center;
+      font-size: 24px; color: #60a5fa;
+      box-shadow: 0 0 24px rgba(96, 165, 250, 0.18);
+    }
+    h1 { text-align: center; font-weight: 700; letter-spacing: 0.28em; font-size: 1.05rem; margin-bottom: 4px; }
+    .sub { text-align: center; color: #8ba7be; font-size: 0.78rem; margin-bottom: 24px; }
+    .field { margin-bottom: 12px; }
+    .field label {
+      display: block;
+      font-size: 0.68rem; text-transform: uppercase; letter-spacing: 0.08em;
+      color: #8ba7be; margin-bottom: 5px;
+    }
+    .field input {
+      width: 100%;
+      background: #0f172a;
+      border: 1px solid rgba(255, 255, 255, 0.14);
+      border-radius: 10px;
+      padding: 10px 12px;
+      color: #e2eaf3;
+      font: inherit;
+      outline: none;
+    }
+    .field input:focus { border-color: #60a5fa; }
+    button {
+      width: 100%;
+      margin-top: 10px;
+      padding: 11px;
+      border: 1px solid rgba(45, 212, 191, 0.35);
+      border-radius: 10px;
+      background: linear-gradient(135deg, #1a6b5e, #2dd4bf);
+      color: #04211c;
+      font: inherit; font-weight: 700; font-size: 0.9rem;
+      letter-spacing: 0.04em;
+      cursor: pointer;
+    }
+    button:disabled { opacity: 0.6; cursor: default; }
+    .err { min-height: 18px; font-size: 0.75rem; color: #f87171; text-align: center; margin-top: 10px; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="emblem">&#x2692;</div>
+    <h1>КУЗНИЦА</h1>
+    <div class="sub">Панель управления</div>
+    <form id="f" autocomplete="off">
+      <div class="field">
+        <label for="u">Логин</label>
+        <input type="text" id="u" autocomplete="username" autofocus />
+      </div>
+      <div class="field">
+        <label for="p">Пароль</label>
+        <input type="password" id="p" autocomplete="current-password" />
+      </div>
+      <button type="submit" id="b">Войти</button>
+      <div class="err" id="e"></div>
+    </form>
+  </div>
+  <script>
+    document.getElementById('f').addEventListener('submit', function (ev) {
+      ev.preventDefault();
+      var btn = document.getElementById('b');
+      var err = document.getElementById('e');
+      btn.disabled = true;
+      err.textContent = '';
+      fetch('/api/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          username: document.getElementById('u').value,
+          password: document.getElementById('p').value,
+        }),
+      }).then(function (res) {
+        return res.json().then(function (data) { return { ok: res.ok, data: data }; });
+      }).then(function (r) {
+        if (r.ok) { window.location.replace('/'); }
+        else {
+          err.textContent = r.data.detail || 'Ошибка входа';
+          btn.disabled = false;
+        }
+      }).catch(function () {
+        err.textContent = 'Ошибка сети. Попробуйте позже.';
+        btn.disabled = false;
+      });
+    });
+  </script>
+</body>
+</html>

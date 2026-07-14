@@ -1,0 +1,519 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Кузница</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <!-- favicon replaced inline below -->
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='7' fill='%231e293b'/><polygon points='16,3 29,12 29,24 16,30 3,24 3,12' fill='none' stroke='%2360a5fa' stroke-width='2.5'/><circle cx='16' cy='16' r='3' fill='%2360a5fa'/></svg>">
+    <link rel="stylesheet" href="/static/styles.css?v=61" />
+
+</head>
+<body>
+  <div class="shell" id="mainShell">
+    <header class="topbar">
+      <nav class="view-tabs" aria-label="Основные разделы">
+        <button type="button" class="view-tab active" data-view="fleet">Принтеры</button>
+        <button type="button" class="view-tab" data-view="dashboard" title="Сводка по ферме: метрики, статистика, лог событий.">Сводка</button>
+        <button type="button" class="view-tab" data-view="history">История</button>
+        <button type="button" class="view-tab" data-view="forecast" id="forecastTab" title="Когда освободятся принтеры в ближайшие часы">Окно</button>
+        <button type="button" class="view-tab" data-view="admin" id="adminTab" style="display: none;" title="Управление пользователями и журнал аудита">Администрирование</button>
+      </nav>
+      <div class="topbar-side">
+        <div class="status-chip">
+          <span class="status-dot-live"></span>
+          <span>Телеметрия</span>
+          <strong>LIVE</strong>
+        </div>
+        <div class="status-chip">
+          <span>Последнее обновление</span>
+          <span id="lastUpdate">—</span>
+        </div>
+        <button type="button" class="view-tab settings-tab" data-view="settings" id="settingsTab" title="Настройки"><span class="settings-tab-gear">⚙</span> Настройки</button>
+      </div>
+    </header>
+
+    <section class="view-panel active" data-panel="fleet">
+      <section class="section-panel fleet-section">
+        <div class="sort-bar">
+          <div class="sort-dropdown-wrap">
+            <button type="button" class="sort-btn" id="sortBtn" aria-haspopup="true" aria-expanded="false">
+              <span id="sortBtnLabel">Сортировка: По имени (А-Я)</span>
+              <span class="sort-btn-caret">▾</span>
+            </button>
+            <div class="sort-dropdown" id="sortDropdown" role="menu">
+              <button type="button" class="sort-option active" data-sort="name">По имени (А-Я)</button>
+              <button type="button" class="sort-option" data-sort="eta">По времени до конца</button>
+            </div>
+          </div>
+          <div class="filters-dropdown-wrap" id="filtersWrap">
+            <button type="button" class="filters-btn" id="filtersBtn" aria-haspopup="true" aria-expanded="false" title="Фильтры по состоянию">
+              <span>Фильтры</span>
+              <span class="filters-btn-badge" id="filtersBtnBadge">0</span>
+              <span class="filters-btn-caret">▾</span>
+            </button>
+            <div class="settings-dropdown" id="filtersDropdown" role="menu">
+              <div class="settings-dropdown-head">
+                <strong>Фильтры по состоянию</strong>
+                <span>Показывать только выбранные категории принтеров.</span>
+              </div>
+              <nav id="filters" class="filters"></nav>
+            </div>
+          </div>
+          <label class="alerts-toggle" id="alertsToggleWrap">
+            <span class="alerts-label">Алерты вверх</span>
+            <span class="toggle-switch">
+              <input type="checkbox" id="alertsTopToggle" checked />
+              <span class="toggle-slider"></span>
+            </span>
+          </label>
+        </div>
+        <div id="printerGrid" class="printer-grid"></div>
+      </section>
+    </section>
+
+    <section class="view-panel" data-panel="dashboard">
+
+      <!-- === KPI row: клик включает фильтр состояния на вкладке «Принтеры» === -->
+      <section class="dash-kpi-row">
+        <button type="button" class="dash-kpi total" data-kpi-filter="" title="Показать все принтеры"><strong id="kpiTotal">0</strong><span>Всего</span></button>
+        <button type="button" class="dash-kpi online" data-kpi-filter="online" title="Показать принтеры онлайн"><strong id="kpiOnline">0</strong><span>Онлайн</span></button>
+        <button type="button" class="dash-kpi printing" data-kpi-filter="printing" title="Показать печатающие"><strong id="kpiPrinting">0</strong><span>Печатают</span></button>
+        <button type="button" class="dash-kpi paused" data-kpi-filter="paused" title="Показать принтеры на паузе"><strong id="kpiPaused">0</strong><span>Пауза</span></button>
+        <button type="button" class="dash-kpi error" data-kpi-filter="error" title="Показать принтеры с ошибкой"><strong id="kpiError">0</strong><span>Ошибка</span></button>
+        <button type="button" class="dash-kpi offline" data-kpi-filter="offline" title="Показать офлайн-принтеры"><strong id="kpiOffline">0</strong><span>Офлайн</span></button>
+      </section>
+
+      <!-- === Meta row === -->
+      <section class="dash-meta-row">
+        <span class="dash-meta-item"><svg class="dash-meta-ic" aria-hidden="true"><use href="#i-gauge"></use></svg>Загрузка <strong id="metaUtil">0%</strong></span>
+        <span class="dash-meta-item"><svg class="dash-meta-ic" aria-hidden="true"><use href="#i-clock"></use></svg>ETA <strong id="metaNextFinish">&mdash;</strong></span>
+        <span class="dash-meta-item"><svg class="dash-meta-ic" aria-hidden="true"><use href="#i-hourglass"></use></svg>Освободятся <strong id="metaFarmIdle" class="dash-meta-finish">&mdash;</strong></span>
+        <span class="dash-meta-item"><svg class="dash-meta-ic" aria-hidden="true"><use href="#i-nozzle"></use></svg>Сопло <strong id="metaNozzle">&mdash;</strong></span>
+        <span class="dash-meta-item"><svg class="dash-meta-ic" aria-hidden="true"><use href="#i-bed"></use></svg>Стол <strong id="metaBed">&mdash;</strong></span>
+      </section>
+
+      <!-- === Stats per printer === -->
+      <section class="dash-stats-section section-panel">
+        <div class="panel-head">
+          <div class="panel-title-group">
+            <h3>Статистика принтеров</h3>
+            <p>Распределение времени по состояниям за выбранный период.</p>
+          </div>
+          <div class="dash-stats-controls">
+            <button type="button" class="stats-period-btn" data-period="86400">24ч</button>
+            <button type="button" class="stats-period-btn active" data-period="604800">7дн</button>
+            <button type="button" class="stats-period-btn" data-period="2592000">30дн</button>
+          </div>
+        </div>
+        <div class="dash-stats-legend" aria-hidden="true">
+          <span><i class="seg-printing"></i>печатал</span>
+          <span><i class="seg-idle"></i>простой</span>
+          <span><i class="seg-paused"></i>пауза</span>
+          <span><i class="seg-error"></i>ошибка</span>
+          <span><i class="seg-finished"></i>завершено</span>
+          <span><i class="seg-offline"></i>офлайн</span>
+        </div>
+        <div id="statsList" class="dash-stats-list">
+          <div class="dash-stats-empty">Выберите период для загрузки статистики.</div>
+        </div>
+        <div id="statesSummaryLoader" class="dash-log-loader" style="display:none">Загрузка статистики...</div>
+      </section>
+
+      <!-- === Event log === -->
+      <section class="section-panel">
+        <div class="panel-head">
+          <div class="panel-title-group">
+            <h3>Лог событий</h3>
+            <p>Переходы состояний принтеров за последние 24 часа.</p>
+          </div>
+        </div>
+        <div class="event-filters">
+          <div class="event-printer-wrap">
+            <button type="button" class="event-printer-btn" id="eventPrinterBtn" aria-haspopup="true" aria-expanded="false">
+              <span id="eventPrinterLabel">Все принтеры</span>
+              <span class="sort-btn-caret">▾</span>
+            </button>
+            <div class="sort-dropdown event-printer-dropdown" id="eventPrinterDropdown" role="menu"></div>
+          </div>
+          <div class="event-state-btns" id="eventStateBtns">
+            <button type="button" class="event-state-btn active" data-state="">Все</button>
+            <button type="button" class="event-state-btn" data-state="printing">Печать</button>
+            <button type="button" class="event-state-btn" data-state="paused">Пауза</button>
+            <button type="button" class="event-state-btn" data-state="error">Ошибки</button>
+            <button type="button" class="event-state-btn" data-state="finished">Завершения</button>
+            <button type="button" class="event-state-btn" data-state="offline">Офлайн</button>
+            <button type="button" class="event-state-btn" data-state="idle">Простой</button>
+          </div>
+        </div>
+        <div id="eventLog" class="dash-event-log"></div>
+        <div id="eventLogLoader" class="dash-log-loader" style="display:none">
+          <span>Загрузка...</span>
+        </div>
+        <div id="eventLogEnd" class="dash-log-end" style="display:none">
+          <span>Конец лога за выбранный период.</span>
+        </div>
+        <div id="eventLogSentinel" style="height:1px"></div>
+      </section>
+
+    </section>
+
+    <section class="view-panel" data-panel="history">
+      <section class="section-panel">
+        <div class="panel-head">
+          <div class="panel-title-group">
+            <h3>История состояний</h3>
+            <p>Таймлайн состояний всех принтеров. Колесо — зум к курсору, перетаскивание — прокрутка, двойной клик — сброс, наведение — детали.</p>
+          </div>
+          <div class="history-range-btns">
+            <span class="history-ctl-label">Диапазон:</span>
+            <button type="button" class="time-btn" data-range-hours="6">6ч</button>
+            <button type="button" class="time-btn active" data-range-hours="24">24ч</button>
+            <button type="button" class="time-btn" data-range-hours="72">3дн</button>
+            <button type="button" class="time-btn" data-range-hours="168">7дн</button>
+          </div>
+        </div>
+        <div class="history-controls">
+          <div class="event-printer-wrap">
+            <button type="button" class="event-printer-btn" id="historyPrinterBtn" aria-haspopup="true" aria-expanded="false">
+              <span id="historyPrinterLabel">Все принтеры</span>
+              <span class="sort-btn-caret">▾</span>
+            </button>
+            <div class="sort-dropdown event-printer-dropdown" id="historyPrinterDropdown" role="menu"></div>
+          </div>
+          <div class="history-ctl-group">
+            <span class="history-ctl-label">С</span>
+            <input type="datetime-local" id="history-from" class="history-dt">
+            <span class="history-ctl-label">По</span>
+            <input type="datetime-local" id="history-to" class="history-dt">
+            <button type="button" id="history-apply">Применить</button>
+          </div>
+        </div>
+        <div class="dash-stats-legend timeline-legend-row" aria-hidden="true">
+          <span><i class="seg-printing"></i>Печатает</span>
+          <span><i class="seg-idle"></i>Простой</span>
+          <span><i class="seg-paused"></i>Пауза</span>
+          <span><i class="seg-finished"></i>Завершено</span>
+          <span><i class="seg-error"></i>Ошибка</span>
+          <span><i class="seg-offline"></i>Офлайн</span>
+          <span id="timeline-scale-label" class="timeline-scale-label"></span>
+        </div>
+        <canvas id="timeline-canvas"></canvas>
+      </section>
+      <div id="timelineLoader" class="dash-log-loader loader-fixed" style="display:none">Загрузка таймлайна...</div>
+      <div class="timeline-tooltip" id="timeline-tooltip"></div>
+    </section>
+
+    <section class="view-panel" data-panel="forecast">
+      <section class="section-panel">
+        <div class="panel-head">
+          <div class="panel-title-group">
+            <h3>Окно печати</h3>
+            <p id="forecastMeta">&mdash;</p>
+          </div>
+          <div class="forecast-controls">
+            <button type="button" class="time-btn active" data-hours="12">12 часов</button>
+            <button type="button" class="time-btn" data-hours="24">24 часа</button>
+          </div>
+        </div>
+        <div id="forecastArea" class="forecast-area"></div>
+        <div id="forecastNoEta" class="forecast-no-eta" style="display:none"></div>
+      </section>
+    </section>
+    <section class="view-panel" data-panel="admin">
+      <div class="apply-bar" id="printersApplyBar" style="display:none">
+        <div class="apply-dot"></div>
+        <div class="apply-txt">
+          <strong>Есть непримененные изменения — <span id="printersPendingCount">0</span></strong>
+          <span>Опрос принтеров пока работает по старой конфигурации. Применение перезапустит сервис (~10 сек).</span>
+        </div>
+        <button type="button" class="discard-btn" id="printersDiscardBtn">Отменить правки</button>
+        <button type="button" class="apply-btn" id="printersApplyBtn">Применить и перезапустить</button>
+      </div>
+      <section class="section-panel">
+        <div class="panel-head">
+          <div class="panel-title-group">
+            <h3>Принтеры</h3>
+            <p>Имя, адрес и ключи доступа парка. История привязана к внутреннему ID и не теряется при переименовании.</p>
+          </div>
+          <button type="button" id="addPrinterBtn" class="pill-btn">+ Добавить принтер</button>
+        </div>
+        <table class="adm-table" id="adminPrintersTable">
+          <thead><tr><th class="sortable" data-sort="label">Название</th><th class="sortable" data-sort="kind">Тип</th><th class="sortable" data-sort="model">Модель</th><th class="sortable" data-sort="host">IP</th><th class="sortable" data-sort="serial">Серийный №</th><th class="sortable" data-sort="firmware">Прошивка</th><th>Access code</th><th class="adm-actions-col">Действия</th></tr></thead>
+          <tbody></tbody>
+        </table>
+        <div class="prn-form" id="prnForm" style="display:none">
+          <div class="prn-form-head">
+            <strong id="prnFormTitle">Добавить принтер</strong>
+            <div class="seg" id="prnKindSeg">
+              <button type="button" data-kind="bambu" class="on">Bambu Lab</button>
+              <button type="button" data-kind="creality">Creality</button>
+              <button type="button" data-kind="klipper">Klipper</button>
+              <button type="button" data-kind="mks">MKS WiFi</button>
+            </div>
+          </div>
+          <div class="fgrid">
+            <div class="fld" data-kinds="bambu creality klipper mks"><label>Название</label><input type="text" id="prnLabel" /></div>
+            <div class="fld" data-kinds="bambu"><label>Модель</label><select id="prnModelBambu"><option value="X1">X1</option><option value="X1C">X1 Carbon</option><option value="X1E">X1E</option><option value="P1P">P1P</option><option value="P1S">P1S</option><option value="P2S">P2S</option><option value="A1">A1</option><option value="A1MINI">A1 mini</option><option value="H2D">H2D</option><option value="H2S">H2S</option></select></div>
+            <div class="fld" data-kinds="creality"><label>Модель</label><select id="prnModelCreality"><option value="k1max">K1 Max</option><option value="k1c">K1C</option><option value="ender5max">Ender-5 Max</option></select></div>
+            <div class="fld" data-kinds="klipper mks"><label>Модель (не обязательно)</label><input type="text" id="prnModelText" /></div>
+            <div class="fld" data-kinds="bambu creality klipper mks"><label>IP-адрес</label><input type="text" id="prnHost" class="mono" /></div>
+            <div class="fld" data-kinds="klipper mks"><label>Порт</label><input type="number" id="prnPort" class="mono" min="1" max="65535" /></div>
+            <div class="fld" data-kinds="bambu"><label>Access code</label><div class="withbtn"><input type="password" id="prnAccessCode" /><button type="button" class="eye" id="prnAccessEye">&#128065;</button></div><div class="fld-hint">Экран принтера → Настройки → Сеть</div></div>
+            <div class="fld" data-kinds="bambu"><label>Серийный номер</label><input type="text" id="prnSerial" class="mono" /></div>
+          </div>
+          <div class="form-actions">
+            <button type="button" class="pill-btn" id="prnSaveBtn">Сохранить</button>
+            <button type="button" class="discard-btn" id="prnCancelBtn">Отмена</button>
+            <span class="adm-err" id="prnError"></span>
+          </div>
+        </div>
+      </section>
+      <section class="section-panel">
+        <div class="panel-head">
+          <div class="panel-title-group">
+            <h3>Пользователи</h3>
+            <p>Учётные записи и права доступа к панели.</p>
+          </div>
+        </div>
+        <table class="adm-table" id="adminUsersTable">
+          <thead><tr><th>ID</th><th>Логин</th><th>Роль</th><th>Создан</th><th>Последний вход</th><th class="adm-actions-col">Действия</th></tr></thead>
+          <tbody></tbody>
+        </table>
+        <div class="adm-add">
+          <input type="text" id="newUsername" placeholder="Логин" />
+          <input type="password" id="newPassword" placeholder="Пароль (мин 8 символов)" />
+          <select id="newUserRole"><option value="viewer">Зритель</option><option value="admin">Админ</option></select>
+          <button type="button" id="addUserBtn" class="pill-btn">Добавить</button>
+        </div>
+        <div class="adm-err" id="adminError"></div>
+      </section>
+      <section class="section-panel">
+        <div class="panel-head">
+          <div class="panel-title-group">
+            <h3>Журнал аудита</h3>
+            <p>Входы, выходы и действия пользователей. Прокрутка подгружает старые записи.</p>
+          </div>
+        </div>
+        <table class="adm-table" id="adminAuditTable">
+          <thead><tr><th>Время</th><th>Пользователь</th><th>Действие</th><th>IP</th><th>User Agent</th></tr></thead>
+          <tbody></tbody>
+        </table>
+        <div id="adminAuditSentinel"></div>
+        <div id="adminAuditLoader" style="display:none;text-align:center;padding:12px;color:var(--text-dim)">Загрузка...</div>
+      </section>
+    </section>
+
+    <section class="view-panel" data-panel="settings">
+      <section class="section-panel">
+        <div class="panel-head">
+          <div class="panel-title-group">
+            <h3>Оформление</h3>
+            <p>Действует только в этом браузере.</p>
+          </div>
+        </div>
+        <div class="setting-row">
+          <div class="setting-text"><strong>Тема</strong></div>
+          <div class="theme-grid" id="themeSegment">
+            <button type="button" class="theme-seg-btn active" data-theme="">Океан</button>
+            <button type="button" class="theme-seg-btn" data-theme="dark-classic">Классика</button>
+            <button type="button" class="theme-seg-btn" data-theme="light">Светлая</button>
+            <button type="button" class="theme-seg-btn" data-theme="night">Ночь</button>
+            <button type="button" class="theme-seg-btn" data-theme="neon">Неон</button>
+          </div>
+        </div>
+        <div class="setting-row">
+          <div class="setting-text"><strong>Масштаб текста</strong></div>
+          <div class="text-scale-row">
+            <input type="range" id="textScaleRange" min="50" max="150" step="5" value="100" aria-label="Масштаб текста" />
+            <span class="text-scale-value" id="textScaleValue">100%</span>
+          </div>
+        </div>
+        <div class="setting-row">
+          <div class="setting-text">
+            <strong>Ошибки в карточках</strong>
+            <span>Показывать последнюю ошибку принтера в его карточке.</span>
+          </div>
+          <label class="toggle-switch">
+            <input type="checkbox" id="showErrorsToggle" />
+            <span class="toggle-slider"></span>
+          </label>
+        </div>
+      </section>
+
+      <section class="section-panel settings-list" id="settingsList">
+        <div class="panel-head">
+          <div class="panel-title-group">
+            <h3>Уведомления браузера</h3>
+            <p>Всплывающие уведомления на этом устройстве.</p>
+          </div>
+        </div>
+        <div class="setting-row">
+          <div class="setting-text">
+            <strong>Уведомления браузера</strong>
+            <span>Главный переключатель. Браузер запросит разрешение.</span>
+          </div>
+          <label class="toggle-switch">
+            <input type="checkbox" id="notificationsEnabledToggle" />
+            <span class="toggle-slider"></span>
+          </label>
+        </div>
+        <div class="setting-row sub-setting">
+          <div class="setting-text">
+            <strong>Завершение печати</strong>
+            <span>При переходе печать → завершено.</span>
+          </div>
+          <label class="toggle-switch">
+            <input type="checkbox" id="notificationsFinishToggle" />
+            <span class="toggle-slider"></span>
+          </label>
+        </div>
+        <div class="setting-row sub-setting">
+          <div class="setting-text">
+            <strong>Ошибка принтера</strong>
+            <span>При переходе в состояние ошибки.</span>
+          </div>
+          <label class="toggle-switch">
+            <input type="checkbox" id="notificationsErrorToggle" />
+            <span class="toggle-slider"></span>
+          </label>
+        </div>
+        <div class="setting-row sub-setting">
+          <div class="setting-text">
+            <strong>Пауза печати</strong>
+            <span>Если печать поставили на паузу.</span>
+          </div>
+          <label class="toggle-switch">
+            <input type="checkbox" id="notificationsPausedToggle" />
+            <span class="toggle-slider"></span>
+          </label>
+        </div>
+      </section>
+
+      <section class="section-panel settings-admin" id="tgSection" style="display:none">
+        <div class="panel-head">
+          <div class="panel-title-group">
+            <h3>Telegram</h3>
+            <p>Бот со сводкой по ферме и уведомлениями о событиях печати. Сохраняется на лету.</p>
+          </div>
+          <span class="admin-chip">админ</span>
+        </div>
+        <div class="setting-row">
+          <div class="setting-text">
+            <strong>Телеграм-бот</strong>
+            <span id="tgStatusLine">—</span>
+          </div>
+          <label class="toggle-switch">
+            <input type="checkbox" id="tgEnabledToggle" />
+            <span class="toggle-slider"></span>
+          </label>
+        </div>
+        <div class="fgrid settings-fgrid">
+          <div class="fld">
+            <label for="tgToken">Токен бота</label>
+            <div class="withbtn"><input type="password" id="tgToken" autocomplete="off" /><button type="button" class="eye" id="tgTokenEye">&#128065;</button></div>
+            <div class="fld-hint">Выдаёт @BotFather. Смена токена перезапустит бота.</div>
+          </div>
+          <div class="fld">
+            <label for="tgChatId">Разрешённый chat ID</label>
+            <input type="text" id="tgChatId" inputmode="numeric" autocomplete="off" />
+            <div class="fld-hint">Бот отвечает только этому чату. Пусто — без ограничения.</div>
+          </div>
+          <div class="fld fld-narrow">
+            <label for="tgUpdateInterval">Интервал обновления, сек</label>
+            <input type="text" id="tgUpdateInterval" inputmode="numeric" />
+            <div class="fld-hint">Как часто бот обновляет закреплённую сводку.</div>
+          </div>
+        </div>
+        <div class="tpl-block">
+          <div class="tpl-cap">Уведомления о событиях</div>
+          <div class="tpl-row">
+            <div class="tpl-left">
+              <label class="toggle-switch"><input type="checkbox" id="tgNotifyFinish" /><span class="toggle-slider"></span></label>
+              <strong>Завершение печати</strong>
+            </div>
+            <input type="text" id="tgTplFinish" />
+          </div>
+          <div class="tpl-row">
+            <div class="tpl-left">
+              <label class="toggle-switch"><input type="checkbox" id="tgNotifyError" /><span class="toggle-slider"></span></label>
+              <strong>Ошибка принтера</strong>
+            </div>
+            <input type="text" id="tgTplError" />
+          </div>
+          <div class="tpl-row">
+            <div class="tpl-left">
+              <label class="toggle-switch"><input type="checkbox" id="tgNotifyPaused" /><span class="toggle-slider"></span></label>
+              <strong>Пауза печати</strong>
+            </div>
+            <input type="text" id="tgTplPaused" />
+          </div>
+          <div class="fld-hint">В шаблоне доступно {label} — имя принтера. <span class="saved-flash" id="tgSavedFlash"><span class="sf-dot"></span>Сохранено</span></div>
+          <div class="settings-error" id="tgError" style="display:none"></div>
+        </div>
+      </section>
+
+      <section class="section-panel settings-admin" id="proxySection" style="display:none">
+        <div class="panel-head">
+          <div class="panel-title-group">
+            <h3>Прокси для Telegram</h3>
+            <p>Все прокси периодически проверяются запросом к api.telegram.org — бот ходит через самый быстрый. Переключение автоматическое.</p>
+          </div>
+          <span class="admin-chip">админ</span>
+        </div>
+        <table class="adm-table" id="proxyTable">
+          <thead><tr><th>Адрес</th><th>Статус</th><th>Задержка</th><th></th><th class="adm-actions-col">Действия</th></tr></thead>
+          <tbody></tbody>
+        </table>
+        <div class="proxy-add-row">
+          <input type="text" id="proxyAddInput" placeholder="http://логин:пароль@хост:порт" autocomplete="off" />
+          <button type="button" class="pill-btn" id="proxyAddBtn">+ Добавить</button>
+        </div>
+        <div class="proxy-meta">
+          <span id="proxyLastCheck">Последняя проверка: —</span>
+          <span class="fld-inline"><label for="proxyCheckInterval">Интервал проверки, сек</label><input type="text" id="proxyCheckInterval" inputmode="numeric" /></span>
+          <button type="button" class="ghost-btn" id="proxyCheckNowBtn">Проверить сейчас</button>
+          <span class="saved-flash" id="proxySavedFlash"><span class="sf-dot"></span>Сохранено</span>
+        </div>
+        <div class="settings-error" id="proxyError" style="display:none"></div>
+      </section>
+
+      <section class="section-panel settings-foot-panel">
+        <div class="settings-foot-row">
+          <span class="ver-chip" id="appVersion">&mdash;</span>
+          <button type="button" class="logout-btn" id="logoutBtn">Выйти из аккаунта</button>
+        </div>
+      </section>
+    </section>
+  </div>
+
+    <svg xmlns="http://www.w3.org/2000/svg" style="display:none" aria-hidden="true">
+      <symbol id="i-nozzle" viewBox="0 0 24 24"><path d="M7 3h10v5H7z"/><path d="M8 8l2 5h4l2 -5"/><path d="M10 13v2h4v-2"/><path d="M12 18v2"/></symbol>
+      <symbol id="i-bed" viewBox="0 0 24 24"><path d="M4 4m0 1a1 1 0 0 1 1 -1h14a1 1 0 0 1 1 1v14a1 1 0 0 1 -1 1h-14a1 1 0 0 1 -1 -1z"/><path d="M4 15l16 0"/></symbol>
+      <symbol id="i-temp" viewBox="0 0 24 24"><path d="M10 13.5a4 4 0 1 0 4 0v-8.5a2 2 0 0 0 -4 0v8.5"/><path d="M10 9l4 0"/></symbol>
+      <symbol id="i-wind" viewBox="0 0 24 24"><path d="M5 8h8.5a2.5 2.5 0 1 0 -2.34 -3.24"/><path d="M3 12h15.5a2.5 2.5 0 1 1 -2.34 3.24"/><path d="M4 16h5.5a2.5 2.5 0 1 1 -2.34 3.24"/></symbol>
+      <symbol id="i-gauge" viewBox="0 0 24 24"><path d="M12 12m-9 0a9 9 0 1 0 18 0a9 9 0 1 0 -18 0"/><path d="M12 7l0 .01"/><path d="M17 12l0 .01"/><path d="M12 12l3.5 -3.5"/><path d="M7 12l0 .01"/></symbol>
+      <symbol id="i-wifi-3" viewBox="0 0 24 24"><path d="M12 18l.01 0"/><path d="M9.172 15.172a4 4 0 0 1 5.656 0"/><path d="M6.343 12.343a8 8 0 0 1 11.314 0"/><path d="M3.515 9.515c4.686 -4.687 12.284 -4.687 17 0"/></symbol>
+      <symbol id="i-wifi-2" viewBox="0 0 24 24"><path d="M12 18l.01 0"/><path d="M9.172 15.172a4 4 0 0 1 5.656 0"/><path d="M6.343 12.343a8 8 0 0 1 11.314 0"/></symbol>
+      <symbol id="i-wifi-1" viewBox="0 0 24 24"><path d="M12 18l.01 0"/><path d="M9.172 15.172a4 4 0 0 1 5.656 0"/></symbol>
+      <symbol id="i-layers" viewBox="0 0 24 24"><path d="M12 4l-8 4l8 4l8 -4l-8 -4"/><path d="M4 12l8 4l8 -4"/><path d="M4 16l8 4l8 -4"/></symbol>
+      <symbol id="i-clock" viewBox="0 0 24 24"><path d="M12 12m-9 0a9 9 0 1 0 18 0a9 9 0 1 0 -18 0"/><path d="M12 7v5l3 3"/></symbol>
+      <symbol id="i-file" viewBox="0 0 24 24"><path d="M14 3v4a1 1 0 0 0 1 1h4"/><path d="M17 21h-10a2 2 0 0 1 -2 -2v-14a2 2 0 0 1 2 -2h7l5 5v11a2 2 0 0 1 -2 2z"/></symbol>
+      <symbol id="i-hourglass" viewBox="0 0 24 24"><path d="M6.5 7h11"/><path d="M6.5 17h11"/><path d="M6 20v-2a6 6 0 1 1 12 0v2a1 1 0 0 1 -1 1h-10a1 1 0 0 1 -1 -1z"/><path d="M6 4v2a6 6 0 1 0 12 0v-2a1 1 0 0 0 -1 -1h-10a1 1 0 0 0 -1 1z"/></symbol>
+      <symbol id="i-steam" viewBox="0 0 24 24"><path d="M7 20c-1.5 -1.6 -1.5 -3.4 0 -5c1.5 -1.6 1.5 -3.4 0 -5"/><path d="M12 20c-1.5 -1.6 -1.5 -3.4 0 -5c1.5 -1.6 1.5 -3.4 0 -5"/><path d="M17 20c-1.5 -1.6 -1.5 -3.4 0 -5c1.5 -1.6 1.5 -3.4 0 -5"/></symbol>
+      <symbol id="i-gear" viewBox="0 0 24 24"><path d="M10.325 4.317c.426 -1.756 2.924 -1.756 3.35 0a1.724 1.724 0 0 0 2.573 1.066c1.543 -.94 3.31 .826 2.37 2.37a1.724 1.724 0 0 0 1.065 2.572c1.756 .426 1.756 2.924 0 3.35a1.724 1.724 0 0 0 -1.066 2.573c.94 1.543 -.826 3.31 -2.37 2.37a1.724 1.724 0 0 0 -2.572 1.065c-.426 1.756 -2.924 1.756 -3.35 0a1.724 1.724 0 0 0 -2.573 -1.066c-1.543 .94 -3.31 -.826 -2.37 -2.37a1.724 1.724 0 0 0 -1.065 -2.572c-1.756 -.426 -1.756 -2.924 0 -3.35a1.724 1.724 0 0 0 1.066 -2.573c-.94 -1.543 .826 -3.31 2.37 -2.37c1 .608 2.296 .07 2.572 -1.065z"/><path d="M9 12a3 3 0 1 0 6 0a3 3 0 0 0 -6 0"/></symbol>
+      <symbol id="i-spool" viewBox="0 0 24 24"><path d="M12 12m-8 0a8 8 0 1 0 16 0a8 8 0 1 0 -16 0"/><path d="M12 12m-2.5 0a2.5 2.5 0 1 0 5 0a2.5 2.5 0 1 0 -5 0"/><path d="M14.5 12h6"/></symbol>
+    </svg>
+    <div class="app-toast" id="appToast"></div>
+    <script src="/static/theme.js?v=2"></script>
+  <script src="/static/app.js?v=62"></script>
+
+  <button type="button" class="scroll-top-btn" id="scrollTopBtn" aria-label="Наверх" title="Вверх">↑</button>
+</body>
+</html>
+<!-- pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad -->
+<!-- pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad -->
+                                                                                                                                                                                                 

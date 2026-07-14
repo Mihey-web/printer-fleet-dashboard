@@ -1,0 +1,34 @@
+# Kuznitsa — one-command self-hosting.
+#
+# First run (create the two SQLite files so Docker bind-mounts them as files,
+# not directories), then start:
+#
+#   touch printer_history.db users.db
+#   docker compose up -d --build
+#   docker compose logs -f          # grab the first-run admin password
+#
+# Open http://<host>:8000 and log in as admin. Add printers from Admin → Printers.
+services:
+  app:
+    build: .
+    image: kuznitsa:latest
+    container_name: kuznitsa
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      - WEB_HOST=0.0.0.0
+      - WEB_PORT=8000
+      # HTTP on the LAN with no TLS proxy → keep 0. Behind nginx/Caddy with
+      # HTTPS, set to 1 and serve the app only through the proxy.
+      - COOKIE_SECURE=0
+      # Optional first-run admin (otherwise a random password is logged once):
+      # - FORGE_ADMIN_USERNAME=admin
+      # - FORGE_ADMIN_PASSWORD=change-me-immediately
+      # Optional fixed JWT signing key (otherwise auto-generated & persisted):
+      # - FORGE_JWT_SECRET=your-64-hex-chars
+    volumes:
+      # Persist the databases on the host. The app writes them at the project
+      # root inside the container, so bind-mount the two files back out.
+      - ./printer_history.db:/app/printer_history.db
+      - ./users.db:/app/users.db

@@ -1,0 +1,19 @@
+[Unit]
+Description=BambuDiagnosticData SSH reverse tunnel to your public VPS
+After=network.target
+
+[Service]
+Type=simple
+User=__USER__
+ExecStart=/usr/bin/autossh -M 0 -N \
+    -o ServerAliveInterval=30 \
+    -o ServerAliveCountMax=3 \
+    -o ExitOnForwardFailure=yes \
+    -o StrictHostKeyChecking=accept-new \
+    -R 58000:localhost:8000 \
+    __VPS_USER__@__VPS_HOST__ -p __VPS_SSH_PORT__
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
