@@ -25,8 +25,32 @@ class FakeCfg:
 @pytest.fixture
 def db(tmp_path):
     path = str(tmp_path / "registry.db")
+    reg._invalidate_label()
     yield path
     reg.set_running(None)
+    reg._invalidate_label()
+
+
+def test_get_label_caches_within_ttl(db, monkeypatch):
+    reg.init_db(db)
+    p = reg.create_printer({"kind": "bambu", "label": "L1", "host": "h"}, db)
+    pid = p["id"]
+    reg._invalidate_label()
+    calls = []
+    real = reg.get_printer
+    monkeypatch.setattr(reg, "get_printer", lambda i, d=None: (calls.append(i), real(i, db))[1])
+    assert reg.get_label(pid, db) == "L1"
+    assert reg.get_label(pid, db) == "L1"  # served from cache, no second DB read
+    assert len(calls) == 1
+
+
+def test_get_label_invalidated_on_rename(db):
+    reg.init_db(db)
+    p = reg.create_printer({"kind": "bambu", "label": "Old", "host": "h"}, db)
+    pid = p["id"]
+    assert reg.get_label(pid, db) == "Old"
+    reg.update_printer(pid, {"label": "New"}, db)
+    assert reg.get_label(pid, db) == "New"  # cache invalidated by the rename
 
 
 @pytest.fixture

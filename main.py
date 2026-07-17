@@ -1,4 +1,6 @@
 # v21 2026-06-09
+import dataclasses
+import html
 import logging
 import os
 import threading
@@ -16,6 +18,7 @@ from app.domain.models import PrinterKind, PrinterState, PrinterStatus, now_ts
 
 from app.services.normalizer import normalize_bambu, normalize_ws_dict
 from app.services.state_store import StateStore
+from app.services.ams_store import AmsStore
 from app.services import settings_service
 import config
 
@@ -35,7 +38,7 @@ WEB_PORT = int(os.environ.get('WEB_PORT', getattr(config, 'WEB_PORT', 8000)))
 
 
 class Notifier(Protocol):
-    def notify(self, text: str) -> None:
+    def notify(self, text: str) -> bool:
         ...
 
 
@@ -69,9 +72,9 @@ def _display_label(pid, fallback):
     """
     try:
         from app.services import printer_registry
-        row = printer_registry.get_printer(pid)
-        if row and row.get("label"):
-            return row["label"]
+        label = printer_registry.get_label(pid)  # short-TTL cached, not a raw SQLite read
+        if label:
+            return label
     except Exception:
         logger.debug("display label lookup failed for %s", pid, exc_info=True)
     return fallback
@@ -89,6 +92,37 @@ def offline_status(pid, label, kind, device_type=None, error=None):
         device_type=device_type,
         grace_period_active=False,
         last_successful_fetch=0.0,
+    )
+
+
+def _effective_prev_state(prev_state, last_active_state):
+    """Collapse a transient OFFLINE to the last active state we actually observed.
+
+    A print that briefly drops offline (grace expired) between an active state and
+    a terminal one (FINISHED/PAUSED/ERROR) would otherwise have prev_state==OFFLINE
+    and never fire a notification. If we saw it active before, use that state.
+    Returns prev_state unchanged when we never observed an active state — so a
+    reconnect of an already-finished job stays quiet (last_active is None).
+    """
+    if prev_state == PrinterState.OFFLINE and last_active_state is not None:
+        return last_active_state
+    return prev_state
+
+
+def _build_grace_status(prev_item, reason, now, device_type):
+    """Clone the last good status for a printer inside its grace period.
+
+    Uses dataclasses.replace so EVERY field is carried over — an earlier
+    field-by-field copy silently dropped ams/fans/light_on/fw_update, blanking
+    the AMS panel and fan/light indicators the moment a transient fetch failure
+    put a printer into grace. Only the failure markers are overridden.
+    """
+    return dataclasses.replace(
+        prev_item,
+        last_update_ts=now,
+        last_error=reason,
+        device_type=device_type,
+        grace_period_active=True,
     )
 
 
@@ -143,11 +177,19 @@ def format_status_text(store: StateStore) -> str:
 
     lines = []
     for s in printers:
+        # Use the current registry label (cached), not the one baked into the
+        # collector at startup — otherwise a rename doesn't show in the bot status
+        # until a restart. Dynamic values (label/job/error) go into a
+        # parse_mode=HTML message, so a literal '<'/'&' would 400 the whole send;
+        # escape them, the <b> markup is ours.
+        label = html.escape(str(_display_label(s.id, s.label)))
         if s.state == PrinterState.PRINTING or s.state == PrinterState.PAUSED:
             icon = "\U0001F7E2" if s.state == PrinterState.PRINTING else "\U0001F7E1"
             pct = f"{s.progress_pct:.0f}%" if s.progress_pct is not None else ""
             job = _fmt_job(s.job_name)
-            line1 = f"{icon} <b>{s.label}</b> — {pct}"
+            if job:
+                job = html.escape(job)
+            line1 = f"{icon} <b>{label}</b> — {pct}"
             if job:
                 line1 += f" · {job}"
             details = []
@@ -168,23 +210,23 @@ def format_status_text(store: StateStore) -> str:
                 lines.append(line1)
 
         elif not s.online or s.state == PrinterState.OFFLINE:
-            lines.append(f"\u2B1B {s.label} — офлайн")
+            lines.append(f"\u2B1B {label} — офлайн")
 
         elif s.state == PrinterState.FINISHED:
-            line = f"\u2705 <b>{s.label}</b> — завершено"
+            line = f"\u2705 <b>{label}</b> — завершено"
             job = _fmt_job(s.job_name)
             if job:
-                line += f" · {job}"
+                line += f" · {html.escape(job)}"
             lines.append(line)
 
         elif s.state == PrinterState.ERROR:
-            line = f"\U0001F534 <b>{s.label}</b> — ошибка"
+            line = f"\U0001F534 <b>{label}</b> — ошибка"
             if s.last_error:
-                line += f": {s.last_error}"
+                line += f": {html.escape(str(s.last_error))}"
             lines.append(line)
 
         else:
-            line = f"\u26AA {s.label}"
+            line = f"\u26AA {label}"
             if s.nozzle_temp is not None and s.nozzle_temp > 0:
                 line += f" · \U0001F321{s.nozzle_temp:.0f}"
                 if s.bed_temp is not None and s.bed_temp > 0:
@@ -205,10 +247,22 @@ def poll_loop(
     tg: Optional[Notifier] = None,
     prev_states: Optional[dict[str, PrinterState]] = None,
     fail_start: Optional[dict[str, float]] = None,
+    ams_store: Optional[AmsStore] = None,
 ):
     _prev = prev_states or {}
     _fail_start = fail_start or {}
     _last_snapshot: dict[str, float] = {}
+    # pid -> время последнего «финишного» уведомления (первого или повторного).
+    # Пока принтер стоит FINISHED и включён повтор, шлём напоминание каждые
+    # telegram_finish_repeat_interval_min минут; запись гасится при любом
+    # уходе из FINISHED.
+    _finish_notify_at: dict[str, float] = {}
+    # pid -> последнее НЕ-offline состояние, которое мы реально наблюдали. Нужно,
+    # чтобы кратковременный уход в OFFLINE (истёкший grace) между активной печатью
+    # и терминальным состоянием не съедал уведомление: если после offline принтер
+    # вернулся FINISHED/PAUSED, а до offline он ПЕЧАТАЛ — уведомление всё равно
+    # уходит. На старте записи нет → реконнект уже-завершённой задачи не шумит.
+    _last_active_state: dict[str, PrinterState] = {}
     # Size the pool to cover every printer so a few slow/offline devices can't
     # starve the rest of the fleet within a single cycle.
     workers = max(MAX_WORKERS, len(collectors)) or 1
@@ -238,16 +292,43 @@ def poll_loop(
                         # the settings page apply without a restart (cached dict).
                         scfg = settings_service.get_all() if tg is not None else {}
                         disp_label = _display_label(pid, status.label) if tg is not None else status.label
+                        # Treat a transient OFFLINE (grace expired) as the last
+                        # active state we actually saw, so a PRINTING→offline→
+                        # FINISHED/PAUSED/ERROR transition still notifies. Defaults
+                        # to prev_state (incl. OFFLINE) when we never saw it active,
+                        # which keeps a reconnect of an already-finished job quiet.
+                        effective_prev = _effective_prev_state(prev_state, _last_active_state.get(pid))
                         if tg is not None and scfg.get('telegram_notify_on_finish'):
-                            if prev_state == PrinterState.PRINTING and status.state == PrinterState.FINISHED:
-                                try:
-                                    msg = scfg['telegram_finish_template'].format(label=disp_label)
-                                    tg.notify(msg)
-                                    logger.info('[%s] Telegram finish notification sent', label)
-                                except Exception as e:
-                                    logger.warning('[%s] Telegram notify failed: %s', label, e)
+                            now = time.time()
+                            if status.state == PrinterState.FINISHED:
+                                entered = effective_prev == PrinterState.PRINTING
+                                last = _finish_notify_at.get(pid)
+                                repeat_due = False
+                                if not entered and scfg.get('telegram_notify_on_finish_repeat') and last is not None:
+                                    interval = max(1, int(scfg.get('telegram_finish_repeat_interval_min') or 30)) * 60
+                                    repeat_due = (now - last) >= interval
+                                if entered or repeat_due:
+                                    try:
+                                        msg = scfg['telegram_finish_template'].format(label=disp_label)
+                                        # Only anchor the repeat timer if the message
+                                        # was actually dispatched. Marking it on a
+                                        # no-op (bot down / no chat) would suppress
+                                        # the real notification once the bot recovers.
+                                        if tg.notify(msg):
+                                            _finish_notify_at[pid] = now
+                                            logger.info('[%s] Telegram finish notification sent%s',
+                                                        label, ' (повтор)' if repeat_due else '')
+                                    except Exception as e:
+                                        logger.warning('[%s] Telegram notify failed: %s', label, e)
+                                elif last is None:
+                                    # Принтер уже стоял завершённым, когда мы начали
+                                    # опрос (перехода PRINTING→FINISHED не видели) —
+                                    # заякорим отсчёт, чтобы повторы шли от now.
+                                    _finish_notify_at[pid] = now
+                        if status.state != PrinterState.FINISHED:
+                            _finish_notify_at.pop(pid, None)
                         if tg is not None and scfg.get('telegram_notify_on_paused'):
-                            if prev_state == PrinterState.PRINTING and status.state == PrinterState.PAUSED:
+                            if effective_prev == PrinterState.PRINTING and status.state == PrinterState.PAUSED:
                                 try:
                                     msg = scfg['telegram_paused_template'].replace('{label}', str(disp_label))
                                     tg.notify(msg)
@@ -255,7 +336,7 @@ def poll_loop(
                                 except Exception as e:
                                     logger.warning('[%s] Telegram notify failed: %s', label, e)
                         if tg is not None and scfg.get('telegram_notify_on_error'):
-                            if prev_state is not None and status.state == PrinterState.ERROR and prev_state not in (PrinterState.ERROR, PrinterState.OFFLINE):
+                            if effective_prev is not None and status.state == PrinterState.ERROR and effective_prev not in (PrinterState.ERROR, PrinterState.OFFLINE):
                                 try:
                                     msg = scfg['telegram_error_template'].replace('{label}', str(disp_label))
                                     if status.last_error:
@@ -265,10 +346,14 @@ def poll_loop(
                                 except Exception as e:
                                     logger.warning('[%s] Telegram notify failed: %s', label, e)
                         _prev[pid] = status.state
+                        if status.state != PrinterState.OFFLINE:
+                            _last_active_state[pid] = status.state
                         store.upsert(status)
                         last_ts = _last_snapshot.get(pid, 0)
                         if time.time() - last_ts >= 60:
                             store.record_snapshot(status)
+                            if ams_store is not None:
+                                ams_store.record_ams(status)
                             _last_snapshot[pid] = time.time()
                     except Exception as e:
                         reason = str(e)
@@ -291,36 +376,10 @@ def poll_loop(
                         elapsed = now - _fail_start[pid]
 
                         if elapsed < OFFLINE_GRACE_PERIOD:
-                            # Grace period active: keep last good state with flag
-                            grace_status = PrinterStatus(
-                                id=prev_item.id,
-                                label=prev_item.label,
-                                kind=prev_item.kind,
-                                online=prev_item.online,
-                                state=prev_item.state,
-                                progress_pct=prev_item.progress_pct,
-                                job_name=prev_item.job_name,
-                                eta_seconds=prev_item.eta_seconds,
-                                print_time_seconds=prev_item.print_time_seconds,
-                                nozzle_temp=prev_item.nozzle_temp,
-                                bed_temp=prev_item.bed_temp,
-                                chamber_temp=prev_item.chamber_temp,
-                                target_nozzle_temp=prev_item.target_nozzle_temp,
-                                target_bed_temp=prev_item.target_bed_temp,
-                                current_layer=prev_item.current_layer,
-                                total_layers=prev_item.total_layers,
-                                wifi_signal=prev_item.wifi_signal,
-                                firmware_version=prev_item.firmware_version,
-                                stage=prev_item.stage,
-                                fan_speed_pct=prev_item.fan_speed_pct,
-                                feedrate_pct=prev_item.feedrate_pct,
-                                last_update_ts=now,
-                                last_error=reason,
-                                device_type=device_type,
-                                grace_period_active=True,
-                                last_successful_fetch=prev_item.last_successful_fetch,
-                                debug=prev_item.debug,
-                            )
+                            # Grace period active: keep last good state with flag.
+                            # dataclasses.replace copies every field (incl. ams/fans/
+                            # light_on/fw_update the old manual copy dropped).
+                            grace_status = _build_grace_status(prev_item, reason, now, device_type)
                             _prev[pid] = grace_status.state
                             store.upsert(grace_status)
                             last_ts = _last_snapshot.get(pid, 0)
@@ -335,9 +394,14 @@ def poll_loop(
                             offline = offline_status(pid, label, kind, device_type=device_type, error=reason)
                             _prev[pid] = PrinterState.OFFLINE
                             store.upsert(offline)
-                            store.record_snapshot(offline)
-                            if pid in _fail_start:
-                                del _fail_start[pid]
+                            # Keep _fail_start set so a still-dead printer stays
+                            # offline instead of re-entering a fresh grace period
+                            # every cycle (which flapped the card offline↔stale and
+                            # spammed the log). It's cleared on the first success.
+                            last_ts = _last_snapshot.get(pid, 0)
+                            if now - last_ts >= 60:
+                                store.record_snapshot(offline)
+                                _last_snapshot[pid] = now
         except RuntimeError:
             break
         except Exception:
@@ -354,6 +418,7 @@ def poll_loop(
 
 def main():
     store = StateStore()
+    ams_store = AmsStore()
     collectors = build_collectors()
 
     for pid, kind, label, c, device_type in collectors:
@@ -399,7 +464,7 @@ def main():
 
     # Run the poll loop on the main thread — it blocks forever and keeps the
     # process alive while the server runs in its daemon thread.
-    poll_loop(store, collectors, tg, fail_start={})
+    poll_loop(store, collectors, tg, fail_start={}, ams_store=ams_store)
 
 
 if __name__ == '__main__':

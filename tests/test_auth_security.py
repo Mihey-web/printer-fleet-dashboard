@@ -184,3 +184,113 @@ def test_init_users_db_adds_tokens_valid_after_column(tmp_path, monkeypatch):
     finally:
         conn.close()
     assert "tokens_valid_after" in cols
+
+
+# --- Endpoint-level regressions (login lockout DoS + refresh watermark) -------
+
+import pytest
+from fastapi import HTTPException
+
+from app.services.auth_service import hash_password, create_refresh_token
+from app.domain.user_models import UserRole
+
+
+class _FakeResponse:
+    def __init__(self):
+        self.cookies = {}
+
+    def set_cookie(self, key, value, **kwargs):
+        self.cookies[key] = value
+
+    def delete_cookie(self, key, **kwargs):
+        self.cookies.pop(key, None)
+
+
+def _full_user(db, username, password, role="admin", tokens_valid_after=0):
+    import sqlite3
+    now = time.time()
+    conn = sqlite3.connect(db)
+    conn.execute(
+        "INSERT INTO users (username, password_hash, role, created_at, updated_at, tokens_valid_after)"
+        " VALUES (?,?,?,?,?,?)",
+        (username, hash_password(password), role, now, now, tokens_valid_after),
+    )
+    conn.commit()
+    conn.close()
+
+
+def _wire_auth_db(tmp_path, monkeypatch):
+    """Point both auth.py and the audit singleton at a fresh temp users.db."""
+    db = str(tmp_path / "users.db")
+    monkeypatch.setattr(auth, "USERS_DB", db)
+    monkeypatch.setattr(auth, "JWT_SECRET", "test-secret-please")
+    monkeypatch.setattr(audit_service, "USERS_DB", db)
+    monkeypatch.setattr(audit_service, "_audit", None)
+    auth.init_users_db()
+    return db
+
+
+def test_login_valid_password_not_locked_out_by_username_flood(tmp_path, monkeypatch):
+    # A flood of failed logins for 'admin' from other IPs must NOT stop the real
+    # owner (supplying the correct password) from logging in — otherwise anyone
+    # can lock out an account by spamming its username. (account-lockout DoS)
+    db = _wire_auth_db(tmp_path, monkeypatch)
+    _full_user(db, "admin", "correct-horse", role="admin")
+    svc = audit_service.get_audit_service()
+    for _ in range(15):
+        svc.log("admin", "login_fail", "203.0.113.7", "ua")  # attacker, wrong pw
+
+    req = _req("203.0.113.99")  # a different, clean source IP (the real owner)
+    resp = _FakeResponse()
+    body = auth.LoginRequest(username="admin", password="correct-horse")
+    result = auth.login(body, req, resp)
+    assert result["user"]["username"] == "admin"
+    assert "access_token" in resp.cookies
+
+
+def test_login_wrong_password_still_locked_after_threshold(tmp_path, monkeypatch):
+    # Brute-force protection is preserved: wrong credentials past the per-username
+    # threshold get 429, not 401.
+    db = _wire_auth_db(tmp_path, monkeypatch)
+    _full_user(db, "admin", "correct-horse", role="admin")
+    svc = audit_service.get_audit_service()
+    for _ in range(12):
+        svc.log("admin", "login_fail", "203.0.113.7", "ua")
+
+    req = _req("203.0.113.7")
+    resp = _FakeResponse()
+    body = auth.LoginRequest(username="admin", password="WRONG")
+    with pytest.raises(HTTPException) as exc:
+        auth.login(body, req, resp)
+    assert exc.value.status_code == 429
+
+
+def test_refresh_rejects_token_predating_watermark(tmp_path, monkeypatch):
+    # A password/role change bumps tokens_valid_after; a refresh token minted
+    # before that watermark must be rejected, so the reset terminates sessions on
+    # the refresh path too (not just the ~15-min access path).
+    db = _wire_auth_db(tmp_path, monkeypatch)
+    now = time.time()
+    _full_user(db, "bob", "pw", role="viewer", tokens_valid_after=now + 1000)
+    # Token issued "now" — before the future watermark.
+    token, _jti = create_refresh_token("bob", auth.JWT_SECRET, auth.JWT_REFRESH_EXPIRES)
+
+    req = _req("203.0.113.5")
+    resp = _FakeResponse()
+    with pytest.raises(HTTPException) as exc:
+        auth.refresh_token(req, resp, refresh_token_cookie=token)
+    assert exc.value.status_code == 401
+
+
+def test_refresh_accepts_token_after_watermark(tmp_path, monkeypatch):
+    # A token minted after the watermark still refreshes normally and rotates.
+    db = _wire_auth_db(tmp_path, monkeypatch)
+    _full_user(db, "bob", "pw", role="viewer", tokens_valid_after=0)
+    token, _jti = create_refresh_token("bob", auth.JWT_SECRET, auth.JWT_REFRESH_EXPIRES)
+
+    req = _req("203.0.113.5")
+    resp = _FakeResponse()
+    result = auth.refresh_token(req, resp, refresh_token_cookie=token)
+    assert result["user"]["username"] == "bob"
+    assert "access_token" in resp.cookies
+    assert "refresh_token" in resp.cookies

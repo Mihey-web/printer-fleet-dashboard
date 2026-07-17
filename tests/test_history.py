@@ -19,7 +19,9 @@ def _seed(db, rows):
         CREATE TABLE printer_history (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             printer_id TEXT, label TEXT, state TEXT,
-            job_name TEXT, last_error TEXT, recorded_at REAL
+            job_name TEXT, last_error TEXT, recorded_at REAL,
+            progress REAL, eta_sec REAL, print_time REAL,
+            nozzle_temp REAL, bed_temp REAL
         )
         """
     )
@@ -68,6 +70,65 @@ def test_events_use_current_registry_name_not_stored_label(tmp_path, monkeypatch
     events = api_main._query_events(db, 0, 100000, limit=50, offset=0)
     assert events["rows"], "expected state-change events"
     assert all(r["label"] == "P7" for r in events["rows"])
+
+
+def test_query_timeline_decimates_but_keeps_state_changes(tmp_path, monkeypatch):
+    """Плотные 5-секундные снапшоты прореживаются до бакетов, но каждая смена
+    состояния и края окна каждого принтера сохраняются точно."""
+    db = str(tmp_path / "h.db")
+    base = 1000.0
+    rows = []
+    # 600с idle каждые 5с, одна смена на printing в середине, дальше printing.
+    for i in range(120):
+        state = "idle" if i < 60 else "printing"
+        rows.append(("p1", "P1", state, None, None, base + i * 5.0))
+    _seed(db, rows)
+    monkeypatch.setattr(api_main, "_current_labels", lambda: {})
+
+    res = api_main._query_timeline(db, 0, 100000, limit=5000, offset=0)
+    out = res["rows"]
+    # Сильно меньше сырых 120 строк (окно огромное => step большой, остаются
+    # только края и смена состояния).
+    assert len(out) < 20
+    assert res["has_more"] is False
+    ts = [r["recorded_at"] for r in out]
+    assert ts == sorted(ts)
+    # Края окна принтера на месте.
+    assert out[0]["recorded_at"] == base
+    assert out[-1]["recorded_at"] == base + 119 * 5.0
+    # Первая printing-строка (точная граница сегмента) сохранена.
+    assert any(r["state"] == "printing" and r["recorded_at"] == base + 60 * 5.0
+               for r in out)
+    # Узкое окно => step упирается в минимум 30с, опорных точек больше.
+    res_narrow = api_main._query_timeline(db, base, base + 600, limit=5000, offset=0)
+    assert len(res_narrow["rows"]) >= 600 / 30
+    assert len(res_narrow["rows"]) < 120
+
+
+def test_query_timeline_pagination_and_desc(tmp_path, monkeypatch):
+    db = str(tmp_path / "h.db")
+    base = 1000.0
+    # Каждая строка меняет state => прореживание ничего не выкидывает.
+    states = ["idle", "printing"] * 10
+    _seed(db, [("p1", "P1", s, None, None, base + i) for i, s in enumerate(states)])
+    monkeypatch.setattr(api_main, "_current_labels", lambda: {"p1": "P9"})
+
+    page1 = api_main._query_timeline(db, 0, 100000, limit=8, offset=0, desc=True)
+    assert len(page1["rows"]) == 8
+    assert page1["has_more"] is True
+    # desc: новейшие первыми.
+    assert page1["rows"][0]["recorded_at"] > page1["rows"][-1]["recorded_at"]
+    # Имя — из реестра, не из замороженного label.
+    assert all(r["label"] == "P9" for r in page1["rows"])
+
+    page3 = api_main._query_timeline(db, 0, 100000, limit=8, offset=16, desc=True)
+    assert len(page3["rows"]) == 4
+    assert page3["has_more"] is False
+
+    # Страницы не пересекаются и вместе дают все 20 строк.
+    page2 = api_main._query_timeline(db, 0, 100000, limit=8, offset=8, desc=True)
+    all_ts = {r["recorded_at"] for p in (page1, page2, page3) for r in p["rows"]}
+    assert len(all_ts) == 20
 
 
 def test_state_durations_merge_across_rename(tmp_path):

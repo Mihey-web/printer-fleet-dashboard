@@ -25,38 +25,47 @@ class CrealityK1Client:
         self._reconnect_delay = 5  # начальная задержка 5 секунд
         self._max_reconnect_delay = 60  # максимум 60 секунд
         self._poll_thread = None
+        # Serializes connect(): both fetch() (poll thread) and the on_close/on_error
+        # reconnect loop can call it. Without this the two drivers race and spawn
+        # duplicate run_forever threads / leaked sockets. Mirrors the Bambu collector.
+        self._connect_lock = threading.Lock()
 
     def connect(self):
-        try:
-            # Close any previous socket before replacing it, otherwise the old
-            # run_forever thread keeps its TCP connection open and leaks on every
-            # reconnect.
-            if self.ws is not None:
-                try:
-                    self.ws.close()
-                except Exception:
-                    pass
-                # close() is non-blocking — join the old run_forever thread so its
-                # TCP socket is released before opening a new one, preventing FD
-                # leaks across repeated reconnects on a flapping network.
-                old_thread = self.thread
-                if old_thread is not None and old_thread.is_alive():
-                    old_thread.join(timeout=5)
-            ws_url = f"ws://{self.host}:9999"
-            self.ws = websocket.WebSocketApp(
-                ws_url,
-                on_message=self.on_message,
-                on_error=self.on_error,
-                on_close=self.on_close,
-                on_open=self.on_open
-            )
-            self.thread = threading.Thread(target=self.ws.run_forever, kwargs={'ping_interval': 15, 'ping_timeout': 10}, daemon=True)
-            self.thread.start()
-            time.sleep(2)
-            return self.connected
-        except Exception as e:
-            logger.error("[%s] Ошибка подключения WebSocket: %s", self.label, e)
-            return False
+        with self._connect_lock:
+            # Idempotent: if a concurrent caller already brought the socket up,
+            # don't tear it down and rebuild — that would orphan the live thread.
+            if self.connected:
+                return self.connected
+            try:
+                # Close any previous socket before replacing it, otherwise the old
+                # run_forever thread keeps its TCP connection open and leaks on every
+                # reconnect.
+                if self.ws is not None:
+                    try:
+                        self.ws.close()
+                    except Exception:
+                        pass
+                    # close() is non-blocking — join the old run_forever thread so its
+                    # TCP socket is released before opening a new one, preventing FD
+                    # leaks across repeated reconnects on a flapping network.
+                    old_thread = self.thread
+                    if old_thread is not None and old_thread.is_alive():
+                        old_thread.join(timeout=5)
+                ws_url = f"ws://{self.host}:9999"
+                self.ws = websocket.WebSocketApp(
+                    ws_url,
+                    on_message=self.on_message,
+                    on_error=self.on_error,
+                    on_close=self.on_close,
+                    on_open=self.on_open
+                )
+                self.thread = threading.Thread(target=self.ws.run_forever, kwargs={'ping_interval': 15, 'ping_timeout': 10}, daemon=True)
+                self.thread.start()
+                time.sleep(2)
+                return self.connected
+            except Exception as e:
+                logger.error("[%s] Ошибка подключения WebSocket: %s", self.label, e)
+                return False
 
     def on_open(self, ws):
         logger.info("[%s] WebSocket подключен", self.label)
@@ -69,7 +78,6 @@ class CrealityK1Client:
                 return
 
             data = json.loads(message)
-            self.last_message_ts = time.time()
 
             if isinstance(data, dict) and data.get('ModeCode') == 'heart_beat':
                 try:
@@ -77,6 +85,12 @@ class CrealityK1Client:
                 except Exception:
                     logger.debug("[%s] heartbeat ack send failed", self.label)
                 return
+
+            # Liveness is refreshed only by real telemetry, not the heart_beat
+            # keepalive handled above — otherwise a printer whose telemetry has
+            # frozen but still pings keeps the 30s staleness guard alive and shows
+            # its last state forever.
+            self.last_message_ts = time.time()
 
             with self._lock:
                 if not self.data:

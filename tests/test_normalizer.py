@@ -449,3 +449,48 @@ def test_p2s_chamber_temp_from_ctc_device_path():
     t3 = pbm.Temperature()
     t3.print_update({"device": {"bed": {"info": {"temp": 4587590}}}})
     assert t3.chamber_temp == 0
+
+
+# --- Phase-3 normalizer regressions ------------------------------------------
+
+def test_bambu_ams_empty_slot_marked_by_type_string():
+    # X1C reports an empty slot as type="Empty" while still carrying a leftover
+    # colour. It must read as empty (no filament chip), not a real material.
+    empty = SimpleNamespace(color="0C0C0CFF", type="Empty", name="", remain=0)
+    real = SimpleNamespace(color="FF0000FF", type="PLA", name="Red", remain=80)
+    unit = SimpleNamespace(tray=[empty, real], humidity_index=1,
+                           temperature=30.0, humidity_raw=20, dry_time=0)
+    ams = SimpleNamespace(tray_now=1, data=[unit])
+    s = normalize_bambu("bambu-x", "X1C", _bambu_result_with_ams(ams))
+    slot0 = s.ams["units"][0]["slots"][0]
+    assert slot0["empty"] is True
+    assert slot0["color"] is None
+    assert slot0["type"] is None
+    slot1 = s.ams["units"][0]["slots"][1]
+    assert slot1["empty"] is False
+    assert slot1["type"] == "PLA"
+    assert slot1["color"] == "FF0000"
+
+
+def test_bambu_ams_unit_index_is_physical_not_list_position():
+    # data[0] = tray-less placeholder (dropped), data[1] = the real unit. The
+    # survivor must carry physical index 1, so its history never collides with a
+    # different physical unit that later occupies filtered-list position 0.
+    placeholder = SimpleNamespace(tray=[], humidity_index=None, temperature=None)
+    real_tray = SimpleNamespace(color="FF0000FF", type="PLA", name="Red", remain=50)
+    real = SimpleNamespace(tray=[real_tray], humidity_index=1, temperature=30.0,
+                           humidity_raw=20, dry_time=0)
+    ams = SimpleNamespace(tray_now=1, data=[placeholder, real])
+    s = normalize_bambu("bambu-x", "X1C", _bambu_result_with_ams(ams))
+    assert len(s.ams["units"]) == 1
+    assert s.ams["units"][0]["index"] == 1
+
+
+def test_ws_new_print_start_with_stale_layers_not_finished():
+    # At the very start of a new print firmware still echoes the previous job's
+    # completed layer count and hasn't set an ETA yet. A reported (low) progress
+    # must keep it PRINTING, not flip it to FINISHED on stale layers.
+    data = {"state": "printing", "progress": 3, "current_layer": 250,
+            "total_layers": 250, "remaining_time": 0}
+    s = normalize_ws_dict("creality-1", "K1", PrinterKind.CREALITY, data)
+    assert s.state == PrinterState.PRINTING

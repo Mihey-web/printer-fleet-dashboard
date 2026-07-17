@@ -278,6 +278,12 @@ def load_persisted_capabilities() -> None:
 def _note_capability(printer_id: str, print_cmds: Optional[bool], via: Optional[str]) -> None:
     with _cap_lock:
         prev = (_capability.get(printer_id) or {}).get("print_cmds")
+        # Transient silence (None) must not clobber a known verdict in memory —
+        # a single missed probe would otherwise hide the control buttons until the
+        # next probe (~10 min). Keep the last known bool; just refresh the ts.
+        if print_cmds is None and isinstance(prev, bool):
+            _capability[printer_id]["ts"] = time.time()
+            return
         _capability[printer_id] = {"print_cmds": print_cmds, "via": via, "ts": time.time()}
     if prev != print_cmds:
         logger.info("[commands] %s print_cmds: %s -> %s (via %s)", printer_id, prev, print_cmds, via)

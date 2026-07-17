@@ -25,17 +25,29 @@
         }
       }
 
-      async function tryRefresh() {
-        try {
-          var res = await fetch('/api/auth/refresh', { method: 'POST' });
-          if (res.ok) {
-            var data = await res.json();
-            currentUser = data.user;
-            updateAuthUI();
-            return true;
-          }
-        } catch (e) {}
-        return false;
+      // Single-flight guard: the refresh token is one-time-use and rotates on the
+      // server, so if several requests 401 at once (which happens every ~15 min
+      // when the access token expires and multiple polls fire together) each
+      // firing its own /refresh would revoke the token for all but the first,
+      // logging everyone out. Coalesce concurrent callers onto one in-flight call.
+      var _refreshInFlight = null;
+      function tryRefresh() {
+        if (_refreshInFlight) return _refreshInFlight;
+        var p = (async function () {
+          try {
+            var res = await fetch('/api/auth/refresh', { method: 'POST' });
+            if (res.ok) {
+              var data = await res.json();
+              currentUser = data.user;
+              updateAuthUI();
+              return true;
+            }
+          } catch (e) {}
+          return false;
+        })();
+        p.finally(function () { if (_refreshInFlight === p) _refreshInFlight = null; });
+        _refreshInFlight = p;
+        return p;
       }
 
       function showLogin() {
@@ -197,9 +209,19 @@
       var tickStep = 3600; // всегда пересчитывается в drawTimeline от видимого окна
       let timelinePrinter = null;
       let timelineOffset = 0;
-      let timelineLimit = 50000;
+      // Бекенд прореживает таймлайн (~800 точек на принтер на окно + все смены
+      // состояний), так что сутки всей фермы — ~13k строк и влезают в одну
+      // страницу: время ответа доминирует скан БД, а не передача, поэтому один
+      // запрос на 20000 быстрее трёх по 5000. Бекенд принимает до 50000 —
+      // границы согласованы, 422 не будет. Догрузка страницами остаётся
+      // запасным путём на случай окна с аномально частыми сменами состояний.
+      // Раньше один запрос на 50000 сырых строк весил ~4МБ и держал вкладку
+      // 8-12 секунд.
+      let timelineLimit = 20000;
       let timelineTotal = 0;
       let timelineHasMore = false;
+      let timelineLoadGen = 0;      // диапазон/фильтр сменили — старые ответы в мусор
+      let timelineLoadingMore = false;
 
       const imageMap = {
         "bambu-x1": "/static/img/bambu-x1c.png",
@@ -485,24 +507,23 @@
       function sortPrinters(printers) {
         const sortKey = currentSort;
         const alerts = alertsTop;
+        // Единый порядок групп. «offline» обязан быть в списке: раньше его тут
+        // не было, он получал вес 0 наравне с «idle» — и офлайн-карточки
+        // перемешивались с простаивающими по алфавиту.
+        const GROUP = { error: 5, paused: 4, finished: 3, printing: 2, idle: 1, unknown: 1, offline: 0 };
         return printers.slice().sort((a, b) => {
-          if (alerts) {
-            const GROUP = { error: 4, paused: 3, finished: 2, printing: 1, idle: 0, unknown: 0 };
-            const ua = computeUiStatus(a);
-            const ub = computeUiStatus(b);
-            const ga = GROUP[ua] || 0;
-            const gb = GROUP[ub] || 0;
-            if (ga !== gb) return gb - ga;
-          }
-          if (alerts && computeUiStatus(a) === "printing" && sortKey === "eta") {
-            const etaA = (a.eta_seconds > 0) ? a.eta_seconds : 86400;
-            const etaB = (b.eta_seconds > 0) ? b.eta_seconds : 86400;
-            if (etaA !== etaB) return etaA - etaB;
-          }
+          const ua = computeUiStatus(a);
+          const ub = computeUiStatus(b);
+          const ga = GROUP[ua] || 0;
+          const gb = GROUP[ub] || 0;
+          if (alerts && ga !== gb) return gb - ga;
           if (sortKey === "eta") {
             const etaA = (a.eta_seconds > 0) ? a.eta_seconds : 86400;
             const etaB = (b.eta_seconds > 0) ? b.eta_seconds : 86400;
             if (etaA !== etaB) return etaA - etaB;
+            // Все без ETA равны (86400) — не даём алфавиту перемешать статусы:
+            // простой выше, офлайн в самом хвосте.
+            if (ga !== gb) return gb - ga;
           }
           return String(a.label || "").localeCompare(String(b.label || ""), "ru", { numeric: true });
         });
@@ -543,6 +564,7 @@
         if (view === 'history') { loadTimeline(); }
         if (view === 'dashboard') { loadStatsSummary(); }
         if (view === 'forecast') { renderForecast(); }
+        if (view === 'ams') { Promise.resolve().then(function () { loadAms(); }); }
         // Загрузка и при клике, и при восстановлении вкладки после перезагрузки
         // страницы (раньше данные грузились только по клику на таб). Микротаска:
         // при восстановлении setActiveView выполняется до того, как IIFE присвоит
@@ -769,8 +791,11 @@
       }
       function renderSummary(allPrinters) {
         const totalCount = allPrinters.length;
-        const onlineCount = allPrinters.filter((p) => p.online).length;
+        // Online is the exact complement of offline (same isOffline() the cards
+        // and filters use) — otherwise a printer that's online-but-without-
+        // telemetry (state 'unknown') was counted in BOTH KPIs.
         const offlineCount = allPrinters.filter((p) => isOffline(p)).length;
+        const onlineCount = allPrinters.length - offlineCount;
         const printingCount = allPrinters.filter((p) => p.state === "printing").length;
         const pausedCount = allPrinters.filter((p) => p.state === "paused").length;
         const errorCount = allPrinters.filter((p) => p.state === "error").length;
@@ -978,7 +1003,7 @@
             var pct = unit.humidity_pct;
             var hcls, htxt;
             if (pct != null) {
-              hcls = pct <= 30 ? "ok" : pct <= 50 ? "warn" : "bad";
+              hcls = pct <= 25 ? "ok" : pct <= 40 ? "warn" : "bad";
               htxt = "💧" + pct + "%";
             } else {
               // older AMS units report only the 5-level index
@@ -1501,7 +1526,12 @@
           const data = await response.json();
           cachedAllPrinters = data.map((p) => Object.assign({}, p));
           applyAndRender();
-          if (Date.now() - lastEventLogLoad > 15000) {
+          if (Date.now() - lastEventLogLoad > 15000
+              && !eventLogLoading && eventLogOffset <= EVENT_LOG_LIMIT) {
+            // Auto-refresh the FIRST page only. Skip when the user has scrolled in
+            // extra pages (offset past the first page) or a load is in flight —
+            // otherwise the reset discards their loaded pages and races the
+            // pending request. Resumes after a manual reloadEventLog().
             eventLogOffset = 0;
             loadEventLog();
             lastEventLogLoad = Date.now();
@@ -1660,6 +1690,7 @@
       }
 
       async function loadTimeline() {
+        var gen = ++timelineLoadGen;
         var loader = document.getElementById('timelineLoader');
         if (loader) loader.style.display = '';
         var from = timelineRange.from || (Date.now() / 1000 - 86400);
@@ -1671,19 +1702,32 @@
         try {
           var resp = await apiFetch(url);
           var data = await resp.json();
+          if (gen !== timelineLoadGen) return; // диапазон уже сменили
           timelineData = data.rows.reverse();
           timelineHasMore = data.has_more;
           timelineTotal = data.total;
           applyScale();
         } catch (e) {
           console.error('loadTimeline failed', e);
+          return;
         } finally {
           if (loader) loader.style.display = 'none';
+        }
+        // Остальные страницы окна — фоном: график уже нарисован и живой,
+        // старые сегменты дорисовываются слева по мере прихода.
+        while (timelineHasMore && gen === timelineLoadGen) {
+          var prevOffset = timelineOffset;
+          await loadMoreTimeline();
+          // Ничего не продвинулось (параллельная догрузка или ошибка) — выходим,
+          // чтобы не крутить цикл вхолостую.
+          if (timelineOffset === prevOffset) break;
         }
       }
 
       async function loadMoreTimeline() {
-        if (!timelineHasMore) return;
+        if (!timelineHasMore || timelineLoadingMore) return;
+        timelineLoadingMore = true;
+        var gen = timelineLoadGen;
         var from = timelineRange.from || (Date.now() / 1000 - 86400);
         var to = timelineRange.to || (Date.now() / 1000);
         timelineOffset += timelineLimit;
@@ -1693,6 +1737,7 @@
         try {
           var resp = await apiFetch(url);
           var data = await resp.json();
+          if (gen !== timelineLoadGen) return; // ответ для уже сменённого диапазона
           timelineData = data.rows.reverse().concat(timelineData);
           timelineHasMore = data.has_more;
           timelineTotal = data.total;
@@ -1700,11 +1745,17 @@
           drawTimeline();
         } catch (e) {
           console.error('loadMoreTimeline failed', e);
+          // Не зацикливаем фоновую догрузку на постоянно падающем запросе.
+          if (gen === timelineLoadGen) timelineHasMore = false;
+        } finally {
+          timelineLoadingMore = false;
         }
       }
 
       function applyScale() {
-        if (timelineData.length === 0) return;
+        // Still redraw on empty so the canvas is cleared (drawTimeline handles
+        // the empty case) instead of leaving the previous range's pixels behind.
+        if (timelineData.length === 0) { drawTimeline(); return; }
         // Видимое окно = выбранный период целиком, без скрытого приближения.
         var b = timelineBounds();
         viewStart = timelineRange.from != null ? timelineRange.from : b.lo;
@@ -1747,14 +1798,18 @@
 
       function drawTimeline() {
         var canvas = document.getElementById('timeline-canvas');
-        if (!canvas || timelineData.length === 0) return;
+        if (!canvas) return;
         var ctx = canvas.getContext('2d');
         var dpr = window.devicePixelRatio || 1;
+        // Reassigning width/height clears the bitmap — do it BEFORE the empty
+        // check so switching to a range with no data wipes the previous render
+        // instead of leaving stale pixels on screen.
         canvas.width = canvas.offsetWidth * dpr;
         canvas.height = canvas.offsetHeight * dpr;
         ctx.scale(dpr, dpr);
         var W = canvas.offsetWidth;
         var H = canvas.offsetHeight;
+        if (timelineData.length === 0) return;
 
         var tc = getTimelineColors();
         var offlinePattern = makeOfflinePattern(ctx);
@@ -2226,6 +2281,169 @@
       function escHtml(s) {
         return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
           .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+      }
+
+      // ===== Вкладка AMS: влажность / температура / сушка =====
+      var amsHours = 24;
+      var amsInited = false;
+      function amsPanelActive() {
+        var p = document.querySelector('.view-panel[data-panel="ams"]');
+        return p && p.classList.contains('active');
+      }
+      function amsInit() {
+        if (amsInited) return;
+        amsInited = true;
+        var rng = document.getElementById('amsRange');
+        if (rng) rng.querySelectorAll('button').forEach(function (b) {
+          b.addEventListener('click', function () {
+            amsHours = parseInt(b.dataset.h, 10) || 24;
+            rng.querySelectorAll('button').forEach(function (x) { x.classList.toggle('active', x === b); });
+            loadAms();
+          });
+        });
+        // Данные пишутся раз в минуту — чаще опрашивать смысла нет.
+        setInterval(function () { if (amsPanelActive()) loadAms(); }, 60000);
+      }
+      function amsHumClass(pct, lvl) {
+        if (pct != null) return pct <= 25 ? 'ok' : pct <= 40 ? 'warn' : 'bad';
+        if (lvl != null) return lvl <= 2 ? 'ok' : lvl === 3 ? 'warn' : 'bad';
+        return '';
+      }
+      function amsHumColorVar(cls) {
+        return cls === 'bad' ? 'var(--danger)' : cls === 'warn' ? 'var(--warn)' : 'var(--ok)';
+      }
+      // SVG-линия по точкам [{t,v}] в окне [fr,to]; bands=цветовые зоны влажности.
+      function amsChart(points, fr, to, ymin, ymax, color, bands) {
+        var W = 378, H = 88, PL = 26, PR = 8, PT = 8, PB = 16;
+        if (!points.length) return '<div class="ams-nodata">нет данных за период</div>';
+        var iw = W - PL - PR, ih = H - PT - PB;
+        function X(t) { return PL + iw * Math.max(0, Math.min(1, (t - fr) / (to - fr))); }
+        function Y(v) { return PT + ih * (1 - (v - ymin) / (ymax - ymin)); }
+        var line = '', area = '';
+        points.forEach(function (p, i) {
+          line += (i ? 'L' : 'M') + X(p.t).toFixed(1) + ' ' + Y(p.v).toFixed(1) + ' ';
+        });
+        area = line + 'L' + X(points[points.length - 1].t).toFixed(1) + ' ' + (PT + ih) +
+          ' L' + X(points[0].t).toFixed(1) + ' ' + (PT + ih) + ' Z';
+        var gl = '', yl = '';
+        for (var k = 0; k <= 2; k++) {
+          var val = ymin + (ymax - ymin) * k / 2, y = PT + ih * (1 - k / 2);
+          gl += '<line class="gridline" x1="' + PL + '" y1="' + y.toFixed(1) + '" x2="' + (W - PR) + '" y2="' + y.toFixed(1) + '"/>';
+          yl += '<text class="axis" x="' + (PL - 4) + '" y="' + (y + 3).toFixed(1) + '" text-anchor="end">' + Math.round(val) + '</text>';
+        }
+        var bandRects = '';
+        if (bands) {
+          [[0, 25, 'var(--ok)'], [25, 40, 'var(--warn)'], [40, 50, 'var(--danger)']].forEach(function (z) {
+            var yTop = Y(Math.min(z[1], ymax)), yBot = Y(Math.max(z[0], ymin));
+            bandRects += '<rect x="' + PL + '" y="' + yTop.toFixed(1) + '" width="' + iw +
+              '" height="' + (yBot - yTop).toFixed(1) + '" fill="' + z[2] + '" opacity="0.05"/>';
+          });
+        }
+        var gid = 'amsg' + Math.round(Math.abs(color.length * 13 + ymax * 7 + points.length));
+        var xl = '<text class="axis" x="' + PL + '" y="' + (H - 4) + '" text-anchor="start">-' + amsHours + 'ч</text>' +
+          '<text class="axis" x="' + (W - PR) + '" y="' + (H - 4) + '" text-anchor="end">сейчас</text>';
+        return '<svg class="ams-chart" viewBox="0 0 ' + W + ' ' + H + '" preserveAspectRatio="none">' +
+          '<defs><linearGradient id="' + gid + '" x1="0" y1="0" x2="0" y2="1">' +
+          '<stop offset="0" stop-color="' + color + '" stop-opacity="0.28"/>' +
+          '<stop offset="1" stop-color="' + color + '" stop-opacity="0"/></linearGradient></defs>' +
+          bandRects + gl +
+          '<path d="' + area + '" fill="url(#' + gid + ')"/>' +
+          '<path d="' + line + '" fill="none" stroke="' + color + '" stroke-width="1.6" stroke-linejoin="round"/>' +
+          yl + xl + '</svg>';
+      }
+      function amsCardShell(u) {
+        var cls = 'ams-card' + (u.drying ? ' drying' : '') +
+          (!u.drying && amsHumClass(u.humidity_pct, u.humidity) === 'bad' ? ' bad' : '');
+        var hcls = amsHumClass(u.humidity_pct, u.humidity);
+        var humTxt = u.humidity_pct != null ? '💧 ' + u.humidity_pct + '%'
+          : (u.humidity != null ? '💧 ' + u.humidity + '/5' : '💧 н/д');
+        var badges = '<span class="ams-badge ' + hcls + '">' + humTxt + '</span>';
+        if (u.temp != null) badges += '<span class="ams-badge">🌡 ' + Math.round(u.temp) + '°</span>';
+        var slots = '<div class="ams-slots">' + (u.slots || []).map(function (s, i) {
+          if (s.empty) return '<div class="ams-slot empty"></div>';
+          var active = u.tray_now_local === i;
+          var color = (typeof s.color === 'string' && /^[0-9a-fA-F]{3,8}$/.test(s.color)) ? '#' + s.color : '';
+          return '<div class="ams-slot' + (active ? ' active' : '') + '"' + (color ? ' style="background:' + color + '"' : '') + '></div>';
+        }).join('') + '</div>';
+        var dry = u.drying
+          ? '<div class="ams-dry"><span>🔥</span><span class="lbl">Идёт сушка</span>' +
+            '<span class="rem">' + (u.dry_time != null ? 'осталось ' + amsFmtMin(u.dry_time) : '') + '</span></div>'
+          : '';
+        var key = u.printer_id + '__' + u.unit_index;
+        var model = u.device_type ? escHtml(u.device_type) : 'AMS';
+        return '<div class="ams-card' + cls.slice(8) + '" data-key="' + key + '">' +
+          '<div class="ams-chead"><div class="ams-spool">🧵</div>' +
+          '<div class="ams-ctitle"><div class="ams-cname">' + escHtml(u.label) + ' · AMS ' + (u.unit_index + 1) +
+          ' <span class="ams-dot ' + (u.online ? 'on' : 'off') + '"></span></div>' +
+          '<div class="ams-csub">' + model + '</div></div>' +
+          '<div class="ams-badges">' + badges + '</div></div>' +
+          slots + dry +
+          '<div class="ams-gwrap"><div class="ams-gtitle"><span class="t">' +
+          (u.humidity_pct != null ? 'Влажность, %' : 'Уровень влажности (0–5)') + '</span>' +
+          '<span class="mm" data-mm="hum-' + key + '"></span></div>' +
+          '<div data-g="hum-' + key + '"><div class="ams-nodata">загрузка…</div></div></div>' +
+          '<div class="ams-gwrap"><div class="ams-gtitle"><span class="t">Температура, °C</span>' +
+          '<span class="mm"></span></div>' +
+          '<div data-g="temp-' + key + '"><div class="ams-nodata">загрузка…</div></div></div>' +
+          '</div>';
+      }
+      function amsFmtMin(m) {
+        m = parseInt(m, 10) || 0;
+        var h = Math.floor(m / 60), mm = m % 60;
+        return h > 0 ? h + ':' + (mm < 10 ? '0' : '') + mm : m + ' мин';
+      }
+      function amsDrawGraphs(key, u, rows, fr, to) {
+        var humBox = document.querySelector('[data-g="hum-' + key + '"]');
+        var tempBox = document.querySelector('[data-g="temp-' + key + '"]');
+        var mm = document.querySelector('[data-mm="hum-' + key + '"]');
+        if (!humBox || !tempBox) return;
+        var usePct = u.humidity_pct != null;
+        var humPts = [], tempPts = [];
+        rows.forEach(function (r) {
+          var v = usePct ? r.humidity_pct : r.humidity_idx;
+          if (v != null) humPts.push({ t: r.recorded_at, v: v });
+          if (r.temp != null) tempPts.push({ t: r.recorded_at, v: r.temp });
+        });
+        var hcls = amsHumClass(u.humidity_pct, u.humidity);
+        humBox.innerHTML = usePct
+          ? amsChart(humPts, fr, to, 10, 50, amsHumColorVar(hcls), true)
+          : amsChart(humPts, fr, to, 0, 5, 'var(--ok)', false);
+        tempBox.innerHTML = amsChart(tempPts, fr, to, 20, 60, 'var(--info)', false);
+        if (mm && humPts.length) {
+          var vals = humPts.map(function (p) { return p.v; });
+          var suf = usePct ? '%' : '';
+          mm.textContent = 'мин ' + Math.round(Math.min.apply(null, vals)) + suf +
+            ' · макс ' + Math.round(Math.max.apply(null, vals)) + suf;
+        }
+      }
+      async function loadAms() {
+        amsInit();
+        var grid = document.getElementById('amsGrid');
+        var empty = document.getElementById('amsEmpty');
+        if (!grid) return;
+        var units;
+        try {
+          var resp = await apiFetch('/api/ams/current');
+          units = await resp.json();
+        } catch (e) { console.error('loadAms current failed', e); return; }
+        if (!units.length) { grid.innerHTML = ''; if (empty) empty.style.display = ''; return; }
+        if (empty) empty.style.display = 'none';
+        function sev(u) {
+          if (u.drying) return 0;
+          var c = amsHumClass(u.humidity_pct, u.humidity);
+          return c === 'bad' ? 1 : c === 'warn' ? 2 : 3;
+        }
+        units.sort(function (a, b) { return sev(a) - sev(b) || String(a.label).localeCompare(String(b.label)); });
+        grid.innerHTML = units.map(amsCardShell).join('');
+        var to = Date.now() / 1000, fr = to - amsHours * 3600;
+        units.forEach(function (u) {
+          var key = u.printer_id + '__' + u.unit_index;
+          var url = '/api/ams/history?printer_id=' + encodeURIComponent(u.printer_id) +
+            '&unit=' + u.unit_index + '&fr=' + fr + '&to=' + to;
+          apiFetch(url).then(function (r) { return r.json(); }).then(function (d) {
+            amsDrawGraphs(key, u, d.rows || [], fr, to);
+          }).catch(function (e) { console.error('ams history failed', e); });
+        });
       }
 
       var ROLE_BADGES = {
@@ -2776,6 +2994,7 @@
         [['tgToken', values.telegram_token],
          ['tgChatId', values.telegram_chat_id === null ? '' : String(values.telegram_chat_id)],
          ['tgUpdateInterval', String(values.telegram_update_interval)],
+         ['tgFinishRepeatInterval', String(values.telegram_finish_repeat_interval_min)],
          ['tgTplFinish', values.telegram_finish_template],
          ['tgTplError', values.telegram_error_template],
          ['tgTplPaused', values.telegram_paused_template],
@@ -2785,6 +3004,7 @@
           if (el && document.activeElement !== el) el.value = pair[1];
         });
         srvEl('tgNotifyFinish').checked = !!values.telegram_notify_on_finish;
+        srvEl('tgNotifyFinishRepeat').checked = !!values.telegram_notify_on_finish_repeat;
         srvEl('tgNotifyError').checked = !!values.telegram_notify_on_error;
         srvEl('tgNotifyPaused').checked = !!values.telegram_notify_on_paused;
         ['Finish', 'Error', 'Paused'].forEach(function (k) {
@@ -2874,6 +3094,15 @@
           var el = this;
           srvDebounced('interval', function () {
             return { telegram_update_interval: srvParseInt(el, 'Интервал обновления') };
+          }, 'tgSavedFlash', 'tgError');
+        });
+        srvEl('tgNotifyFinishRepeat').addEventListener('change', function () {
+          saveServerSettings({ telegram_notify_on_finish_repeat: this.checked }, 'tgSavedFlash', 'tgError').catch(function () {});
+        });
+        srvEl('tgFinishRepeatInterval').addEventListener('input', function () {
+          var el = this;
+          srvDebounced('finishRepeat', function () {
+            return { telegram_finish_repeat_interval_min: srvParseInt(el, 'Интервал повтора') };
           }, 'tgSavedFlash', 'tgError');
         });
 

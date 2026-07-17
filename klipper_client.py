@@ -40,6 +40,11 @@ class KlipperClient:
         # detect a hung socket (TCP stalled with no FIN, so on_close never fires)
         # and force a disconnect instead of serving stale telemetry as fresh.
         self.last_message_ts = 0.0
+        # False until the first real printer-status message is parsed. self.data is
+        # pre-seeded with a full default dict (state='unknown', …), so without this
+        # flag get_data() would serve those defaults for a Moonraker that connected
+        # but never sent telemetry — showing a dead/empty host as online 'unknown'.
+        self._got_telemetry = False
         # Guards self.data (WS thread vs reader thread) and request_id (WS thread
         # subscribe vs API thread send_command).
         self._lock = threading.Lock()
@@ -47,6 +52,10 @@ class KlipperClient:
         self._reconnect_thread = None
         self._reconnect_delay = 5
         self._max_reconnect_delay = 60
+        # Serializes connect(): both fetch() (poll thread) and the on_close/on_error
+        # reconnect loop can call it. Without this the two drivers race and spawn
+        # duplicate run_forever threads / leaked sockets. Mirrors the Bambu collector.
+        self._connect_lock = threading.Lock()
 
     def _next_id(self):
         with self._lock:
@@ -55,42 +64,47 @@ class KlipperClient:
             return rid
 
     def connect(self):
-        try:
-            # Close any previous socket before replacing it so the old run_forever
-            # thread's TCP connection doesn't leak on every reconnect.
-            if self.ws is not None:
-                try:
-                    self.ws.close()
-                except Exception:
-                    pass
-                # close() only signals run_forever to stop; it does not block. Join
-                # the old thread so its TCP socket is actually released before we
-                # open a new one — otherwise FDs leak on every reconnect on a
-                # flapping network.
-                old_thread = self.thread
-                if old_thread is not None and old_thread.is_alive():
-                    old_thread.join(timeout=5)
-            ws_url = f"ws://{self.host}:{self.port}/websocket"
-            self.ws = websocket.WebSocketApp(
-                ws_url,
-                on_message=self.on_message,
-                on_error=self.on_error,
-                on_close=self.on_close,
-                on_open=self.on_open
-            )
-            # ping_interval/timeout let the library detect a dead peer that stopped
-            # responding without sending a FIN, instead of blocking in recv forever.
-            self.thread = threading.Thread(
-                target=self.ws.run_forever,
-                kwargs={'ping_interval': 15, 'ping_timeout': 10},
-                daemon=True,
-            )
-            self.thread.start()
-            time.sleep(2)
-            return self.connected
-        except Exception as e:
-            logger.error("[%s] Ошибка подключения WebSocket: %s", self.label, e)
-            return False
+        with self._connect_lock:
+            # Idempotent: if a concurrent caller already brought the socket up,
+            # don't tear it down and rebuild — that would orphan the live thread.
+            if self.connected:
+                return self.connected
+            try:
+                # Close any previous socket before replacing it so the old run_forever
+                # thread's TCP connection doesn't leak on every reconnect.
+                if self.ws is not None:
+                    try:
+                        self.ws.close()
+                    except Exception:
+                        pass
+                    # close() only signals run_forever to stop; it does not block. Join
+                    # the old thread so its TCP socket is actually released before we
+                    # open a new one — otherwise FDs leak on every reconnect on a
+                    # flapping network.
+                    old_thread = self.thread
+                    if old_thread is not None and old_thread.is_alive():
+                        old_thread.join(timeout=5)
+                ws_url = f"ws://{self.host}:{self.port}/websocket"
+                self.ws = websocket.WebSocketApp(
+                    ws_url,
+                    on_message=self.on_message,
+                    on_error=self.on_error,
+                    on_close=self.on_close,
+                    on_open=self.on_open
+                )
+                # ping_interval/timeout let the library detect a dead peer that stopped
+                # responding without sending a FIN, instead of blocking in recv forever.
+                self.thread = threading.Thread(
+                    target=self.ws.run_forever,
+                    kwargs={'ping_interval': 15, 'ping_timeout': 10},
+                    daemon=True,
+                )
+                self.thread.start()
+                time.sleep(2)
+                return self.connected
+            except Exception as e:
+                logger.error("[%s] Ошибка подключения WebSocket: %s", self.label, e)
+                return False
 
     def on_open(self, ws):
         logger.info("[%s] WebSocket подключен", self.label)
@@ -144,16 +158,26 @@ class KlipperClient:
     def on_message(self, ws, message):
         try:
             data = json.loads(message)
-            self.last_message_ts = time.time()
 
+            got_status = False
             if data.get('result') and isinstance(data['result'], dict):
                 result_status = data['result'].get('status')
                 if isinstance(result_status, dict):
                     self.parse_status(result_status)
+                    got_status = True
 
             if 'method' in data and data['method'] == 'notify_status_update':
                 status = data['params'][0]
                 self.parse_status(status)
+                got_status = True
+
+            # Only a real printer-status message counts as liveness. Moonraker also
+            # broadcasts server-process notifications (notify_proc_stat_update ~1/s)
+            # on this socket even after klippy has shut down; refreshing the
+            # staleness timestamp on those would keep a dead print showing its last
+            # state forever, defeating get_data()'s 30s guard.
+            if got_status:
+                self.last_message_ts = time.time()
 
         except Exception as e:
             logger.warning("[%s] Ошибка парсинга: %s", self.label, e, exc_info=True)
@@ -161,6 +185,7 @@ class KlipperClient:
     def parse_status(self, status):
         try:
             with self._lock:
+                self._got_telemetry = True
                 if 'print_stats' in status:
                     ps = status['print_stats']
                     if 'state' in ps:
@@ -380,6 +405,10 @@ class KlipperClient:
         telemetry forever. Mirrors the Creality client's guard.
         """
         with self._lock:
+            # No real telemetry parsed yet — don't serve the pre-seeded defaults
+            # as if the printer were reporting (Moonraker up, klippy silent).
+            if not self._got_telemetry:
+                return {}
             if self.last_message_ts and time.time() - self.last_message_ts > 30:
                 self.connected = False
                 logger.warning("[%s] Нет данных > 30с, принудительный дисконнект", self.label)

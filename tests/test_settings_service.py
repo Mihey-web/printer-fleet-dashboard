@@ -75,6 +75,22 @@ def test_set_many_roundtrip_types(db):
     assert values["proxy_list"] == ["http://u:p@10.1.1.1:9000"]
 
 
+def test_finish_repeat_defaults(db):
+    values = svc.get_all(db)
+    assert values["telegram_notify_on_finish_repeat"] is True
+    assert values["telegram_finish_repeat_interval_min"] == 30
+
+
+def test_finish_repeat_roundtrip(db):
+    svc.set_many({
+        "telegram_notify_on_finish_repeat": True,
+        "telegram_finish_repeat_interval_min": 15,
+    }, db)
+    values = svc.get_all(db)
+    assert values["telegram_notify_on_finish_repeat"] is True
+    assert values["telegram_finish_repeat_interval_min"] == 15
+
+
 def test_set_many_rejects_unknown_key(db):
     with pytest.raises(KeyError):
         svc.set_many({"nope": 1}, db)

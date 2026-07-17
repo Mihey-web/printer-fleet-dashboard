@@ -27,6 +27,10 @@ class TelegramReporter:
         self._chat_id: Optional[int] = None
         self._message_id: Optional[int] = None
         self._periodic_task = None
+        # Live Bot instance owned by the polling coroutine. Held on the reporter
+        # (not just as a coroutine local) so _run's finally can close its aiohttp
+        # session — otherwise the session leaks on every reporter restart.
+        self._bot = None
         self._available = True
         self._last_text: Optional[str] = None
         # Per-chat cooldown (timestamp until which edits should be skipped)
@@ -42,19 +46,29 @@ class TelegramReporter:
     def set_status_getter(self, fn: Callable[[], str]):
         self._get_text = fn
 
-    def notify(self, text: str):
-        """Send a one-shot message to the current chat.
+    def notify(self, text: str) -> bool:
+        """Dispatch a one-shot message to the current chat.
 
-        Works only after a chat has been established via /start.
+        Returns True when the message was handed off for delivery (bot available
+        and a chat is established), False when it was a no-op (bot down or the
+        user never /start-ed). The caller uses that to decide whether a
+        notification actually went out — e.g. the poll loop only anchors its
+        finish-repeat timer on a real dispatch, not a silent no-op.
+
+        The actual send runs on a short-lived daemon thread so a hung network
+        call can't stall the caller — poll_loop invokes notify() synchronously in
+        its cycle, and a blocking send would freeze the whole fleet poll.
         Safe to call from any thread.
         """
-        if not self._available:
-            return
-        if not self._chat_id:
-            # Chat not known yet; user hasn't issued /start
-            return
+        if not self._available or not self._chat_id:
+            return False
+        threading.Thread(target=self._send_now, args=(text,), daemon=True,
+                         name="tg-notify").start()
+        return True
+
+    def _send_now(self, text: str) -> None:
+        """Blocking send of a one-shot message; run off-thread by notify()."""
         try:
-            # Best-effort fire-and-forget in a short-lived loop.
             async def _send_once():
                 import importlib
                 Bot = None
@@ -193,17 +207,11 @@ class TelegramReporter:
                 else:
                     bot = Bot(token=self.token)
                     logger.info("Telegram bot: direct connection (no proxy)")
+                # Publish for _run's finally so the session gets closed on exit.
+                self._bot = bot
                 logger.info("Telegram bot instance created, starting polling...")
 
             await ensure_bot()
-
-            # Proactively establish the chat if we already know it from settings.
-            # Telegram only forbids messaging a user who never /start-ed the bot
-            # *ever*; once that happened, allowed_chat_id lets us resume after any
-            # restart without a fresh /start. Best-effort: if it fails (user truly
-            # never started the bot, network), fall through to the /start handler.
-            if self.allowed_chat_id is not None and self._chat_id is None:
-                await self._establish_chat(bot, self.allowed_chat_id)
 
             while not self._stop_event.is_set():
                 try:
@@ -211,6 +219,17 @@ class TelegramReporter:
                     if new_proxy != current_proxy:
                         logger.info("Proxy changed: %s -> %s", current_proxy, new_proxy)
                         await ensure_bot()
+
+                    # Proactively (re)establish the chat if we know it from
+                    # settings but haven't bound it yet. Retried every cycle — a
+                    # one-shot attempt before the loop would leave notifications
+                    # dead until a manual /start if the network was down at start.
+                    # Telegram only forbids messaging a user who never /start-ed
+                    # the bot *ever*; once that happened, allowed_chat_id lets us
+                    # resume after any restart. _establish_chat is a cheap no-op
+                    # once bound.
+                    if self.allowed_chat_id is not None and self._chat_id is None:
+                        await self._establish_chat(bot, self.allowed_chat_id)
 
                     updates = await bot.get_updates(offset=offset, timeout=20)
                     retry_delay = 1
@@ -249,8 +268,12 @@ class TelegramReporter:
         except Exception:
             logger.exception("aiogram polling failed")
         finally:
+            # Close the live bot's aiohttp session. It's held on the reporter
+            # (self._bot), not as a local here — referencing the coroutine-local
+            # `bot` would NameError and silently leak the session every restart.
             try:
-                loop.run_until_complete(bot.session.close())
+                if self._bot is not None:
+                    loop.run_until_complete(self._bot.session.close())
             except Exception:
                 pass
 

@@ -72,7 +72,7 @@ def _build_ams(ams_obj: Any) -> Optional[Dict[str, Any]]:
     if not ams_obj:
         return None
     units = []
-    for unit in getattr(ams_obj, "data", None) or []:
+    for phys_idx, unit in enumerate(getattr(ams_obj, "data", None) or []):
         trays = getattr(unit, "tray", None) or []
         if not trays:
             continue
@@ -80,15 +80,25 @@ def _build_ams(ams_obj: Any) -> Optional[Dict[str, Any]]:
         for tray in trays:
             color = getattr(tray, "color", None) or ""
             mat_type = getattr(tray, "type", None) or ""
-            empty = color[:8] in ("", "00000000") and not mat_type
+            # An empty slot is signalled either by no colour + no material, or by
+            # an explicit type marker ("Empty" on X1C). The marker slot still
+            # carries a leftover colour, so keying emptiness only on colour left it
+            # rendered as a black-filament chip.
+            is_empty_marker = mat_type.strip().lower() == "empty"
+            empty = is_empty_marker or (color[:8] in ("", "00000000") and not mat_type)
             slots.append({
-                "type": mat_type or None,
+                "type": None if empty else (mat_type or None),
                 "color": None if empty else color[:6],
                 "name": None if empty else getattr(tray, "name", None),
                 "remain_pct": as_int(getattr(tray, "remain", None)),
                 "empty": empty,
             })
         units.append({
+            # Stable physical unit position in ams_obj.data. History must be keyed
+            # by this, not by the position in the filtered `units` list — dropping
+            # tray-less placeholder units would otherwise shift indices and mix
+            # different physical units' history under one unit_index.
+            "index": phys_idx,
             "humidity": as_int(getattr(unit, "humidity_index", None)),
             # humidity_raw and dry_time are grafted onto AMSInstance by
             # bambu_collector's print_update wrapper (pybambu discards both).
@@ -373,7 +383,12 @@ def normalize_ws_dict(printer_id: str, label: str, kind: PrinterKind, data: Dict
             and current_layer >= total_layers
         )
         no_time_left = eta_seconds is None or eta_seconds <= 0
-        looks_finished = (progress_complete or layers_complete) and no_time_left
+        # layers_complete only counts as "finished" evidence when progress isn't
+        # reported at all. Otherwise a new print's first cycles — where firmware
+        # still echoes the PREVIOUS job's completed layer count and hasn't set an
+        # ETA yet — would flip the fresh job straight to FINISHED. A reported
+        # progress (even 0-3%) proves the job isn't done.
+        looks_finished = (progress_complete or (layers_complete and progress_pct is None)) and no_time_left
         # Creality K1/K1C/Ender Klipper firmware reports print_stats.state="paused"
         # once a job finishes (it auto-pauses at the end), which otherwise leaves the
         # card stuck on "Пауза" at 100%. A real mid-print pause keeps time remaining,

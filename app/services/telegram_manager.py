@@ -87,11 +87,17 @@ def init(status_getter: Callable[[], str]) -> None:
     threading.Thread(target=_bg_start, daemon=True, name="tg-start").start()
 
 
-def notify(text: str) -> None:
-    """Poll-loop Notifier entry point. Safe no-op while the bot is down."""
+def notify(text: str) -> bool:
+    """Poll-loop Notifier entry point. Safe no-op while the bot is down.
+
+    Returns True only when the message was actually dispatched (bot up and a
+    chat established), so the caller can avoid recording a no-op as a real
+    notification.
+    """
     reporter = _reporter
     if reporter is not None:
-        reporter.notify(text)
+        return bool(reporter.notify(text))
+    return False
 
 
 def _restart_bot_async():

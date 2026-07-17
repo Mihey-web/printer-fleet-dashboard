@@ -1,5 +1,6 @@
 import logging
 import socket
+import threading
 
 from pybambu import BambuClient
 from pybambu import models as _pb_models
@@ -95,10 +96,18 @@ class BambuCollector:
             access_code=access_code,
         )
         self.connected = False
+        self._connect_lock = threading.Lock()
 
     def connect(self):
-        self.client.connect(lambda *_args, **_kwargs: None)
-        self.connected = True
+        # Идемпотентно: connect() зовут и warm-up на старте, и fetch()/send_command
+        # из своих потоков. Каждый вызов BambuClient.connect() создаёт НОВЫЙ
+        # mqtt.Client + listener-поток (старый продолжает жить и реконнектиться),
+        # поэтому вторую сессию к принтеру поднимать нельзя.
+        with self._connect_lock:
+            if self.connected:
+                return
+            self.client.connect(lambda *_args, **_kwargs: None)
+            self.connected = True
 
     def is_reachable(self) -> bool:
         for port in (8883, 8884):
@@ -130,7 +139,11 @@ class BambuCollector:
             ok = self.client.publish(payload)
             return {"success": bool(ok), "detail": "Command sent" if ok else "Publish failed"}
         except Exception as e:
-            self.connected = False
+            # Don't flip connected=False here. pybambu's listener thread owns
+            # reconnection of the existing mqtt.Client; a fresh connect() would
+            # spawn a DUPLICATE client + listener alongside the still-live one
+            # (see connect()'s note). The publish error is surfaced to the caller;
+            # real liveness is judged by info.online in fetch().
             return {"success": False, "detail": str(e)}
 
     def fetch(self):
@@ -139,10 +152,21 @@ class BambuCollector:
         except Exception:
             device = None
 
-        if device is not None:
+        # pybambu создаёт Device прямо в конструкторе клиента, поэтому
+        # get_device() никогда не возвращает None — после выключения принтера
+        # он вечно отдаёт последнюю закешированную телеметрию. Живость
+        # определяет info.online: его сбрасывают paho on_disconnect при
+        # разрыве MQTT и 30-секундный watchdog при тишине в эфире. Стейл
+        # нельзя отдавать наверх — иначе выключенный принтер навсегда
+        # остаётся в последнем статусе (или в «простое» после рестарта Pi).
+        if device is not None and getattr(getattr(device, "info", None), "online", False):
             return device
 
-        self.connected = False
+        if self.connected:
+            # MQTT-сессия уже поднималась: mqtt_listen_thread в pybambu сам
+            # бесконечно переподключается (reconnect_delay 1s). Повторный
+            # connect() породил бы дубль клиента и потока на каждый опрос.
+            raise ConnectionError("MQTT telemetry lost (printer powered off or unreachable)")
 
         if not self.is_reachable():
             raise ConnectionError(f"TCP unreachable at {self.host}:8883/8884")
@@ -150,19 +174,10 @@ class BambuCollector:
         try:
             self.connect()
         except Exception as e:
+            self.connected = False
             raise ConnectionError(f"MQTT connect failed: {e}")
 
-        if not getattr(self.client, 'connected', False):
-            raise ConnectionError("MQTT session not established after connect()")
-
-        try:
-            device = self.client.get_device()
-        except Exception as e:
-            self.connected = False
-            raise ConnectionError(f"get_device() failed: {e}")
-
-        if device is None:
-            self.connected = False
-            raise ConnectionError("get_device() returned None — no telemetry received")
-
-        return device
+        # connect() асинхронный — первая телеметрия придёт чуть позже. Этот
+        # цикл честно считаем неудачным: grace-период в poll_loop закроет
+        # разрыв, а следующий опрос уже увидит info.online=True.
+        raise ConnectionError("MQTT connecting — telemetry not received yet")

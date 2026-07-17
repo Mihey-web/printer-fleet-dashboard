@@ -31,6 +31,37 @@ _lock = Lock()
 # Rows the collectors were built from at startup — baseline for pending diffs.
 _running: Optional[List[Dict[str, Any]]] = None
 
+# Short-TTL cache of pid -> current label. _display_label is called on the poll
+# hot path (per printer, per event) and by the Telegram status render; without
+# this each call hit SQLite. Renames go through update_printer/discard_changes,
+# which invalidate the cache, so a rename shows up immediately; the TTL is just a
+# backstop so any missed write path self-heals within a few seconds.
+_label_cache: Dict[str, Any] = {}   # pid -> (label, ts)
+_label_cache_lock = Lock()
+_LABEL_TTL = 15.0
+
+
+def get_label(printer_id: str, db_path: Optional[str] = None) -> Optional[str]:
+    """Current label for a printer id, cached with a short TTL + write invalidation."""
+    now = time.time()
+    with _label_cache_lock:
+        hit = _label_cache.get(printer_id)
+        if hit is not None and now - hit[1] < _LABEL_TTL:
+            return hit[0]
+    row = get_printer(printer_id, db_path)
+    label = row.get("label") if row else None
+    with _label_cache_lock:
+        _label_cache[printer_id] = (label, now)
+    return label
+
+
+def _invalidate_label(printer_id: Optional[str] = None) -> None:
+    with _label_cache_lock:
+        if printer_id is None:
+            _label_cache.clear()
+        else:
+            _label_cache.pop(printer_id, None)
+
 
 def _connect(db_path: Optional[str] = None) -> sqlite3.Connection:
     conn = sqlite3.connect(db_path or DB_PATH, timeout=10)
@@ -178,6 +209,7 @@ def update_printer(printer_id: str, data: Dict[str, Any], db_path: Optional[str]
             return None
     finally:
         conn.close()
+    _invalidate_label(printer_id)
     return get_printer(printer_id, db_path)
 
 
@@ -201,6 +233,7 @@ def delete_printer(printer_id: str, db_path: Optional[str] = None) -> Optional[s
             conn.execute("DELETE FROM printers WHERE id = ?", (printer_id,))
             mode = "hard"
         conn.commit()
+        _invalidate_label(printer_id)
         return mode
     finally:
         conn.close()
@@ -216,6 +249,7 @@ def restore_printer(printer_id: str, db_path: Optional[str] = None) -> Optional[
             return None
     finally:
         conn.close()
+    _invalidate_label(printer_id)
     return get_printer(printer_id, db_path)
 
 
@@ -236,6 +270,7 @@ def discard_changes(db_path: Optional[str] = None) -> int:
                r.get("access_code"), r.get("serial"),
                r.get("created_at", now), now) for r in running])
         conn.commit()
+        _invalidate_label()  # bulk reset — clear the whole cache
         return len(running)
     finally:
         conn.close()

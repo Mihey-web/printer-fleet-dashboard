@@ -1,6 +1,7 @@
 from fastapi import FastAPI, HTTPException, Response, Request, Cookie, Query
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, StreamingResponse, JSONResponse
+import json
 import sqlite3
 import os
 import time as time_module
@@ -8,6 +9,7 @@ import logging
 import threading
 
 from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.middleware.gzip import GZipMiddleware
 
 from app.services.state_store import StateStore
 
@@ -53,6 +55,14 @@ def _history_db_path():
     return os.path.join(
         os.path.dirname(os.path.dirname(os.path.dirname(__file__))),
         "printer_history.db",
+    )
+
+
+def _ams_db_path():
+    """Absolute path to the ams_history SQLite DB (project root)."""
+    return os.path.join(
+        os.path.dirname(os.path.dirname(os.path.dirname(__file__))),
+        "ams_history.db",
     )
 
 
@@ -128,6 +138,71 @@ def _query_events(db, fr, to, limit, offset, printer_id=None, state=None):
         d["label"] = labels.get(d["printer_id"], d["label"])
         out.append(d)
     return {"rows": out, "has_more": has_more}
+
+
+# Прореживание таймлайна: канвас всё равно ~1200px шириной, так что больше
+# ~800 точек на принтер на всё окно неотличимо на глаз. Смены состояний
+# сохраняются ВСЕ (границы сегментов точные), между ними — одна строка на
+# бакет времени для тултипа (прогресс/температуры). При 5-секундных снапшотах
+# и 15 принтерах это сжимает сутки с ~260k строк до ~10-15k.
+_TIMELINE_TARGET_BUCKETS = 800
+_TIMELINE_MIN_STEP = 30.0  # мельче 30с не прореживаем — совпадает с сырыми данными
+
+
+def _query_timeline(db, fr, to, limit, offset, printer=None, desc=False):
+    """Одна страница прореженного таймлайна в [fr, to].
+
+    Строка сохраняется, если она: первая/последняя у принтера в окне (края
+    сегментов), меняет state (границы сегментов точные) или первая в своём
+    бакете шириной `step` (опорные точки для тултипа). LIMIT+1 вместо
+    COUNT(*) — has_more без второго полного скана окна.
+    """
+    step = max(_TIMELINE_MIN_STEP, (to - fr) / _TIMELINE_TARGET_BUCKETS)
+    where = "recorded_at >= ? AND recorded_at <= ?"
+    params = [fr, to]
+    if printer:
+        where += " AND printer_id = ?"
+        params.append(printer)
+    # Направление сортировки выбирается из bool в фиксированный литерал —
+    # пользовательский ввод в текст SQL не попадает.
+    order_clause = "ORDER BY recorded_at DESC" if desc else "ORDER BY recorded_at ASC"
+    params.extend([step, step, limit + 1, offset])
+    conn = sqlite3.connect(db, timeout=10)
+    try:
+        conn.row_factory = sqlite3.Row
+        rows = conn.execute("""
+            WITH win AS (
+                SELECT printer_id, label, state, recorded_at, job_name,
+                       progress, eta_sec, print_time, nozzle_temp, bed_temp,
+                       LAG(state) OVER w AS prev_state,
+                       LAG(recorded_at) OVER w AS prev_ts,
+                       LEAD(recorded_at) OVER w AS next_ts
+                FROM printer_history
+                WHERE %s
+                WINDOW w AS (PARTITION BY printer_id ORDER BY recorded_at)
+            )
+            SELECT printer_id, label, state, recorded_at, job_name,
+                   progress, eta_sec, print_time, nozzle_temp, bed_temp
+            FROM win
+            WHERE prev_ts IS NULL OR next_ts IS NULL
+               OR prev_state IS NOT state
+               OR CAST(recorded_at / ? AS INTEGER) != CAST(prev_ts / ? AS INTEGER)
+            %s LIMIT ? OFFSET ?
+        """ % (where, order_clause), params).fetchall()
+    finally:
+        conn.close()
+    has_more = len(rows) > limit
+    labels = _current_labels()
+    out = []
+    for r in rows[:limit]:
+        d = dict(r)
+        d["label"] = labels.get(d["printer_id"], d["label"])
+        out.append(d)
+    # total раньше был COUNT(*) по сырым строкам; фронт его только сохраняет,
+    # нигде не читает. Отдаём нижнюю оценку по прореженному набору, чтобы не
+    # ломать форму ответа для закэшированных клиентов.
+    return {"rows": out, "has_more": has_more,
+            "total": offset + len(out) + (1 if has_more else 0)}
 
 
 def _query_state_durations(db, fr, to):
@@ -217,7 +292,11 @@ class JWTAuthMiddleware(BaseHTTPMiddleware):
                     # predates their tokens_valid_after watermark.
                     payload = decode_token(token, secret)
                     iat = payload.get('iat', 0) if payload else 0
-                    if token_subject_active(result[0], iat):
+                    # token_subject_active does a synchronous SQLite read; run it in
+                    # the threadpool so a concurrent users.db write can't stall the
+                    # event loop (and with it every in-flight request).
+                    from starlette.concurrency import run_in_threadpool
+                    if await run_in_threadpool(token_subject_active, result[0], iat):
                         username, role = result
         if username is not None:
             request.state.username = username
@@ -297,60 +376,86 @@ def create_app(store: StateStore) -> FastAPI:
         # empty instead of 404-ing.
         return {'ffmpeg_available': False, 'cuda': False, 'cameras': []}
 
+    @app.get("/api/ams/current")
+    def ams_current():
+        # Живой срез AMS из памяти: по одной записи на юнит для каждого принтера
+        # с непустым status.ams. Не-Bambu и принтеры без AMS отсутствуют.
+        labels = _current_labels()
+        out = []
+        for s in store.get_all():
+            ams = s.ams
+            if not ams or not ams.get("units"):
+                continue
+            tray_now = ams.get("tray_now")
+            base = 0
+            for idx, unit in enumerate(ams["units"]):
+                dry_time = unit.get("dry_time")
+                nslots = len(unit.get("slots") or [])
+                out.append({
+                    "printer_id": s.id,
+                    "label": labels.get(s.id, s.label),
+                    "device_type": s.device_type,
+                    "online": s.online,
+                    # Physical unit index (matches what record_ams stores), so the
+                    # history query below lines up with the right unit's rows.
+                    "unit_index": unit.get("index", idx),
+                    "humidity": unit.get("humidity"),
+                    "humidity_pct": unit.get("humidity_pct"),
+                    "temp": unit.get("temp"),
+                    "dry_time": dry_time,
+                    "drying": bool(dry_time and dry_time > 0),
+                    "slots": unit.get("slots") or [],
+                    "tray_now_local": (tray_now - base) if tray_now is not None
+                        and base <= tray_now < base + nslots else None,
+                })
+                base += nslots
+        return out
+
+    @app.get("/api/ams/history")
+    def ams_history(printer_id: str, unit: int = Query(0, ge=0),
+                    fr: float = None, to: float = None):
+        if to is None:
+            to = time_module.time()
+        if fr is None:
+            fr = to - 24 * 3600
+        if fr > to:
+            raise HTTPException(status_code=400, detail="fr must be <= to")
+        db = _ams_db_path()
+        if not os.path.exists(db):
+            return {"rows": []}
+        conn = sqlite3.connect(db, timeout=10)
+        try:
+            conn.row_factory = sqlite3.Row
+            rows = conn.execute(
+                "SELECT recorded_at, humidity_idx, humidity_pct, temp, dry_time "
+                "FROM ams_history "
+                "WHERE printer_id = ? AND unit_index = ? "
+                "AND recorded_at >= ? AND recorded_at <= ? "
+                "ORDER BY recorded_at ASC",
+                (printer_id, unit, fr, to)).fetchall()
+        finally:
+            conn.close()
+        return {"rows": [dict(r) for r in rows]}
+
     @app.get("/api/history/timeline")
     def get_timeline(fr: float, to: float = None, printer: str = None,
                      limit: int = Query(1000, ge=1, le=50000),
                      offset: int = Query(0, ge=0), desc: bool = False):
+        # le=50000 сознательно НЕ снижен до фактической страницы фронта (5000):
+        # закэшированный старый app.js всё ещё шлёт limit=50000 и не должен
+        # ловить 422 (однажды уже наступали — см. вкладку «История» 07.2026).
         if to is None:
             to = time_module.time()
         if fr > to:
             raise HTTPException(status_code=400, detail="fr must be <= to")
-        db = _history_db_path()
-        conn = sqlite3.connect(db, timeout=10)
-        try:
-            conn.row_factory = sqlite3.Row
-            # ORDER BY direction is chosen from a bool into a fixed literal — never
-            # interpolate user input into SQL text.
-            order_clause = "ORDER BY recorded_at DESC" if desc else "ORDER BY recorded_at ASC"
-
-            if printer:
-                count_row = conn.execute("""
-                    SELECT COUNT(*) AS cnt FROM printer_history
-                    WHERE printer_id = ? AND recorded_at >= ? AND recorded_at <= ?
-                """, (printer, fr, to)).fetchone()
-                rows = conn.execute(
-                    "SELECT printer_id, label, state, recorded_at, job_name, "
-                    "progress, eta_sec, print_time, nozzle_temp, bed_temp "
-                    "FROM printer_history "
-                    "WHERE printer_id = ? AND recorded_at >= ? AND recorded_at <= ? "
-                    + order_clause + " LIMIT ? OFFSET ?",
-                    (printer, fr, to, limit, offset)).fetchall()
-            else:
-                count_row = conn.execute("""
-                    SELECT COUNT(*) AS cnt FROM printer_history
-                    WHERE recorded_at >= ? AND recorded_at <= ?
-                """, (fr, to)).fetchone()
-                rows = conn.execute(
-                    "SELECT printer_id, label, state, recorded_at, job_name, "
-                    "progress, eta_sec, print_time, nozzle_temp, bed_temp "
-                    "FROM printer_history "
-                    "WHERE recorded_at >= ? AND recorded_at <= ? "
-                    + order_clause + " LIMIT ? OFFSET ?",
-                    (fr, to, limit, offset)).fetchall()
-        finally:
-            conn.close()
-        total = count_row["cnt"]
-        labels = _current_labels()
-        out = []
-        for r in rows:
-            d = dict(r)
-            d["label"] = labels.get(d["printer_id"], d["label"])
-            out.append(d)
-        return {
-            "rows": out,
-            "has_more": (offset + limit) < total,
-            "total": total
-        }
+        payload = _query_timeline(_history_db_path(), fr, to, limit, offset,
+                                  printer=printer, desc=desc)
+        # json.dumps здесь, в threadpool-потоке sync-эндпоинта: дефолтный путь
+        # FastAPI гонит тысячи строк через jsonable_encoder уже на event loop
+        # и блокирует его — параллельные /api/printers проседали до секунд.
+        return Response(content=json.dumps(payload, ensure_ascii=False,
+                                           separators=(",", ":")),
+                        media_type="application/json")
 
     @app.get("/api/history/events")
     def get_events(fr: float, to: float = None,
@@ -472,6 +577,10 @@ def create_app(store: StateStore) -> FastAPI:
     from app.api.admin import router as admin_router
     app.include_router(auth_router)
     app.include_router(admin_router)
+    # GZip добавлен ПЕРЕД JWT (= внутренним слоем): аутентификация остаётся
+    # внешней, а JSON истории (~сотни КБ на страницу) сжимается в ~10 раз.
+    # compresslevel=6 — на Pi уровень 9 заметно дороже при ~том же размере.
+    app.add_middleware(GZipMiddleware, minimum_size=1024, compresslevel=6)
     app.add_middleware(JWTAuthMiddleware)
 
     return app

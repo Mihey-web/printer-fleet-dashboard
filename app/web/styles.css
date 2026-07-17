@@ -1786,6 +1786,52 @@
         gap: 6px;
       }
     }
+    @media (max-width: 640px) {
+      /* Компактная шапка: вкладки и чипы — по одной скроллируемой строке,
+         иначе кнопки складываются столбиком и шапка съедает весь первый экран */
+      .topbar {
+        gap: 6px;
+        padding: 2px 0 8px;
+      }
+      .view-tabs {
+        width: 100%;
+        flex-wrap: nowrap;
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+        scrollbar-width: none;
+        gap: 6px;
+      }
+      .view-tabs::-webkit-scrollbar { display: none; }
+      .view-tab {
+        flex: 0 0 auto;
+        padding: 8px 12px;
+        font-size: 0.7rem;
+      }
+      .topbar-side {
+        width: 100%;
+        flex-wrap: nowrap;
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+        scrollbar-width: none;
+        justify-content: flex-start;
+        gap: 6px;
+        margin-left: 0;
+      }
+      .topbar-side::-webkit-scrollbar { display: none; }
+      .status-chip {
+        flex: 0 0 auto;
+        min-height: 30px;
+        padding: 0 10px;
+        font-size: 0.68rem;
+      }
+      .status-chip strong,
+      .status-chip span:last-child { font-size: 0.72rem; }
+      /* Фильтр дат истории: пары «label+input» тянутся и переносятся,
+         вместо фиксированных 525px, вылезавших за 375px-экран */
+      .history-ctl-group { width: 100%; }
+      .history-dt-pair { flex: 1 1 220px; }
+      .history-dt { flex: 1 1 auto; width: 100%; }
+    }
     @media (prefers-reduced-motion: reduce) {
       *,
       *::before,
@@ -2129,7 +2175,8 @@
       justify-content: flex-start;
     }
     .history-range-btns { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
-    .history-ctl-group { display: flex; gap: 6px; align-items: center; }
+    .history-ctl-group { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+    .history-dt-pair { display: inline-flex; gap: 6px; align-items: center; min-width: 0; }
     .history-ctl-label { color: var(--text-muted); font-size: 0.7rem; white-space: nowrap; }
     .history-controls { display: flex; align-items: center; gap: 8px 16px; margin-bottom: 12px; flex-wrap: wrap; }
     [data-panel="history"] .time-btn {
@@ -2161,6 +2208,8 @@
       font-size: 0.72rem;
       font-family: "IBM Plex Mono", monospace;
       color-scheme: dark;
+      min-width: 0;
+      max-width: 100%;
     }
     [data-theme="light"] .history-dt { color-scheme: light; }
     #history-apply {
@@ -2252,6 +2301,11 @@
       /* --*-soft полупрозрачны в части тем — слоим поверх --bg-elev */
       background-color: var(--bg-elev);
       text-align: center;
+      min-width: 0;
+      max-width: 100%;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
     }
     .event-badge-printing { color: var(--info); background-image: linear-gradient(var(--info-soft), var(--info-soft)); }
     .event-badge-paused { color: var(--warn); background-image: linear-gradient(var(--warn-soft), var(--warn-soft)); }
@@ -2262,6 +2316,23 @@
     .event-desc { color: var(--text-dim); font-size: 0.78rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
     .event-job { color: var(--text); position: relative; }
     .event-err { color: var(--danger); }
+    /* ≤640px: четыре фиксированные колонки не влезают в ~311px контента —
+       время+принтер+бейдж в одну строку, описание задачи — второй строкой */
+    @media (max-width: 640px) {
+      .event-row {
+        grid-template-columns: auto minmax(0, 1fr) auto;
+        grid-template-areas:
+          "time printer badge"
+          "desc desc desc";
+        gap: 2px 8px;
+        align-items: center;
+      }
+      .event-time { grid-area: time; }
+      .event-printer { grid-area: printer; }
+      .event-badge { grid-area: badge; justify-self: end; }
+      .event-desc { grid-area: desc; }
+      .event-desc:empty { display: none; }
+    }
 
     .scroll-top-btn {
       position: fixed;
@@ -2298,6 +2369,12 @@
     }
 
     /* === Admin panel === */
+    /* Таблицы шире вьюпорта (на мобильных) скроллятся внутри обёртки,
+       а не распирают документ по горизонтали */
+    .adm-table-wrap {
+      overflow-x: auto;
+      -webkit-overflow-scrolling: touch;
+    }
     .adm-table {
       width: 100%;
       border-collapse: collapse;
@@ -2915,3 +2992,56 @@
       color: var(--text-muted);
       border: 1px solid var(--line);
     }
+
+    /* === AMS tab === */
+    .ams-toolbar { display:flex; gap:16px; align-items:center; margin:4px 0 18px; flex-wrap:wrap; }
+    .ams-range { display:flex; gap:4px; background:var(--bg-panel); border:1px solid var(--line);
+      border-radius:10px; padding:3px; }
+    .ams-range button { border:0; background:transparent; color:var(--text-muted);
+      padding:6px 13px; border-radius:7px; font-size:13px; cursor:pointer; }
+    .ams-range button.active { background:var(--bg-elev); color:var(--text); }
+    .ams-legend { display:flex; gap:14px; color:var(--text-muted); font-size:12px; align-items:center; flex-wrap:wrap; }
+    .ams-legend i { display:inline-block; width:10px; height:10px; border-radius:3px; margin-right:5px; vertical-align:-1px; }
+    .ams-legend i.z-ok { background:var(--ok); }
+    .ams-legend i.z-warn { background:var(--warn); }
+    .ams-legend i.z-bad { background:var(--danger); }
+    .ams-empty { color:var(--text-muted); padding:24px 4px; }
+
+    /* min(410px,100%): на узких экранах колонка ужимается до ширины контейнера,
+       иначе minmax(410px,…) распирает документ шире вьюпорта */
+    .ams-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(min(410px,100%),1fr)); gap:18px; }
+    .ams-card { background:linear-gradient(180deg,#26354899,#26354855);
+      border:1px solid var(--line); border-radius:16px; padding:16px 16px 14px; overflow:hidden; }
+    .ams-card.drying { border-color:#7a5c2e; }
+    .ams-card.bad { border-color:#7a2e2e; }
+    .ams-chead { display:flex; align-items:flex-start; gap:11px; }
+    .ams-spool { width:34px; height:34px; border-radius:9px; flex:none; display:grid; place-items:center;
+      background:var(--bg-elev); border:1px solid var(--line); font-size:17px; }
+    .ams-ctitle { flex:1; min-width:0; }
+    .ams-cname { font-weight:650; font-size:15px; display:flex; align-items:center; gap:7px; }
+    .ams-dot { width:8px; height:8px; border-radius:50%; }
+    .ams-dot.on { background:var(--ok); box-shadow:0 0 6px var(--ok); }
+    .ams-dot.off { background:var(--text-muted); }
+    .ams-csub { color:var(--text-muted); font-size:12px; margin-top:2px; }
+    .ams-badges { display:flex; gap:6px; flex-wrap:wrap; justify-content:flex-end; }
+    .ams-badge { font-size:12.5px; padding:4px 9px; border-radius:8px; font-weight:600; white-space:nowrap;
+      border:1px solid var(--line); background:var(--bg-elev); color:var(--text-dim); }
+    .ams-badge.ok { background:var(--ok-soft); border-color:#2e7a7a; color:var(--ok-11); }
+    .ams-badge.warn { background:var(--warn-soft); border-color:#7a5c2e; color:var(--warn-11); }
+    .ams-badge.bad { background:var(--danger-soft); border-color:#7a2e2e; color:var(--danger-11); }
+    .ams-slots { display:flex; gap:6px; margin:13px 0 4px; }
+    .ams-slot { flex:1; height:6px; border-radius:4px; background:#33475c; }
+    .ams-slot.empty { background:repeating-linear-gradient(45deg,#2d3f52,#2d3f52 4px,#263548 4px,#263548 8px); }
+    .ams-slot.active { outline:2px solid var(--info); outline-offset:1px; }
+    .ams-dry { margin-top:11px; display:flex; align-items:center; gap:9px;
+      background:var(--warn-soft); border:1px solid #7a5c2e; border-radius:10px; padding:8px 11px; }
+    .ams-dry .rem { margin-left:auto; font-weight:700; color:var(--warn-12); font-size:13px; }
+    .ams-dry .lbl { font-size:12.5px; color:var(--warn-11); }
+    .ams-gwrap { margin-top:12px; }
+    .ams-gtitle { display:flex; justify-content:space-between; align-items:baseline; margin-bottom:2px; }
+    .ams-gtitle .t { font-size:12px; color:var(--text-dim); font-weight:600; }
+    .ams-gtitle .mm { font-size:11px; color:var(--text-muted); }
+    .ams-chart { width:100%; display:block; height:88px; }
+    .ams-chart .axis { fill:var(--text-muted); font-size:9px; }
+    .ams-chart .gridline { stroke:var(--line); stroke-width:1; stroke-dasharray:2 3; opacity:.5; }
+    .ams-nodata { height:88px; display:grid; place-items:center; color:var(--text-muted); font-size:12px; }

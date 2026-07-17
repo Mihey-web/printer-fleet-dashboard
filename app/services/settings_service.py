@@ -29,6 +29,10 @@ DEFAULTS: Dict[str, Any] = {
     "telegram_update_interval": 2,
     "telegram_notify_on_finish": False,
     "telegram_finish_template": "✅ Печать завершена: {label}",
+    # Повторно слать уведомление о завершении, пока принтер стоит завершённым
+    # (печать не забрали / не запустили новую). Интервал — в минутах.
+    "telegram_notify_on_finish_repeat": True,
+    "telegram_finish_repeat_interval_min": 30,
     "telegram_notify_on_error": False,
     "telegram_error_template": "\U0001f534 Ошибка: {label}",
     "telegram_notify_on_paused": False,

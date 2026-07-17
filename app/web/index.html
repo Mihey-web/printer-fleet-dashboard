@@ -9,7 +9,7 @@
   <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
   <!-- favicon replaced inline below -->
     <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='7' fill='%231e293b'/><polygon points='16,3 29,12 29,24 16,30 3,24 3,12' fill='none' stroke='%2360a5fa' stroke-width='2.5'/><circle cx='16' cy='16' r='3' fill='%2360a5fa'/></svg>">
-    <link rel="stylesheet" href="/static/styles.css?v=61" />
+    <link rel="stylesheet" href="/static/styles.css?v=63" />
 
 </head>
 <body>
@@ -19,6 +19,7 @@
         <button type="button" class="view-tab active" data-view="fleet">Принтеры</button>
         <button type="button" class="view-tab" data-view="dashboard" title="Сводка по ферме: метрики, статистика, лог событий.">Сводка</button>
         <button type="button" class="view-tab" data-view="history">История</button>
+        <button type="button" class="view-tab" data-view="ams" title="Влажность, температура и сушка AMS">AMS</button>
         <button type="button" class="view-tab" data-view="forecast" id="forecastTab" title="Когда освободятся принтеры в ближайшие часы">Окно</button>
         <button type="button" class="view-tab" data-view="admin" id="adminTab" style="display: none;" title="Управление пользователями и журнал аудита">Администрирование</button>
       </nav>
@@ -185,10 +186,14 @@
             <div class="sort-dropdown event-printer-dropdown" id="historyPrinterDropdown" role="menu"></div>
           </div>
           <div class="history-ctl-group">
-            <span class="history-ctl-label">С</span>
-            <input type="datetime-local" id="history-from" class="history-dt">
-            <span class="history-ctl-label">По</span>
-            <input type="datetime-local" id="history-to" class="history-dt">
+            <span class="history-dt-pair">
+              <label class="history-ctl-label" for="history-from">С</label>
+              <input type="datetime-local" id="history-from" class="history-dt">
+            </span>
+            <span class="history-dt-pair">
+              <label class="history-ctl-label" for="history-to">По</label>
+              <input type="datetime-local" id="history-to" class="history-dt">
+            </span>
             <button type="button" id="history-apply">Применить</button>
           </div>
         </div>
@@ -223,6 +228,23 @@
         <div id="forecastNoEta" class="forecast-no-eta" style="display:none"></div>
       </section>
     </section>
+    <section class="view-panel" data-panel="ams">
+      <div class="ams-toolbar">
+        <div class="ams-range" id="amsRange">
+          <button type="button" data-h="6">6ч</button>
+          <button type="button" class="active" data-h="24">24ч</button>
+          <button type="button" data-h="168">7д</button>
+          <button type="button" data-h="720">30д</button>
+        </div>
+        <div class="ams-legend">
+          <span><i class="z-ok"></i>сухо ≤25%</span>
+          <span><i class="z-warn"></i>норма ≤40%</span>
+          <span><i class="z-bad"></i>влажно &gt;40%</span>
+        </div>
+      </div>
+      <div id="amsGrid" class="ams-grid"></div>
+      <div id="amsEmpty" class="ams-empty" style="display:none">Нет принтеров с AMS.</div>
+    </section>
     <section class="view-panel" data-panel="admin">
       <div class="apply-bar" id="printersApplyBar" style="display:none">
         <div class="apply-dot"></div>
@@ -241,10 +263,12 @@
           </div>
           <button type="button" id="addPrinterBtn" class="pill-btn">+ Добавить принтер</button>
         </div>
+        <div class="adm-table-wrap">
         <table class="adm-table" id="adminPrintersTable">
           <thead><tr><th class="sortable" data-sort="label">Название</th><th class="sortable" data-sort="kind">Тип</th><th class="sortable" data-sort="model">Модель</th><th class="sortable" data-sort="host">IP</th><th class="sortable" data-sort="serial">Серийный №</th><th class="sortable" data-sort="firmware">Прошивка</th><th>Access code</th><th class="adm-actions-col">Действия</th></tr></thead>
           <tbody></tbody>
         </table>
+        </div>
         <div class="prn-form" id="prnForm" style="display:none">
           <div class="prn-form-head">
             <strong id="prnFormTitle">Добавить принтер</strong>
@@ -256,14 +280,14 @@
             </div>
           </div>
           <div class="fgrid">
-            <div class="fld" data-kinds="bambu creality klipper mks"><label>Название</label><input type="text" id="prnLabel" /></div>
-            <div class="fld" data-kinds="bambu"><label>Модель</label><select id="prnModelBambu"><option value="X1">X1</option><option value="X1C">X1 Carbon</option><option value="X1E">X1E</option><option value="P1P">P1P</option><option value="P1S">P1S</option><option value="P2S">P2S</option><option value="A1">A1</option><option value="A1MINI">A1 mini</option><option value="H2D">H2D</option><option value="H2S">H2S</option></select></div>
-            <div class="fld" data-kinds="creality"><label>Модель</label><select id="prnModelCreality"><option value="k1max">K1 Max</option><option value="k1c">K1C</option><option value="ender5max">Ender-5 Max</option></select></div>
-            <div class="fld" data-kinds="klipper mks"><label>Модель (не обязательно)</label><input type="text" id="prnModelText" /></div>
-            <div class="fld" data-kinds="bambu creality klipper mks"><label>IP-адрес</label><input type="text" id="prnHost" class="mono" /></div>
-            <div class="fld" data-kinds="klipper mks"><label>Порт</label><input type="number" id="prnPort" class="mono" min="1" max="65535" /></div>
-            <div class="fld" data-kinds="bambu"><label>Access code</label><div class="withbtn"><input type="password" id="prnAccessCode" /><button type="button" class="eye" id="prnAccessEye">&#128065;</button></div><div class="fld-hint">Экран принтера → Настройки → Сеть</div></div>
-            <div class="fld" data-kinds="bambu"><label>Серийный номер</label><input type="text" id="prnSerial" class="mono" /></div>
+            <div class="fld" data-kinds="bambu creality klipper mks"><label for="prnLabel">Название</label><input type="text" id="prnLabel" /></div>
+            <div class="fld" data-kinds="bambu"><label for="prnModelBambu">Модель</label><select id="prnModelBambu"><option value="X1">X1</option><option value="X1C">X1 Carbon</option><option value="X1E">X1E</option><option value="P1P">P1P</option><option value="P1S">P1S</option><option value="P2S">P2S</option><option value="A1">A1</option><option value="A1MINI">A1 mini</option><option value="H2D">H2D</option><option value="H2S">H2S</option></select></div>
+            <div class="fld" data-kinds="creality"><label for="prnModelCreality">Модель</label><select id="prnModelCreality"><option value="k1max">K1 Max</option><option value="k1c">K1C</option><option value="ender5max">Ender-5 Max</option></select></div>
+            <div class="fld" data-kinds="klipper mks"><label for="prnModelText">Модель (не обязательно)</label><input type="text" id="prnModelText" /></div>
+            <div class="fld" data-kinds="bambu creality klipper mks"><label for="prnHost">IP-адрес</label><input type="text" id="prnHost" class="mono" /></div>
+            <div class="fld" data-kinds="klipper mks"><label for="prnPort">Порт</label><input type="number" id="prnPort" class="mono" min="1" max="65535" /></div>
+            <div class="fld" data-kinds="bambu"><label for="prnAccessCode">Access code</label><div class="withbtn"><input type="password" id="prnAccessCode" /><button type="button" class="eye" id="prnAccessEye">&#128065;</button></div><div class="fld-hint">Экран принтера → Настройки → Сеть</div></div>
+            <div class="fld" data-kinds="bambu"><label for="prnSerial">Серийный номер</label><input type="text" id="prnSerial" class="mono" /></div>
           </div>
           <div class="form-actions">
             <button type="button" class="pill-btn" id="prnSaveBtn">Сохранить</button>
@@ -279,14 +303,16 @@
             <p>Учётные записи и права доступа к панели.</p>
           </div>
         </div>
+        <div class="adm-table-wrap">
         <table class="adm-table" id="adminUsersTable">
           <thead><tr><th>ID</th><th>Логин</th><th>Роль</th><th>Создан</th><th>Последний вход</th><th class="adm-actions-col">Действия</th></tr></thead>
           <tbody></tbody>
         </table>
+        </div>
         <div class="adm-add">
-          <input type="text" id="newUsername" placeholder="Логин" />
-          <input type="password" id="newPassword" placeholder="Пароль (мин 8 символов)" />
-          <select id="newUserRole"><option value="viewer">Зритель</option><option value="admin">Админ</option></select>
+          <input type="text" id="newUsername" placeholder="Логин" aria-label="Логин нового пользователя" />
+          <input type="password" id="newPassword" placeholder="Пароль (мин 8 символов)" aria-label="Пароль нового пользователя" />
+          <select id="newUserRole" aria-label="Роль нового пользователя"><option value="viewer">Зритель</option><option value="admin">Админ</option></select>
           <button type="button" id="addUserBtn" class="pill-btn">Добавить</button>
         </div>
         <div class="adm-err" id="adminError"></div>
@@ -298,10 +324,12 @@
             <p>Входы, выходы и действия пользователей. Прокрутка подгружает старые записи.</p>
           </div>
         </div>
+        <div class="adm-table-wrap">
         <table class="adm-table" id="adminAuditTable">
           <thead><tr><th>Время</th><th>Пользователь</th><th>Действие</th><th>IP</th><th>User Agent</th></tr></thead>
           <tbody></tbody>
         </table>
+        </div>
         <div id="adminAuditSentinel"></div>
         <div id="adminAuditLoader" style="display:none;text-align:center;padding:12px;color:var(--text-dim)">Загрузка...</div>
       </section>
@@ -435,21 +463,31 @@
               <label class="toggle-switch"><input type="checkbox" id="tgNotifyFinish" /><span class="toggle-slider"></span></label>
               <strong>Завершение печати</strong>
             </div>
-            <input type="text" id="tgTplFinish" />
+            <input type="text" id="tgTplFinish" aria-label="Шаблон уведомления о завершении печати" />
+          </div>
+          <div class="tpl-row tpl-subrow">
+            <div class="tpl-left">
+              <label class="toggle-switch"><input type="checkbox" id="tgNotifyFinishRepeat" /><span class="toggle-slider"></span></label>
+              <span>Повторять, пока не забрали</span>
+            </div>
+            <div class="fld fld-narrow">
+              <input type="text" id="tgFinishRepeatInterval" inputmode="numeric" aria-label="Интервал повтора уведомления, минуты" />
+              <div class="fld-hint">Интервал повтора, мин</div>
+            </div>
           </div>
           <div class="tpl-row">
             <div class="tpl-left">
               <label class="toggle-switch"><input type="checkbox" id="tgNotifyError" /><span class="toggle-slider"></span></label>
               <strong>Ошибка принтера</strong>
             </div>
-            <input type="text" id="tgTplError" />
+            <input type="text" id="tgTplError" aria-label="Шаблон уведомления об ошибке принтера" />
           </div>
           <div class="tpl-row">
             <div class="tpl-left">
               <label class="toggle-switch"><input type="checkbox" id="tgNotifyPaused" /><span class="toggle-slider"></span></label>
               <strong>Пауза печати</strong>
             </div>
-            <input type="text" id="tgTplPaused" />
+            <input type="text" id="tgTplPaused" aria-label="Шаблон уведомления о паузе печати" />
           </div>
           <div class="fld-hint">В шаблоне доступно {label} — имя принтера. <span class="saved-flash" id="tgSavedFlash"><span class="sf-dot"></span>Сохранено</span></div>
           <div class="settings-error" id="tgError" style="display:none"></div>
@@ -464,12 +502,14 @@
           </div>
           <span class="admin-chip">админ</span>
         </div>
+        <div class="adm-table-wrap">
         <table class="adm-table" id="proxyTable">
           <thead><tr><th>Адрес</th><th>Статус</th><th>Задержка</th><th></th><th class="adm-actions-col">Действия</th></tr></thead>
           <tbody></tbody>
         </table>
+        </div>
         <div class="proxy-add-row">
-          <input type="text" id="proxyAddInput" placeholder="http://логин:пароль@хост:порт" autocomplete="off" />
+          <input type="text" id="proxyAddInput" placeholder="http://логин:пароль@хост:порт" autocomplete="off" aria-label="Адрес нового прокси" />
           <button type="button" class="pill-btn" id="proxyAddBtn">+ Добавить</button>
         </div>
         <div class="proxy-meta">
@@ -509,7 +549,7 @@
     </svg>
     <div class="app-toast" id="appToast"></div>
     <script src="/static/theme.js?v=2"></script>
-  <script src="/static/app.js?v=62"></script>
+  <script src="/static/app.js?v=67"></script>
 
   <button type="button" class="scroll-top-btn" id="scrollTopBtn" aria-label="Наверх" title="Вверх">↑</button>
 </body>

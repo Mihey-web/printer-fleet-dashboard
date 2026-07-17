@@ -274,9 +274,10 @@ def login(body: LoginRequest, request: Request, response: Response):
         audit.log(None, "login_fail", source_ip, user_agent)
         raise HTTPException(status_code=400, detail="Username and password required")
 
-    failed_count = audit.count_failed_attempts(source_ip)
-    failed_by_user = audit.count_failed_attempts_by_username(body.username)
-    if failed_count >= 5 or failed_by_user >= 10:
+    # Per-IP limit: blocks a single source outright (that's the attacker's OWN
+    # IP, so it self-throttles and can't be used to lock out a victim). Safe to
+    # enforce before verifying the password.
+    if audit.count_failed_attempts(source_ip) >= 5:
         audit.log(body.username or None, "rate_limit_block", source_ip, user_agent)
         raise HTTPException(status_code=429, detail="Too many login attempts. Try again later.")
 
@@ -286,7 +287,14 @@ def login(body: LoginRequest, request: Request, response: Response):
     candidate_hash = user.password_hash if user is not None else _dummy_hash()
     password_ok = verify_password(body.password, candidate_hash)
     if user is None or not password_ok:
+        # Wrong credentials. The cross-IP per-username lockout is applied ONLY on
+        # this failure path — never on a correct password — so a flood of failed
+        # attempts for 'admin' throttles guessing but can't lock out the real
+        # owner, who supplies the right password and skips this branch entirely.
         audit.log(body.username, "login_fail", source_ip, user_agent)
+        if audit.count_failed_attempts_by_username(body.username) >= 10:
+            audit.log(body.username or None, "rate_limit_block", source_ip, user_agent)
+            raise HTTPException(status_code=429, detail="Too many login attempts. Try again later.")
         raise HTTPException(status_code=401, detail="Invalid username or password")
 
     access = create_access_token(user.username, user.role, JWT_SECRET, JWT_ACCESS_EXPIRES)
@@ -314,6 +322,14 @@ def refresh_token(request: Request, response: Response,
     user = get_user_by_username(username)
     if user is None:
         raise HTTPException(status_code=401, detail="User not found")
+
+    # A role/password change bumps the user's tokens_valid_after watermark. A
+    # refresh token minted before that watermark must be rejected here too —
+    # otherwise a password reset only kills the ~15-min access token (checked in
+    # the middleware) while a stolen refresh token keeps minting new ones for up
+    # to 7 days. Checked before revoking so a rejected refresh doesn't consume it.
+    if not token_subject_active(username, payload.get("iat", 0)):
+        raise HTTPException(status_code=401, detail="Refresh token no longer valid")
 
     # Atomically claim the old refresh token. If the claim fails the token was
     # already used/revoked — reject. This both rotates the token and closes the

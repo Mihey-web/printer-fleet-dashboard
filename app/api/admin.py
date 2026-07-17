@@ -305,6 +305,7 @@ def _validate_settings(values: dict):
             raise HTTPException(status_code=400, detail=f"{key} must be an integer {lo}-{hi}")
 
     _int_in("telegram_update_interval", 1, 3600)
+    _int_in("telegram_finish_repeat_interval_min", 1, 1440)
     _int_in("proxy_check_interval", 30, 86400)
 
     if "telegram_chat_id" in values:
@@ -313,6 +314,7 @@ def _validate_settings(values: dict):
             raise HTTPException(status_code=400, detail="telegram_chat_id must be an integer or null")
 
     for key in ("telegram_enabled", "telegram_notify_on_finish",
+                "telegram_notify_on_finish_repeat",
                 "telegram_notify_on_error", "telegram_notify_on_paused"):
         if key in values and not isinstance(values[key], bool):
             raise HTTPException(status_code=400, detail=f"{key} must be a boolean")

@@ -6,6 +6,21 @@ import pytest
 from app.services import printer_commands
 
 
+def test_note_capability_transient_silence_keeps_prior_verdict(monkeypatch):
+    # A silent probe (None) must not wipe a known verdict, or the control buttons
+    # vanish until the next probe (~10 min).
+    from app.services import settings_service
+    monkeypatch.setattr(settings_service, "set_many", lambda d, **k: None)
+    printer_commands._capability.clear()
+    printer_commands._note_capability("p1", True, "local")
+    assert printer_commands.get_capability("p1") is True
+    printer_commands._note_capability("p1", None, None)      # transient silence
+    assert printer_commands.get_capability("p1") is True     # kept
+    printer_commands._note_capability("p1", False, "local")  # real verdict updates
+    assert printer_commands.get_capability("p1") is False
+    printer_commands._capability.clear()
+
+
 @pytest.fixture
 def cmd_env(monkeypatch):
     monkeypatch.setattr(printer_commands, "REPLY_TIMEOUT", 0.05)
