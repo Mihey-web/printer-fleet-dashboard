@@ -2686,6 +2686,16 @@
         return null;
       }
 
+      // Прошивки Bambu вида "01.02.00.00": посегментное числовое сравнение.
+      function fwCmp(a, b) {
+        var pa = String(a).split('.'), pb = String(b).split('.');
+        for (var i = 0; i < Math.max(pa.length, pb.length); i++) {
+          var na = parseInt(pa[i], 10) || 0, nb = parseInt(pb[i], 10) || 0;
+          if (na !== nb) return na < nb ? -1 : 1;
+        }
+        return 0;
+      }
+
       async function loadAdminPrinters() {
         var tbody = document.querySelector('#adminPrintersTable tbody');
         if (!tbody) return;
@@ -2698,6 +2708,20 @@
             var st = (cachedAllPrinters || []).find(function (s) { return String(s.id) === String(r.id); });
             r.firmware = st && st.firmware_version ? st.firmware_version : '';
             r.fw_update = st ? st.fw_update : null;
+          });
+          // new_version_state принтер сообщает только с доступом к облаку Bambu;
+          // в LAN/Developer Mode он молчит. Поэтому дополнительно сравниваем
+          // прошивки внутри парка: если одномодельный собрат уже на более новой
+          // версии — обновление точно существует.
+          var fwMaxByModel = {};
+          prnRows.forEach(function (r) {
+            if (r.kind !== 'bambu' || !r.firmware || !r.model) return;
+            var m = fwMaxByModel[r.model];
+            if (!m || fwCmp(r.firmware, m) > 0) fwMaxByModel[r.model] = r.firmware;
+          });
+          prnRows.forEach(function (r) {
+            if (r.kind !== 'bambu' || !r.firmware || !r.model) return;
+            if (fwCmp(r.firmware, fwMaxByModel[r.model]) < 0) r.fw_update = true;
           });
           renderAdminPrinters();
         } catch (e) { console.error('loadAdminPrinters', e); }

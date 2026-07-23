@@ -101,6 +101,27 @@ def test_bambu_printing_basic_fields_and_eta_minutes_to_seconds():
     assert s.job_name == "cube.gcode"
 
 
+def test_bambu_job_name_prefers_subtask_name_over_plate_gcode():
+    result = _bambu_result(
+        gcode_state="printing",
+        gcode_file="/data/Metadata/plate_1.gcode",
+        subtask_name="Крепление NVR v3",
+    )
+    s = normalize_bambu("bambu-1", "P1", result)
+    assert s.job_name == "Крепление NVR v3"
+
+
+def test_bambu_job_name_falls_back_to_gcode_file_when_no_subtask():
+    # SD-card reprints arrive without subtask_name — gcode_file is all we have.
+    result = _bambu_result(
+        gcode_state="printing",
+        gcode_file="plate_2.gcode",
+        subtask_name="",
+    )
+    s = normalize_bambu("bambu-1", "P1", result)
+    assert s.job_name == "plate_2.gcode"
+
+
 def test_bambu_progress_fallback_to_percent():
     result = _bambu_result(gcode_state="printing", percent=55)
     s = normalize_bambu("bambu-1", "P1", result)

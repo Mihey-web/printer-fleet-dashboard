@@ -118,9 +118,13 @@ def normalize_bambu(printer_id: str, label: str, result: Any, device_type: Optio
         reason = "fetch returned None" if result is None else "device object has no print_job (MQTT telemetry not received)"
         return PrinterStatus(id=printer_id, label=label, kind=PrinterKind.BAMBU, online=False, state=PrinterState.OFFLINE, last_update_ts=now_ts(), device_type=device_type, last_error=reason, grace_period_active=False, last_successful_fetch=0.0)
 
+    # Bambu Studio names the gcode inside every .3mf "Metadata/plate_N.gcode" and
+    # the printer reports that path in gcode_file, so it can't serve as a job name.
+    # The human-readable name arrives in subtask_name; gcode_file stays as the
+    # fallback for SD-card reprints, where subtask_name comes back empty.
     ext = {
-        "filename": getattr(pj, "gcode_file", None),
-        "message": getattr(pj, "subtask_name", None) or getattr(pj, "message", None),
+        "filename": getattr(pj, "subtask_name", None) or getattr(pj, "gcode_file", None),
+        "message": getattr(pj, "message", None),
     }
     raw_state = getattr(pj, "gcode_state", None)
     state = map_state(raw_state)
