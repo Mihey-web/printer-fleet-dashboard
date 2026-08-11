@@ -2312,9 +2312,11 @@
       function amsHumColorVar(cls) {
         return cls === 'bad' ? 'var(--danger)' : cls === 'warn' ? 'var(--warn)' : 'var(--ok)';
       }
+      // Геометрия viewBox графиков AMS — общая для отрисовки и ховера.
+      var AMS_GW = 378, AMS_GH = 88, AMS_GPL = 26, AMS_GPR = 8, AMS_GPT = 8, AMS_GPB = 16;
       // SVG-линия по точкам [{t,v}] в окне [fr,to]; bands=цветовые зоны влажности.
       function amsChart(points, fr, to, ymin, ymax, color, bands) {
-        var W = 378, H = 88, PL = 26, PR = 8, PT = 8, PB = 16;
+        var W = AMS_GW, H = AMS_GH, PL = AMS_GPL, PR = AMS_GPR, PT = AMS_GPT, PB = AMS_GPB;
         if (!points.length) return '<div class="ams-nodata">нет данных за период</div>';
         var iw = W - PL - PR, ih = H - PT - PB;
         function X(t) { return PL + iw * Math.max(0, Math.min(1, (t - fr) / (to - fr))); }
@@ -2350,6 +2352,56 @@
           '<path d="' + area + '" fill="url(#' + gid + ')"/>' +
           '<path d="' + line + '" fill="none" stroke="' + color + '" stroke-width="1.6" stroke-linejoin="round"/>' +
           yl + xl + '</svg>';
+      }
+      function amsTipTime(t) {
+        var d = new Date(t * 1000);
+        var s = pad2(d.getHours()) + ':' + pad2(d.getMinutes());
+        return amsHours > 24 ? pad2(d.getDate()) + '.' + pad2(d.getMonth() + 1) + ' ' + s : s;
+      }
+      // Ховер по графику: вертикальная линия, маркер ближайшей точки и тултип «время · значение».
+      function amsAttachHover(box, points, fr, to, ymin, ymax, color, suf) {
+        var svg = box.querySelector('svg.ams-chart');
+        if (!svg || !points.length) return;
+        box.classList.add('ams-gbox');
+        var iw = AMS_GW - AMS_GPL - AMS_GPR, ih = AMS_GH - AMS_GPT - AMS_GPB;
+        var pts = points.map(function (p) {
+          return {
+            x: AMS_GPL + iw * Math.max(0, Math.min(1, (p.t - fr) / (to - fr))),
+            y: AMS_GPT + ih * (1 - (p.v - ymin) / (ymax - ymin)),
+            t: p.t, v: p.v
+          };
+        });
+        var line = document.createElement('div'); line.className = 'ams-hline';
+        var dot = document.createElement('div'); dot.className = 'ams-hdot';
+        var tip = document.createElement('div'); tip.className = 'ams-htip';
+        line.style.top = (AMS_GPT / AMS_GH * 100) + '%';
+        line.style.height = (ih / AMS_GH * 100) + '%';
+        dot.style.background = color;
+        box.appendChild(line); box.appendChild(dot); box.appendChild(tip);
+        function hide() {
+          line.style.display = 'none'; dot.style.display = 'none'; tip.style.display = 'none';
+        }
+        hide();
+        function move(e) {
+          var rect = svg.getBoundingClientRect();
+          if (!rect.width) return;
+          var vx = (e.clientX - rect.left) / rect.width * AMS_GW;
+          var best = pts[0];
+          for (var i = 1; i < pts.length; i++) {
+            if (Math.abs(pts[i].x - vx) < Math.abs(best.x - vx)) best = pts[i];
+          }
+          var xp = best.x / AMS_GW * 100;
+          var yp = Math.max(0, Math.min(1, best.y / AMS_GH)) * 100;
+          line.style.left = xp + '%'; line.style.display = '';
+          dot.style.left = xp + '%'; dot.style.top = yp + '%'; dot.style.display = '';
+          tip.textContent = amsTipTime(best.t) + ' · ' + (Math.round(best.v * 10) / 10) + suf;
+          tip.style.left = xp + '%';
+          tip.style.transform = xp < 18 ? 'translateX(0)' : xp > 82 ? 'translateX(-100%)' : 'translateX(-50%)';
+          tip.style.display = '';
+        }
+        box.addEventListener('pointermove', move);
+        box.addEventListener('pointerdown', move);
+        box.addEventListener('pointerleave', hide);
       }
       function amsCardShell(u) {
         var cls = 'ams-card' + (u.drying ? ' drying' : '') +
@@ -2409,6 +2461,9 @@
           ? amsChart(humPts, fr, to, 10, 50, amsHumColorVar(hcls), true)
           : amsChart(humPts, fr, to, 0, 5, 'var(--ok)', false);
         tempBox.innerHTML = amsChart(tempPts, fr, to, 20, 60, 'var(--info)', false);
+        if (usePct) amsAttachHover(humBox, humPts, fr, to, 10, 50, amsHumColorVar(hcls), '%');
+        else amsAttachHover(humBox, humPts, fr, to, 0, 5, 'var(--ok)', '/5');
+        amsAttachHover(tempBox, tempPts, fr, to, 20, 60, 'var(--info)', '°');
         if (mm && humPts.length) {
           var vals = humPts.map(function (p) { return p.v; });
           var suf = usePct ? '%' : '';
