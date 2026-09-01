@@ -27,8 +27,9 @@ temperatures, AMS slots, and Wi-Fi signal. (Screenshot uses a synthetic demo fle
   summaries backed by SQLite.
 - **Telegram notifications** — configurable alerts on finish / pause / error,
   with an optional outbound proxy pool, all editable from the UI.
-- **Remote control** — pause/resume/stop and temperature control for supported
-  models (capability-probed per firmware).
+- **Remote control** — pause/resume/stop on Bambu and Creality; temperature, fan,
+  and speed control on Bambu. Bambu firmware is capability-probed, so controls
+  only appear where the printer actually accepts them.
 - **Auth & roles** — JWT cookie sessions, `admin` and `viewer` roles, login rate
   limiting, refresh-token rotation, and an audit log.
 - **Fleet managed from the UI** — add, edit, and remove printers in the admin

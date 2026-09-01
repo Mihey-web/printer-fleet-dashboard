@@ -1,4 +1,9 @@
-"""Команды принтерам Bambu: свет, пауза/продолжить/стоп, скорость, обдув и т.п.
+"""Команды принтерам: свет, пауза/продолжить/стоп, скорость, обдув и т.п.
+
+Поддерживаются два канала (см. SUPPORTED_ACTIONS):
+  · Bambu — локальный MQTT, полный набор команд, с проверкой подписи прошивкой;
+  · Creality — WS :9999 метод "set", только pause/resume/stop, без подписи.
+Ниже — про Bambu-канал, он сложнее.
 
 Канал — локальный MQTT через уже подключённый клиент коллектора (свежую
 TLS-сессию X1C обрывает лимитом подключений, поэтому новый клиент не
@@ -37,6 +42,16 @@ _local_awaited: Dict[str, Dict[str, Any]] = {}
 # printer_id -> {"print_cmds": bool|None, "via": "cloud"|"local"|None, "ts": float}
 _cap_lock = threading.Lock()
 _capability: Dict[str, Dict[str, Any]] = {}
+
+# Какие действия принимает каждый тип принтера. None — полный набор Bambu
+# (см. _build_payload). У Creality канал — WS :9999 с методом "set", в нём есть
+# только управление печатью: ни света, ни скорости, ни вентиляторов, ни AMS.
+CREALITY_ACTIONS = ("pause", "resume", "stop")
+SUPPORTED_ACTIONS: Dict[str, Optional[tuple]] = {
+    "bambu": None,
+    "creality": CREALITY_ACTIONS,
+}
+KIND_TITLES = {"bambu": "Bambu", "creality": "Creality"}
 
 
 def set_store(store) -> None:
@@ -247,6 +262,28 @@ def _send_local(printer_id: str, payload: Dict[str, Any]) -> Dict[str, Any]:
             "replied": got}
 
 
+def _send_creality(printer_id: str, action: str) -> Dict[str, Any]:
+    """Creality: команда уходит в живую WS-сессию коллектора (метод "set" на :9999).
+
+    Подписи, как у Bambu, здесь нет — прошивка принимает pause/resume/stop без
+    проверок, поэтому зонд капабилити не нужен. Подтверждения на команду
+    прошивка тоже не шлёт: факт паузы видно только по смене state в телеметрии,
+    которую и так забирает poll-цикл.
+    """
+    collector = _store.get_collector(printer_id) if _store is not None else None
+    if collector is None or not hasattr(collector, "send_command"):
+        return {"success": False, "detail": "коллектор принтера не найден"}
+    try:
+        r = collector.send_command(action)
+    except Exception as e:
+        logger.error("[commands] %s creality %s failed", printer_id, action, exc_info=True)
+        return {"success": False, "detail": str(e)}
+    if not isinstance(r, dict) or not r.get("success"):
+        detail = (r or {}).get("detail") if isinstance(r, dict) else None
+        return {"success": False, "detail": detail or "принтер не принял команду"}
+    return {"success": True, "detail": "отправлено (без подтверждения)"}
+
+
 def _persist_capabilities() -> None:
     """Сохранить известные (не None) вердикты в settings, чтобы они пережили
     рестарт. Никакой сбой персиста не должен ронять телеметрию/команды."""
@@ -298,13 +335,34 @@ def get_capability(printer_id: str) -> Optional[bool]:
         return (_capability.get(printer_id) or {}).get("print_cmds")
 
 
+def capability_for(printer_id: str, kind: Optional[str], online: bool) -> Optional[bool]:
+    """print_cmds для /api/printers — по нему фронт решает, рисовать ли кнопки.
+
+    Bambu — вердикт зонда (прошивка может блокировать print-класс). Creality —
+    подписи нет, зондировать нечего: канал доступен ровно пока жива WS-сессия.
+    Остальные типы команд не поддерживают вовсе.
+    """
+    if kind == "bambu":
+        return get_capability(printer_id)
+    if kind == "creality":
+        return bool(online)
+    return None
+
+
 def send(printer_id: str, action: str, params: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     """Отправить команду принтеру локально; ответ принтера — вердикт."""
     from app.services import printer_registry
 
     prn = printer_registry.get_printer(printer_id)
-    if prn is None or prn.get("kind") != "bambu":
-        return {"success": False, "detail": "Команды поддерживаются только для Bambu-принтеров"}
+    kind = (prn or {}).get("kind")
+    if prn is None or kind not in SUPPORTED_ACTIONS:
+        return {"success": False, "detail": "Команды поддерживаются только для Bambu и Creality"}
+    allowed = SUPPORTED_ACTIONS[kind]
+    if allowed is not None and action not in allowed:
+        return {"success": False,
+                "detail": "%s не принимает команду «%s»" % (KIND_TITLES.get(kind, kind), action)}
+    if kind == "creality":
+        return _send_creality(printer_id, action)
     try:
         payload = _build_payload(action, params or {})
     except ValueError as e:

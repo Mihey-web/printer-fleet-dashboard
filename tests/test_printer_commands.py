@@ -158,9 +158,8 @@ def test_speed_confirmed_and_marks_capability(cmd_env, monkeypatch):
     assert r["success"] and printer_commands.get_capability("p1") is True
 
 
-def test_send_rejects_non_bambu(cmd_env, monkeypatch):
-    monkeypatch.setattr("app.services.printer_registry.get_printer",
-                        lambda pid: {"id": pid, "kind": "creality"})
+def test_send_rejects_unknown_printer(cmd_env, monkeypatch):
+    monkeypatch.setattr("app.services.printer_registry.get_printer", lambda pid: None)
     r = printer_commands.send("p1", "light_on")
     assert not r["success"]
 
@@ -243,3 +242,102 @@ def test_capability_persists_and_reloads(monkeypatch):
     assert printer_commands.get_capability("bambu-6") is True
     assert printer_commands.get_capability("bambu-7") is None
     printer_commands._capability.clear()
+
+
+class _CrealityStore:
+    """Стор с Creality-коллектором: пишет вызовы send_command в calls."""
+
+    def __init__(self, reply=None, boom=None):
+        self.calls = []
+        outer = self
+
+        class _Collector:
+            def send_command(self, command, param=None):
+                outer.calls.append((command, param))
+                if boom is not None:
+                    raise boom
+                return reply if reply is not None else {"success": True, "detail": "Command sent"}
+
+        self._c = _Collector()
+
+    def get_collector(self, pid):
+        return self._c
+
+
+def _creality_registry(monkeypatch):
+    monkeypatch.setattr("app.services.printer_registry.get_printer",
+                        lambda pid: {"id": pid, "kind": "creality"})
+
+
+def test_send_creality_pause_goes_to_collector(cmd_env, monkeypatch):
+    _creality_registry(monkeypatch)
+    store = _CrealityStore()
+    printer_commands.set_store(store)
+    r = printer_commands.send("p1", "pause")
+    assert r["success"]
+    assert store.calls == [("pause", None)]
+
+
+def test_send_creality_resume_and_stop(cmd_env, monkeypatch):
+    _creality_registry(monkeypatch)
+    store = _CrealityStore()
+    printer_commands.set_store(store)
+    assert printer_commands.send("p1", "resume")["success"]
+    assert printer_commands.send("p1", "stop")["success"]
+    assert store.calls == [("resume", None), ("stop", None)]
+
+
+def test_send_creality_rejects_bambu_only_action(cmd_env, monkeypatch):
+    # Канал Creality ("set" на WS :9999) умеет только управление печатью —
+    # свет/скорость/AMS туда не пробросить, отклоняем до отправки.
+    _creality_registry(monkeypatch)
+    store = _CrealityStore()
+    printer_commands.set_store(store)
+    for action in ("light_on", "speed", "ams_load", "cooldown"):
+        r = printer_commands.send("p1", action, {"level": 2, "slot": 0})
+        assert not r["success"] and "Creality" in r["detail"]
+    assert store.calls == []
+
+
+def test_send_creality_client_failure_surfaces_detail(cmd_env, monkeypatch):
+    _creality_registry(monkeypatch)
+    printer_commands.set_store(_CrealityStore(reply={"success": False, "detail": "Not connected"}))
+    r = printer_commands.send("p1", "pause")
+    assert not r["success"] and r["detail"] == "Not connected"
+
+
+def test_send_creality_exception_does_not_escape(cmd_env, monkeypatch):
+    _creality_registry(monkeypatch)
+    printer_commands.set_store(_CrealityStore(boom=RuntimeError("socket dead")))
+    r = printer_commands.send("p1", "pause")
+    assert not r["success"] and "socket dead" in r["detail"]
+
+
+def test_send_creality_no_collector(cmd_env, monkeypatch):
+    _creality_registry(monkeypatch)
+    printer_commands.set_store(None)
+    r = printer_commands.send("p1", "pause")
+    assert not r["success"] and "коллектор" in r["detail"]
+
+
+def test_send_rejects_unsupported_kind(cmd_env, monkeypatch):
+    # klipper/mks канал команд ещё не реализован — отказ, а не тихий успех.
+    for kind in ("klipper", "mks"):
+        monkeypatch.setattr("app.services.printer_registry.get_printer",
+                            lambda pid, k=kind: {"id": pid, "kind": k})
+        r = printer_commands.send("p1", "pause")
+        assert not r["success"]
+
+
+def test_capability_for_by_kind(cmd_env, monkeypatch):
+    from app.services import settings_service
+    monkeypatch.setattr(settings_service, "set_many", lambda d, **k: None)
+    # Creality: подписи нет, зондировать нечего — канал жив, пока принтер онлайн.
+    assert printer_commands.capability_for("c1", "creality", True) is True
+    assert printer_commands.capability_for("c1", "creality", False) is False
+    # Bambu: только вердикт зонда.
+    assert printer_commands.capability_for("b1", "bambu", True) is None
+    printer_commands._note_capability("b1", True, "local")
+    assert printer_commands.capability_for("b1", "bambu", True) is True
+    # Остальные типы команд не поддерживают.
+    assert printer_commands.capability_for("k1", "klipper", True) is None

@@ -245,3 +245,30 @@ def test_bambu_send_command_publish_error_keeps_connected():
     r = c.send_command("gcode_line", "G28")
     assert r["success"] is False
     assert c.connected is True
+
+
+def test_creality_numeric_state_5_is_paused():
+    # Ender 5 Max сообщает паузу кодом 5 (проверено вживую на E5). Раньше он
+    # проваливался в дефолт 'idle', normalizer промоутил idle обратно в
+    # 'printing' — и пауза была не видна на карточке вообще.
+    c = CrealityK1Client("host", "E5")
+    c.on_message(None, '{"state": 5, "printLeftTime": 16352}')
+    c.connected = True
+    assert c.get_data()["state"] == "paused"
+
+
+def test_creality_numeric_state_known_codes():
+    c = CrealityK1Client("host", "E5")
+    c.connected = True
+    for code, want in ((0, "idle"), (1, "printing"), (2, "paused"), (3, "finish")):
+        c.on_message(None, '{"state": %d}' % code)
+        assert c.get_data()["state"] == want
+
+
+def test_creality_unknown_numeric_state_is_not_idle():
+    # Неизвестный код не должен маскироваться под 'idle' — иначе следующая
+    # незнакомая пауза снова станет невидимой.
+    c = CrealityK1Client("host", "E5")
+    c.on_message(None, '{"state": 42}')
+    c.connected = True
+    assert c.get_data()["state"] == "unknown"

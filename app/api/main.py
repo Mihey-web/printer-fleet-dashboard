@@ -338,10 +338,12 @@ def create_app(store: StateStore) -> FastAPI:
             # переименование видно на карточках и в браузерных уведомлениях
             # (фронт шлёт p.label) сразу, без ожидания рестарта.
             d["label"] = labels.get(d["id"], d["label"])
-            if d.get("kind") == "bambu":
-                # True/False/None: принимает ли прошивка print-класс команд
-                # (пауза/стоп/сушка) — фронт прячет кнопки при False
-                d["print_cmds"] = printer_commands.get_capability(d["id"])
+            # True/False/None: доступно ли управление печатью. У Bambu это
+            # вердикт зонда (прошивка может блокировать print-класс), у Creality
+            # — просто живая WS-сессия. Фронт прячет кнопки на всём, кроме True.
+            cap = printer_commands.capability_for(d["id"], d.get("kind"), d.get("online"))
+            if cap is not None or d.get("kind") == "bambu":
+                d["print_cmds"] = cap
             rows.append(d)
         return rows
 

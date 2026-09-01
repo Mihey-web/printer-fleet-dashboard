@@ -1048,10 +1048,14 @@
         var speedMode = p.feedrate_pct == null || p.feedrate_pct <= 0 ? null
           : p.feedrate_pct < 100 ? "slow" : p.feedrate_pct > 124 ? "turbo" : p.feedrate_pct > 100 ? "fast" : "norm";
         var speedIcon = speedMode === "slow" ? ' \u2193' : speedMode === "turbo" ? ' \uD83D\uDE80' : speedMode === "fast" ? ' \u26A1' : '';
-        // print_cmds === true — зонд ПОДТВЕРДИЛ, что прошивка принимает print-класс.
-        // null (ещё не проверено) и false — не даём редактировать: иначе на 2S/заблок.
-        // прошивках чипы кликаются, а команда потом отклоняется с ошибкой.
-        var canEdit = isAdmin() && p.kind === "bambu" && !offlineFlag && p.print_cmds === true;
+        // print_cmds === true — управление печатью доступно (у Bambu это вердикт
+        // зонда, у Creality — живая WS-сессия). null (ещё не проверено) и false —
+        // кнопок нет: иначе на 2S/заблок. прошивках они кликаются, а команда
+        // потом отклоняется с ошибкой.
+        var canControl = isAdmin() && !offlineFlag && p.print_cmds === true;
+        // Правка температур/скорости/вентиляторов — только Bambu: канал Creality
+        // (WS "set") умеет ровно pause/resume/stop, остальное туда не пробросить.
+        var canEdit = canControl && p.kind === "bambu";
         var speedEdit = canEdit ? ' pc-editable" data-edit="speed" data-cur="' + (p.feedrate_pct || 100) : '';
         var chips = [
           tempChip("nozzle", "\u0421\u043E\u043F\u043B\u043E", p.nozzle_temp, p.target_nozzle_temp, canEdit),
@@ -1061,11 +1065,11 @@
           speedMode ? '<span class="pc-chip pc-speed-' + speedMode + speedEdit + '" data-tip="\u0421\u043A\u043E\u0440\u043E\u0441\u0442\u044C \u043F\u0435\u0447\u0430\u0442\u0438">' + icon("gauge") + p.feedrate_pct + '%' + speedIcon + '</span>' : "",
         ].filter(Boolean).join("");
 
-        // Панель управления рендерится ТОЛЬКО когда зонд подтвердил приём
-        // print-класса (=== true). null/false — панели нет вовсе (не пустой блок),
-        // чтобы карточка не росла и не предлагала команды, которые упадут на 2S.
+        // Панель управления рендерится ТОЛЬКО при print_cmds === true.
+        // null/false — панели нет вовсе (не пустой блок), чтобы карточка не росла
+        // и не предлагала команды, которые упадут на 2S.
         var controls = "";
-        if (isAdmin() && p.kind === "bambu" && !offlineFlag && p.print_cmds === true) {
+        if (canControl) {
           var printing = p.state === "printing";
           var pausedSt = p.state === "paused";
           var printBtns =
@@ -1073,7 +1077,10 @@
               ? '<button type="button" class="pc-ctl" data-cmd="resume" data-tip="Продолжить">▶</button>'
               : '<button type="button" class="pc-ctl" data-cmd="pause" data-tip="Пауза"' + (printing ? "" : " disabled") + '>⏸</button>') +
             '<button type="button" class="pc-ctl pc-ctl-danger" data-cmd="stop" data-tip="Стоп"' + (printing || pausedSt ? "" : " disabled") + '>⏹</button>' +
-            '<button type="button" class="pc-ctl" data-cmd="svc" data-tip="Сервис">' + icon("gear") + '</button>';
+            // «Сервис» — сушка, свет, преднагрев, выброс: всё Bambu-only.
+            (p.kind === "bambu"
+              ? '<button type="button" class="pc-ctl" data-cmd="svc" data-tip="Сервис">' + icon("gear") + '</button>'
+              : "");
           controls = '<div class="pc-controls">' + printBtns + '</div>';
         }
 

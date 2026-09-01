@@ -7,6 +7,13 @@ import time
 
 logger = logging.getLogger(__name__)
 
+# Числовой `state` из WS-телеметрии Creality. K1-прошивки отдают паузу как 2,
+# Ender 5 Max — как 5 (проверено вживую: pause -> 5, resume -> 0/1).
+# Неизвестный код НЕЛЬЗЯ схлопывать в 'idle': normalizer промоутит idle обратно
+# в 'printing' по любому признаку активности, и реальная пауза становится
+# невидимой на карточке. 'unknown' проходит ту же промоцию, но паузу не прячет.
+STATE_CODES = {0: 'idle', 1: 'printing', 2: 'paused', 3: 'finish', 5: 'paused'}
+
 
 class CrealityK1Client:
     """Simple WebSocket client for Creality K1/K1 Max"""
@@ -121,7 +128,7 @@ class CrealityK1Client:
                 elif 'state' in data:
                     st = data['state']
                     if isinstance(st, int):
-                        self.data['state'] = {0: 'idle', 1: 'printing', 2: 'paused', 3: 'finish'}.get(st, 'idle')
+                        self.data['state'] = STATE_CODES.get(st, 'unknown')
                     else:
                         self.data['state'] = str(st).lower()
 
