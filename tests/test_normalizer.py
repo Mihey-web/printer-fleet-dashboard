@@ -515,3 +515,63 @@ def test_ws_new_print_start_with_stale_layers_not_finished():
             "total_layers": 250, "remaining_time": 0}
     s = normalize_ws_dict("creality-1", "K1", PrinterKind.CREALITY, data)
     assert s.state == PrinterState.PRINTING
+
+
+# --- H2S: активный подогрев камеры -------------------------------------------
+
+def test_h2s_ctc_temp_is_packed_target_and_current():
+    """H2S пакует device.ctc.info.temp как (цель << 16) | текущая.
+
+    Проверено live на H3: при нагреве камеры до 65° приходит 4259903 = (65, 63),
+    после `M141 S0` — просто 63 (цель 0). Та же упаковка у device.bed.info.temp
+    (4587590 = 70/70 при плоских bed_temper 70/70) и у airduct range 6553600 =
+    (100, 0), поэтому раньше значение с включённым нагревом отсеивалось
+    фильтром 0 < t < 200 и камера показывала протухшее число."""
+    import app.collectors.bambu_collector  # noqa: F401 — применяет монкипатч
+    from pybambu import models as pbm
+
+    t = pbm.Temperature()
+    t.print_update({"device": {"ctc": {"info": {"temp": 4259903}, "state": 2}}})
+    assert t.chamber_temp == 63
+    assert t.target_chamber_temp == 65
+
+
+def test_h2s_ctc_heater_off_keeps_plain_current_temp():
+    import app.collectors.bambu_collector  # noqa: F401
+    from pybambu import models as pbm
+
+    t = pbm.Temperature()
+    t.print_update({"device": {"ctc": {"info": {"temp": 38}, "state": 0}}})
+    assert t.chamber_temp == 38
+    assert t.target_chamber_temp == 0
+
+
+def test_ctc_out_of_range_current_is_ignored():
+    import app.collectors.bambu_collector  # noqa: F401
+    from pybambu import models as pbm
+
+    t = pbm.Temperature()
+    t.print_update({"device": {"ctc": {"info": {"temp": (65 << 16) | 4095}}}})
+    assert t.chamber_temp == 0                                # мусор не пишем
+    assert getattr(t, "target_chamber_temp", None) is None
+
+
+def test_bambu_target_chamber_temp_surfaced():
+    temp = SimpleNamespace(nozzle_temp=63.0, bed_temp=100.0, chamber_temp=63.0,
+                           target_nozzle_temp=0.0, target_bed_temp=100.0,
+                           target_chamber_temp=65)
+    result = SimpleNamespace(print_job=SimpleNamespace(gcode_state="FAILED"),
+                             temperature=temp)
+    s = normalize_bambu("p-h3", "H3", result, device_type="H2S")
+    assert s.chamber_temp == 63.0
+    assert s.target_chamber_temp == 65.0
+
+
+def test_bambu_chamber_target_zero_becomes_none():
+    # У P2S/X1C активного подогрева нет — цель всегда 0, стрелку рисовать нечем.
+    temp = SimpleNamespace(chamber_temp=47.0, target_chamber_temp=0)
+    result = SimpleNamespace(print_job=SimpleNamespace(gcode_state="RUNNING"),
+                             temperature=temp)
+    s = normalize_bambu("bambu-9", "P4", result, device_type="P2S")
+    assert s.chamber_temp == 47.0
+    assert s.target_chamber_temp is None

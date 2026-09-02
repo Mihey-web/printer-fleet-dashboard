@@ -37,6 +37,7 @@ class PrinterStatus:
     chamber_temp: Optional[float] = None
     target_nozzle_temp: Optional[float] = None
     target_bed_temp: Optional[float] = None
+    target_chamber_temp: Optional[float] = None
     current_layer: Optional[int] = None
     total_layers: Optional[int] = None
     wifi_signal: Optional[int] = None

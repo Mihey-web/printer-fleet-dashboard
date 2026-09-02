@@ -35,9 +35,10 @@ def cmd_env(monkeypatch):
     printer_commands.set_store(None)
 
 
-def _bambu_registry(monkeypatch):
+def _bambu_registry(monkeypatch, model=None):
     monkeypatch.setattr("app.services.printer_registry.get_printer",
-                        lambda pid: {"id": pid, "kind": "bambu", "serial": "SN1"})
+                        lambda pid: {"id": pid, "kind": "bambu", "serial": "SN1",
+                                     "model": model})
 
 
 class _Store:
@@ -341,3 +342,46 @@ def test_capability_for_by_kind(cmd_env, monkeypatch):
     assert printer_commands.capability_for("b1", "bambu", True) is True
     # Остальные типы команд не поддерживают.
     assert printer_commands.capability_for("k1", "klipper", True) is None
+
+
+# --- Камера H2S: M141 --------------------------------------------------------
+
+def test_build_chamber_sets_m141():
+    assert printer_commands.build_chamber(55)["print"]["param"] == "M141 S55\n"
+    assert printer_commands.build_chamber(0)["print"]["param"] == "M141 S0\n"
+
+
+def test_chamber_action_requires_temp_in_range():
+    with pytest.raises(ValueError):
+        printer_commands._build_payload("chamber", {})
+    with pytest.raises(ValueError):
+        printer_commands._build_payload("chamber", {"temp": printer_commands.CHAMBER_MAX + 1})
+    with pytest.raises(ValueError):
+        printer_commands._build_payload("chamber", {"temp": -1})
+    p = printer_commands._build_payload("chamber", {"temp": printer_commands.CHAMBER_MAX})
+    assert p["print"]["param"] == "M141 S65\n"
+
+
+def test_has_chamber_heater_only_h2_series():
+    assert printer_commands.has_chamber_heater("H2S")
+    assert printer_commands.has_chamber_heater("h2d")
+    assert not printer_commands.has_chamber_heater("P2S")
+    assert not printer_commands.has_chamber_heater("X1C")
+    assert not printer_commands.has_chamber_heater(None)
+
+
+def test_send_chamber_rejected_without_heater(cmd_env, monkeypatch):
+    _bambu_registry(monkeypatch, model="P2S")
+    printer_commands.set_store(_Store(_replying("success")))
+    r = printer_commands.send("p1", "chamber", {"temp": 50})
+    assert not r["success"] and "H2" in r["detail"]
+
+
+def test_send_chamber_on_h2s_publishes_m141(cmd_env, monkeypatch):
+    _bambu_registry(monkeypatch, model="H2S")
+    published = []
+    printer_commands.set_store(_Store(lambda payload: published.append(payload) or True))
+    r = printer_commands.send("p1", "chamber", {"temp": 60})
+    assert r["success"]
+    assert published[0]["print"]["command"] == "gcode_line"
+    assert published[0]["print"]["param"] == "M141 S60\n"

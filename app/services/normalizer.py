@@ -135,6 +135,12 @@ def normalize_bambu(printer_id: str, label: str, result: Any, device_type: Optio
     chamber_temp = as_float(getattr(temp_obj, "chamber_temp", None)) if temp_obj else None
     if chamber_temp is not None and chamber_temp <= 0:
         chamber_temp = None
+    # Цель камеры есть только у моделей с активным подогревом (H2-серия); её
+    # распаковывает монкипатч ctc в bambu_collector. 0 = нагрев выключен —
+    # отдаём None, чтобы карточка не рисовала стрелку «→0°».
+    target_chamber_temp = as_float(getattr(temp_obj, "target_chamber_temp", None)) if temp_obj else None
+    if target_chamber_temp is not None and target_chamber_temp <= 0:
+        target_chamber_temp = None
     target_nozzle_temp = as_float(getattr(temp_obj, "target_nozzle_temp", None)) if temp_obj else None
     target_bed_temp = as_float(getattr(temp_obj, "target_bed_temp", None)) if temp_obj else None
 
@@ -304,6 +310,7 @@ def normalize_bambu(printer_id: str, label: str, result: Any, device_type: Optio
         nozzle_temp=nozzle_temp,
         bed_temp=bed_temp,
         chamber_temp=chamber_temp,
+        target_chamber_temp=target_chamber_temp,
         target_nozzle_temp=target_nozzle_temp,
         target_bed_temp=target_bed_temp,
         current_layer=current_layer,

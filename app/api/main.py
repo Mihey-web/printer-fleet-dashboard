@@ -344,6 +344,10 @@ def create_app(store: StateStore) -> FastAPI:
             cap = printer_commands.capability_for(d["id"], d.get("kind"), d.get("online"))
             if cap is not None or d.get("kind") == "bambu":
                 d["print_cmds"] = cap
+            # Активный подогрев камеры (M141) — только H2-серия; на остальных
+            # моделях чип камеры остаётся некликабельным показометром.
+            if printer_commands.has_chamber_heater(d.get("device_type")):
+                d["chamber_ctl"] = True
             rows.append(d)
         return rows
 

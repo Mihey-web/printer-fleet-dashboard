@@ -933,7 +933,8 @@
         return new Date(ts).toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" });
       }
       // Cold → gray, heating toward target → yellow with →target, at working temp → warm.
-      function tempChip(icName, name, cur, target, editable) {
+      function tempChip(kind, name, cur, target, editable, icName) {
+        icName = icName || kind;
         if (cur == null || !isFinite(cur)) return "";
         var val = Math.round(cur);
         var cls = "pc-chip";
@@ -944,7 +945,7 @@
         }
         if (hasTarget && Math.abs(cur - target) > 3) cls += " pc-heating";
         else if (val >= 40) cls += " pc-hot";
-        var edit = editable ? ' pc-editable" data-edit="' + icName + '" data-cur="' + (hasTarget ? Math.round(target) : val) : '';
+        var edit = editable ? ' pc-editable" data-edit="' + kind + '" data-cur="' + (hasTarget ? Math.round(target) : val) : '';
         return '<span class="' + cls + edit + '" data-tip="' + name + '">' + icon(icName) + val + '°' + arrow + '</span>';
       }
 
@@ -1060,7 +1061,9 @@
         var chips = [
           tempChip("nozzle", "\u0421\u043E\u043F\u043B\u043E", p.nozzle_temp, p.target_nozzle_temp, canEdit),
           tempChip("bed", "\u0421\u0442\u043E\u043B", p.bed_temp, p.target_bed_temp, canEdit),
-          p.chamber_temp != null ? '<span class="pc-chip' + (p.chamber_temp > 55 ? " pc-heating" : "") + '" data-tip="\u041A\u0430\u043C\u0435\u0440\u0430">' + icon("temp") + Math.round(p.chamber_temp) + '\u00B0</span>' : "",
+          // Камера: цель (M141) есть только у H2-серии, у P/X это просто датчик.
+          tempChip("chamber", "Камера", p.chamber_temp, p.target_chamber_temp,
+                   canEdit && p.chamber_ctl === true, "temp"),
           fanChip(p, canEdit),
           speedMode ? '<span class="pc-chip pc-speed-' + speedMode + speedEdit + '" data-tip="\u0421\u043A\u043E\u0440\u043E\u0441\u0442\u044C \u043F\u0435\u0447\u0430\u0442\u0438">' + icon("gauge") + p.feedrate_pct + '%' + speedIcon + '</span>' : "",
         ].filter(Boolean).join("");
@@ -1373,7 +1376,8 @@
         var chips = presets.map(function (v) {
           return '<button type="button" class="pc-pop-preset" data-set="' + v[1] + '">' + v[0] + '</button>';
         }).join("");
-        return '<div class="pc-pop-h">' + (kind === "nozzle" ? "Сопло" : "Стол") + ', °C</div>'
+        var title = kind === "nozzle" ? "Сопло" : kind === "chamber" ? "Камера" : "Стол";
+        return '<div class="pc-pop-h">' + title + ', °C</div>'
           + '<div class="pc-pop-presets">' + chips + '</div>'
           + '<div class="pc-pop-row"><input type="text" inputmode="numeric" class="pc-pop-in" value="' + cur + '">'
           + '<button type="button" class="pc-pop-ok" data-ok="preheat">OK</button></div>';
@@ -1436,6 +1440,11 @@
         if (t.dataset.ok === "preheat") {
           var v = parseInt((pcPop.querySelector(".pc-pop-in").value || "").trim(), 10);
           if (isNaN(v)) { pcPop.querySelector(".pc-pop-in").focus(); return; }
+          // Камера — не преднагрев: своя команда с параметром temp.
+          if (pcPop.dataset.kind === "chamber") {
+            if (await sendPrinterCmd(pid, "chamber", { temp: v })) closePop();
+            return;
+          }
           var extra = {}; extra[pcPop.dataset.kind] = v;
           if (await sendPrinterCmd(pid, "preheat", extra)) closePop();
           return;
@@ -1498,9 +1507,11 @@
             var c = chip.closest(".printer-card");
             if (!c) return;
             var pid = c.dataset.id, kind = chip.dataset.edit;
-            if (kind === "nozzle" || kind === "bed") {
+            if (kind === "nozzle" || kind === "bed" || kind === "chamber") {
               var presets = kind === "nozzle"
                 ? [["PLA 220", 220], ["PETG 250", 250], ["ABS 260", 260], ["Выкл", 0]]
+                : kind === "chamber"
+                ? [["40", 40], ["50", 50], ["60", 60], ["65", 65], ["Выкл", 0]]
                 : [["60", 60], ["80", 80], ["100", 100], ["Выкл", 0]];
               openPop(chip, pid, tempPopHtml(kind, chip.dataset.cur || "", presets), kind);
             } else if (kind === "speed") {

@@ -114,6 +114,25 @@ def build_preheat(nozzle=None, bed=None) -> Dict[str, Any]:
     return build_gcode(lines)
 
 
+# Активный подогрев камеры есть только у H2-серии (H2D/H2S, потолок 65 °C).
+# У P-серии и X1C нагревателя камеры нет — там M141 гнать некуда.
+CHAMBER_MAX = 65
+
+
+def has_chamber_heater(device_type: Optional[str]) -> bool:
+    return str(device_type or "").upper().startswith("H2")
+
+
+def build_chamber(temp: int) -> Dict[str, Any]:
+    """Целевая температура камеры: M141 (S0 — выключить нагрев).
+
+    Проверено live на H2S (fw 01.02.00.00): `M141 S0` → result SUCCESS, ctc
+    переходит из (65, 65) state 2 в (0, 65) state 0 и камера остывает; `M141 S65`
+    возвращает нагрев. Команда неблокирующая — M191 (ждать прогрева) не шлём.
+    """
+    return build_gcode(["M141 S%d" % temp])
+
+
 def build_cooldown() -> Dict[str, Any]:
     """Вырубить весь нагрев и вентиляторы."""
     return build_gcode(["M104 S0", "M140 S0",
@@ -183,6 +202,8 @@ def _build_payload(action: str, params: Dict[str, Any]) -> Dict[str, Any]:
         if nozzle is None and bed is None:
             raise ValueError("Не задана температура нагрева")
         return build_preheat(nozzle, bed)
+    if action == "chamber":
+        return build_chamber(_req_int(params, "temp", 0, CHAMBER_MAX, "Камера"))
     if action == "cooldown":
         return build_cooldown()
     if action == "eject":
@@ -363,6 +384,9 @@ def send(printer_id: str, action: str, params: Optional[Dict[str, Any]] = None) 
                 "detail": "%s не принимает команду «%s»" % (KIND_TITLES.get(kind, kind), action)}
     if kind == "creality":
         return _send_creality(printer_id, action)
+    if action == "chamber" and not has_chamber_heater(prn.get("model")):
+        return {"success": False,
+                "detail": "Активный подогрев камеры есть только у H2-серии"}
     try:
         payload = _build_payload(action, params or {})
     except ValueError as e:

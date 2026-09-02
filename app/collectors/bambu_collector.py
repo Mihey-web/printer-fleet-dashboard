@@ -38,12 +38,21 @@ def _ams_print_update_keep_raw(self, data):
 _pb_models.AMSList.print_update = _ams_print_update_keep_raw
 
 # pybambu читает температуру камеры только из плоского chamber_temper — так шлют
-# X1/X1C. P2S (новая прошивка) чамбер-сенсор отдаёт вложенно:
+# X1/X1C. P2S/H2S (новая прошивка) чамбер-сенсор отдают вложенно:
 # print.device.ctc.info.temp (ctc = chamber temperature controller, °C, verified
-# live on P2S: 43). Без фолбэка камера у P2S не показывается, хотя сенсор есть.
-# Значения вроде device.bed.info.temp — бит-паковка, поэтому берём только ctc и
-# в разумном диапазоне.
+# live on P2S: 43). Без фолбэка камера у них не показывается, хотя сенсор есть.
+#
+# Значение УПАКОВАНО: (цель << 16) | текущая. Пока подогрев камеры выключен
+# (P2S, X1C, да и H2S в простое) старшие биты нули и число выглядит обычной
+# температурой — поэтому старый фильтр 0 < t < 200 работал. У H2S с включённым
+# нагревом приходит, например, 4259903 = (65, 63): прежний фильтр его отбрасывал,
+# и карточка показывала протухшее значение ровно тогда, когда камера греется.
+# Та же упаковка у device.bed.info.temp (4587590 = 70/70 при плоских bed_temper
+# 70/70), device.extruder.info[].temp (16711935 = 255/255) и у airduct
+# range 6553600 = (100, 0) — но берём только ctc: остальное уже есть плоским.
 _orig_temp_print_update = _pb_models.Temperature.print_update
+
+_CTC_MAX = 200
 
 
 def _temp_print_update_ctc(self, data):
@@ -51,9 +60,18 @@ def _temp_print_update_ctc(self, data):
     try:
         if not data.get("chamber_temper"):
             ctc = (((data.get("device") or {}).get("ctc") or {}).get("info") or {}).get("temp")
-            if isinstance(ctc, (int, float)) and 0 < ctc < 200 and self.chamber_temp != round(ctc):
-                self.chamber_temp = round(ctc)
-                changed = True
+            if isinstance(ctc, (int, float)) and ctc >= 0:
+                raw = int(ctc)
+                target, current = raw >> 16, raw & 0xFFFF
+                if 0 < current < _CTC_MAX and 0 <= target < _CTC_MAX:
+                    if self.chamber_temp != current:
+                        self.chamber_temp = current
+                        changed = True
+                    # 0 — нагрев выключен (или модель без нагревателя камеры);
+                    # нормализатор превращает такой ноль в None.
+                    if getattr(self, "target_chamber_temp", None) != target:
+                        self.target_chamber_temp = target
+                        changed = True
     except (TypeError, ValueError, AttributeError):
         pass
     return changed

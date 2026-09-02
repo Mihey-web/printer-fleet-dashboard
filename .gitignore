@@ -424,6 +424,8 @@ users.db-*
 # Local database + screenshots
 printer_history.db
 pi_printer_history*.db
+ams_history.db
+ams_history.db-*
 pi_status.txt
 timeline*.png
 *.db-journal

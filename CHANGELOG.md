@@ -6,6 +6,23 @@ The format is loosely based on [Keep a Changelog](https://keepachangelog.com/).
 Releases after `1.0.0` are dated sync points rather than semver bumps; they
 match the `Sync to internal v<date>` commits in this repository's history.
 
+## [2026-09-02]
+
+### Added
+- Chamber temperature control on Bambu models with an actively heated chamber
+  (H2 series): the chamber chip on the printer card is now editable and sends
+  `M141` with presets 40/50/60/65 °C and off. Models without a chamber heater
+  (P series, X1C) keep a read-only chip, and the API rejects the command for
+  them instead of sending gcode that would do nothing.
+
+### Fixed
+- Chamber temperature went stale exactly when the chamber was being heated.
+  `device.ctc.info.temp` packs two values as `(target << 16) | current`; with
+  the heater off the high bits are zero, so the raw number looked like a plain
+  temperature and passed the sanity filter, but with the heater on it was
+  discarded and the card kept showing the last value from before. The reading is
+  now unpacked, and the target is shown next to it like nozzle and bed.
+
 ## [2026-09-01]
 
 ### Added
