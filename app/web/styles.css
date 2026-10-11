@@ -813,14 +813,11 @@
       height: 9px;
       border-radius: 50%;
       background: var(--ok);
-      box-shadow: var(--shadow-pulse);
-      animation: livePulse 2.2s infinite;
+      /* Static glow on purpose: any infinite animation makes Chrome redraw the
+         whole page every frame, and with the backdrop blurs and the full-screen
+         blend layer that costs ~15-20% GPU on an idle tab (measured 12.10.2026). */
+      box-shadow: 0 0 6px var(--ok);
       flex: 0 0 auto;
-    }
-    @keyframes livePulse {
-      0% { box-shadow: var(--shadow-pulse-start); }
-      70% { box-shadow: var(--shadow-pulse-end); }
-      100% { box-shadow: var(--shadow-pulse-end); }
     }
     /* ── Dashboard Summary ─────────────────────── */
     .dash-kpi-row {
@@ -1387,11 +1384,6 @@
       background: linear-gradient(180deg, var(--danger-bg-grad-start), var(--danger-bg-grad-end));
       border-color: var(--danger-border-strong);
       box-shadow: 0 0 24px var(--danger-shadow-strong), var(--shadow-lg);
-      animation: errorPulse 2.4s ease-in-out infinite;
-    }
-    @keyframes errorPulse {
-      0%, 100% { box-shadow: 0 0 20px var(--danger-pulse-start), var(--shadow-lg); border-color: var(--danger-pulse-border-start); }
-      50% { box-shadow: 0 0 36px var(--danger-pulse-mid), var(--shadow-lg); border-color: var(--danger-pulse-border-mid); }
     }
     .printer-card.paused {
       background: linear-gradient(180deg, var(--warn-bg-grad-start), var(--warn-bg-grad-end));
@@ -1583,11 +1575,6 @@
     }
     .status-badge.finished::before {
       box-shadow: 0 0 14px currentColor;
-      animation: finishedPulse 3s ease-in-out infinite;
-    }
-    @keyframes finishedPulse {
-      0%, 100% { box-shadow: 0 0 8px currentColor; }
-      50% { box-shadow: 0 0 18px currentColor; }
     }
     .status-badge.paused {
       color: var(--warn-11);
@@ -2621,12 +2608,7 @@
       border-radius: 50%;
       margin-left: 6px;
       vertical-align: middle;
-      animation: gracePulse 2.2s ease-in-out infinite;
-    }
-
-    @keyframes gracePulse {
-      0%, 100% { opacity: 0.25; }
-      50% { opacity: 0.85; }
+      opacity: 0.6;
     }
 
     /* -- Text scale slider (settings dropdown) -- */

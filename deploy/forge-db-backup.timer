@@ -1,0 +1,11 @@
+[Unit]
+Description=Run the dashboard database backup every night
+
+[Timer]
+OnCalendar=*-*-* 03:30:00
+RandomizedDelaySec=10min
+# Catch up on the next boot if the Pi was off at 03:30.
+Persistent=true
+
+[Install]
+WantedBy=timers.target

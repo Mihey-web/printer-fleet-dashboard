@@ -1,0 +1,17 @@
+# Nightly backup of the dashboard databases to a separate data disk.
+# Install (replace placeholders, e.g. __USER__=pi, __WORKDIR__=/home/pi/BambuDiagnosticData):
+#   sed "s|__USER__|$USER|g; s|__WORKDIR__|$PWD|g" deploy/forge-db-backup.service | sudo tee /etc/systemd/system/forge-db-backup.service
+#   sudo cp deploy/forge-db-backup.timer /etc/systemd/system/ && sudo systemctl daemon-reload
+#   sudo systemctl enable --now forge-db-backup.timer
+# Run once by hand: sudo systemctl start forge-db-backup.service ; logs: journalctl -u forge-db-backup
+[Unit]
+Description=Nightly backup of the dashboard databases
+RequiresMountsFor=/mnt/ssd
+
+[Service]
+Type=oneshot
+User=__USER__
+WorkingDirectory=__WORKDIR__
+ExecStart=/usr/bin/python3 __WORKDIR__/deploy/forge_db_backup.py --src __WORKDIR__ --dest /mnt/ssd/forge-backups --mountpoint /mnt/ssd --keep 14
+Nice=19
+IOSchedulingClass=idle

@@ -4,6 +4,8 @@ import logging
 import time
 from typing import Callable, Optional, Dict
 
+from proxy_checker import mask_proxy
+
 logger = logging.getLogger(__name__)
 
 
@@ -203,7 +205,7 @@ class TelegramReporter:
                     from aiogram.client.session.aiohttp import AiohttpSession
                     session = AiohttpSession(proxy=current_proxy)
                     bot = Bot(token=self.token, session=session)
-                    logger.info("Telegram bot using proxy: %s", current_proxy)
+                    logger.info("Telegram bot using proxy: %s", mask_proxy(current_proxy))
                 else:
                     bot = Bot(token=self.token)
                     logger.info("Telegram bot: direct connection (no proxy)")
@@ -217,7 +219,7 @@ class TelegramReporter:
                 try:
                     new_proxy = self._get_effective_proxy()
                     if new_proxy != current_proxy:
-                        logger.info("Proxy changed: %s -> %s", current_proxy, new_proxy)
+                        logger.info("Proxy changed: %s -> %s", mask_proxy(current_proxy), mask_proxy(new_proxy))
                         await ensure_bot()
 
                     # Proactively (re)establish the chat if we know it from

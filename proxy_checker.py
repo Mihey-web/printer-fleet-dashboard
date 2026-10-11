@@ -3,8 +3,29 @@ import logging
 import threading
 import time
 from typing import Optional
+from urllib.parse import urlsplit
 
 logger = logging.getLogger(__name__)
+
+
+def mask_proxy(url: Optional[str]) -> Optional[str]:
+    """Proxy URL for logs: keep scheme://host:port, hide the login:password."""
+    if not url:
+        return url
+    try:
+        parts = urlsplit(url)
+    except ValueError:
+        return "<invalid proxy url>"
+    if "@" not in parts.netloc:
+        return url
+    return "%s://***@%s" % (parts.scheme, parts.netloc.rsplit("@", 1)[1])
+
+
+def _scrub(text: str, url: str) -> str:
+    """Remove a proxy URL's credentials from free text such as exception messages."""
+    if not url or "@" not in url:
+        return text
+    return text.replace(url, mask_proxy(url)).replace(urlsplit(url).netloc.rsplit("@", 1)[0] + "@", "***@")
 
 CHECK_URL = "https://api.telegram.org"
 CHECK_TIMEOUT = 10
@@ -81,13 +102,13 @@ class ProxyChecker:
                 async with session.get(CHECK_URL, proxy=proxy_url) as resp:
                     if resp.status < 500:
                         elapsed = time.monotonic() - start
-                        logger.debug("Proxy check OK: %s, %.3fs", proxy_url, elapsed)
+                        logger.debug("Proxy check OK: %s, %.3fs", mask_proxy(proxy_url), elapsed)
                         return elapsed
                     else:
-                        logger.debug("Proxy %s returned HTTP %s", proxy_url, resp.status)
+                        logger.debug("Proxy %s returned HTTP %s", mask_proxy(proxy_url), resp.status)
                         return None
         except Exception as e:
-            logger.debug("Proxy check failed %s: %s", proxy_url, e)
+            logger.debug("Proxy check failed %s: %s", mask_proxy(proxy_url), _scrub(str(e), proxy_url))
             return None
 
     async def _check_all_async(self) -> dict[str, Optional[float]]:
@@ -115,12 +136,12 @@ class ProxyChecker:
                 if best:
                     logger.info(
                         "Best proxy changed: %s -> %s (%.3fs)",
-                        self._best_proxy,
-                        best,
+                        mask_proxy(self._best_proxy),
+                        mask_proxy(best),
                         best_latency,
                     )
                 elif self._best_proxy and not best:
-                    logger.warning("All proxies failed, keeping current: %s", self._best_proxy)
+                    logger.warning("All proxies failed, keeping current: %s", mask_proxy(self._best_proxy))
                     return
                 self._best_proxy = best
         self._ready_event.set()
