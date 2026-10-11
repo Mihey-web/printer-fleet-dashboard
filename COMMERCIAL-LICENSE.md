@@ -31,3 +31,8 @@ can be offered.
 The copyright holder retains all rights necessary to offer the software under
 these alternative terms (see [`CONTRIBUTING.md`](./CONTRIBUTING.md) for how
 contributions are licensed to make this possible).
+
+Third-party code bundled with the project is not part of either grant: the
+vendored copy of `pybambu` in [`app/vendor/pybambu/`](./app/vendor/pybambu/)
+remains under its own MIT License (© 2023 ha-bambulab contributors, see its
+[`LICENSE`](./app/vendor/pybambu/LICENSE)).

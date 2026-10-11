@@ -227,6 +227,8 @@
         "bambu-x1": "/static/img/bambu-x1c.png",
         "bambu-x1c": "/static/img/bambu-x1c.png",
         "bambu-x1e": "/static/img/bambu-x1c.png",
+        "bambu-p1": "/static/img/bambu-p2s.png",
+        "bambu-p1p": "/static/img/bambu-p2s.png",
         "bambu-p1s": "/static/img/bambu-p2s.png",
         "bambu-p2s": "/static/img/bambu-p2s.png",
         "bambu-a1": "/static/img/bambu-a1.png",
@@ -237,6 +239,7 @@
         "creality-k1c": "/static/img/creality-k1c.png",
         "creality-ender5max": "/static/img/creality-ender5max.png",
         "klipper": "/static/img/generic-klipper.svg",
+        "klipper-ghost6": "/static/img/flyingbear-ghost6-cutout.png",
         "klipper-flyingbear_ghost6": "/static/img/flyingbear-ghost6-cutout.png",
         "mks-reborn2": "/static/img/flyingbear-reborn2-cutout.png",
         "mks-robin": "/static/img/flyingbear-reborn2-cutout.png"
@@ -387,8 +390,9 @@
         };
         return labels[status] || "—";
       }
-      // Перевод этапа печати (stage) на русский. Ключи — значения pybambu
-      // CURRENT_STAGE_IDS (Bambu) в нижнем регистре. Возвращает null, если
+      // Перевод этапа печати (stage) на русский. Ключи — значения
+      // CURRENT_STAGE_IDS (app/vendor/pybambu/const.py) в нижнем регистре,
+      // включая опечатку upstream check_plaform. Возвращает null, если
       // этап показывать не нужно (дублирует основной статус или пустой).
       const STAGE_LABELS = {
         auto_bed_leveling: "Калибровка стола",
@@ -424,7 +428,49 @@
         paused_nozzle_filament_covered_detected: "Пауза: сопло в филаменте",
         paused_cutter_error: "Пауза: ошибка ножа",
         paused_first_layer_error: "Пауза: ошибка первого слоя",
-        paused_nozzle_clog: "Пауза: засор сопла"
+        paused_nozzle_clog: "Пауза: засор сопла",
+        check_absolute_accuracy_before_calibration: "Проверка точности перед калибровкой",
+        absolute_accuracy_calibration: "Калибровка абсолютной точности",
+        check_absolute_accuracy_after_calibration: "Проверка точности после калибровки",
+        calibrate_nozzle_offset: "Калибровка смещения сопел",
+        bed_level_high_temperature: "Калибровка горячего стола",
+        check_quick_release: "Проверка фиксатора хотенда",
+        check_door_and_cover: "Проверка дверцы и крышки",
+        laser_calibration: "Калибровка лазера",
+        check_plaform: "Проверка платформы",
+        check_birdeye_camera_position: "Проверка положения обзорной камеры",
+        calibrate_birdeye_camera: "Калибровка обзорной камеры",
+        bed_level_phase_1: "Калибровка стола: этап 1",
+        bed_level_phase_2: "Калибровка стола: этап 2",
+        heating_chamber: "Нагрев камеры",
+        heated_bedcooling: "Охлаждение стола",
+        print_calibration_lines: "Печать калибровочных линий",
+        check_material: "Проверка материала",
+        calibrating_live_view_camera: "Калибровка камеры",
+        waiting_for_heatbed_temperature: "Ожидание нагрева стола",
+        check_material_position: "Проверка положения материала",
+        calibrating_cutter_model_offset: "Калибровка смещения режущего модуля",
+        measuring_surface: "Измерение поверхности",
+        thermal_preconditioning: "Термостабилизация",
+        homing_blade_holder: "Парковка держателя лезвия",
+        calibrating_camera_offset: "Калибровка смещения камеры",
+        calibrating_blade_holder_position: "Калибровка положения держателя лезвия",
+        hotend_pick_place_test: "Тест захвата хотенда",
+        waiting_chamber_temperature_equalize: "Выравнивание температуры камеры",
+        preparing_hotend: "Подготовка хотенда",
+        calibrating_detection_nozzle_clumping: "Калибровка детекции налипания на сопло",
+        purifying_chamber_air: "Очистка воздуха камеры",
+        measuring_rotary_attachment: "Измерение поворотной насадки",
+        moving_toolhead_above_purge_chute: "Перемещение головы к жёлобу сброса",
+        cooling_nozzle: "Охлаждение сопла",
+        moving_toolhead_to_center_of_heatbed: "Перемещение головы в центр стола",
+        active_arc_fitting: "Активная подгонка дуг",
+        hotend_type_detection: "Определение типа хотенда",
+        build_plate_alignment_detection: "Проверка положения печатной пластины",
+        heatbed_surface_foreign_object_detection: "Поиск посторонних предметов на столе",
+        heatbed_underside_foreign_object_detection: "Поиск посторонних предметов под столом",
+        pre_extrusion_before_printing: "Предэкструзия перед печатью",
+        preparing_ams: "Подготовка AMS"
       };
       function stageLabel(stage) {
         if (stage == null) return null;
@@ -2421,6 +2467,11 @@
         box.addEventListener('pointerdown', move);
         box.addEventListener('pointerleave', hide);
       }
+      // Card title only: unit_index is the physical unit id (history key) — 0-3 for
+      // AMS / AMS 2 Pro / AMS Lite, 128-135 for AMS HT.
+      function amsUnitName(index) {
+        return index >= 128 ? 'AMS HT ' + (index - 127) : 'AMS ' + (index + 1);
+      }
       function amsCardShell(u) {
         var cls = 'ams-card' + (u.drying ? ' drying' : '') +
           (!u.drying && amsHumClass(u.humidity_pct, u.humidity) === 'bad' ? ' bad' : '');
@@ -2443,7 +2494,7 @@
         var model = u.device_type ? escHtml(u.device_type) : 'AMS';
         return '<div class="ams-card' + cls.slice(8) + '" data-key="' + key + '">' +
           '<div class="ams-chead"><div class="ams-spool">🧵</div>' +
-          '<div class="ams-ctitle"><div class="ams-cname">' + escHtml(u.label) + ' · AMS ' + (u.unit_index + 1) +
+          '<div class="ams-ctitle"><div class="ams-cname">' + escHtml(u.label) + ' · ' + amsUnitName(u.unit_index) +
           ' <span class="ams-dot ' + (u.online ? 'on' : 'off') + '"></span></div>' +
           '<div class="ams-csub">' + model + '</div></div>' +
           '<div class="ams-badges">' + badges + '</div></div>' +

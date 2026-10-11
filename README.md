@@ -42,8 +42,10 @@ temperatures, AMS slots, and Wi-Fi signal. (Screenshot uses a synthetic demo fle
 - **Frontend:** vanilla JavaScript, HTML, and CSS (no build step)
 - **Storage:** SQLite (`printer_history.db` for fleet/settings/history,
   `users.db` for accounts/audit)
-- **Printer libraries:** `pybambu` (Bambu), `websocket-client` (Creality /
-  Klipper), plus a small MKS WiFi client
+- **Printer libraries:** a vendored copy of `pybambu` from
+  [ha-bambulab](https://github.com/greghesp/ha-bambulab) (Bambu; MIT,
+  `app/vendor/pybambu`), `websocket-client` (Creality / Klipper), plus a small
+  MKS WiFi client
 - **Bot:** `aiogram` for Telegram
 
 ## Requirements
@@ -116,6 +118,7 @@ All runtime configuration is optional and has safe defaults. See
 | `COOKIE_SECURE` | `1` | Send auth cookies over HTTPS only |
 | `WEB_HOST` / `WEB_PORT` | `127.0.0.1` / `8000` | Server bind address |
 | `POLL_INTERVAL` / `MAX_WORKERS` | `5` / `10` | Polling cadence / concurrency |
+| `FORGE_BAMBU_TLS_VERIFY` | empty (off) | Verify Bambu printer TLS certificates against Bambu's CAs: `*` or comma-separated models |
 
 The **Telegram bot token, chat id, notification templates, and proxy list** are
 managed in the database and edited from **Settings** in the UI — not via env or
@@ -158,3 +161,12 @@ This project is dual-licensed:
   see [`COMMERCIAL-LICENSE.md`](./COMMERCIAL-LICENSE.md).
 
 Contributions are accepted under the CLA in [`CONTRIBUTING.md`](./CONTRIBUTING.md).
+
+### Third-party code
+
+[`app/vendor/pybambu/`](./app/vendor/pybambu/) is a vendored copy of the `pybambu`
+library from [ha-bambulab](https://github.com/greghesp/ha-bambulab), licensed
+under the MIT License, © 2023 ha-bambulab contributors (see its
+[`LICENSE`](./app/vendor/pybambu/LICENSE) and
+[`VENDORED.md`](./app/vendor/pybambu/VENDORED.md)). It stays under the MIT
+License and is not covered by the dual-licensing grant above.

@@ -14,7 +14,12 @@ bcrypt>=4.1,<5
 PyJWT>=2.8,<3
 
 # --- Printer protocols ---
-pybambu==1.0.1           # Bambu Lab (MQTT); pulls paho-mqtt
+# Bambu Lab: pybambu vendored from ha-bambulab (app/vendor/pybambu, see VENDORED.md).
+paho-mqtt==2.1.0         # Bambu MQTT (vendored lib uses paho's VERSION1 callback API; same as the Pi)
+requests>=2.28,<3        # imported at module level by the vendored lib (cloud code stays unused)
+python-dateutil>=2.8,<3  # ditto (cloud task times)
+# Optional, imported lazily by the vendored lib for features kept disabled here:
+# Pillow (3MF pick image via FTP), beautifulsoup4 (firmware page scrape)
 websocket-client==1.9.0  # Creality + Klipper/Moonraker WebSocket clients
 
 # --- Telegram bot + proxy ---

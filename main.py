@@ -10,7 +10,7 @@ from typing import Any, Optional, Protocol
 
 import uvicorn
 from app.api.main import create_app
-from app.collectors.bambu_collector import BambuCollector
+from app.collectors.bambu_collector import BambuCollector, quiet_vendor_logging, tls_verify_enabled
 from app.collectors.creality_collector import CrealityCollector
 from app.collectors.klipper_collector import KlipperCollector
 from app.collectors.mks_wifi_collector import MksWifiCollector
@@ -22,7 +22,8 @@ from app.services.ams_store import AmsStore
 from app.services import settings_service
 import config
 
-logging.getLogger("pybambu").setLevel(logging.ERROR)
+# The vendored pybambu (logger app.vendor.pybambu) and paho: ERROR only, rate-limited.
+quiet_vendor_logging()
 logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] %(message)s')
 logger = logging.getLogger(__name__)
 
@@ -53,7 +54,9 @@ def build_collectors():
         pid, label, host = r['id'], r['label'], r['host']
         if r['kind'] == 'bambu':
             device_type = r.get('model') or 'X1C'
-            items.append((pid, PrinterKind.BAMBU, label, BambuCollector(label, host, r['access_code'], r['serial'], device_type), device_type))
+            # Opt-in TLS certificate check per model (FORGE_BAMBU_TLS_VERIFY, see config.py).
+            tls_verify = tls_verify_enabled(getattr(config, 'BAMBU_TLS_VERIFY', ''), device_type)
+            items.append((pid, PrinterKind.BAMBU, label, BambuCollector(label, host, r['access_code'], r['serial'], device_type, tls_verify=tls_verify), device_type))
         elif r['kind'] == 'creality':
             items.append((pid, PrinterKind.CREALITY, label, CrealityCollector(label, host), r.get('model') or 'k1max'))
         elif r['kind'] == 'klipper':
@@ -61,6 +64,18 @@ def build_collectors():
         elif r['kind'] == 'mks':
             items.append((pid, PrinterKind.MKS, label, MksWifiCollector(label, host, int(r.get('port') or 8080)), r.get('model') or 'mks'))
     return items
+
+
+def _close_bambu_collectors(collectors):
+    """Stop the Bambu MQTT listeners (shutdown). One failing close() must not
+    keep the others running."""
+    for _pid, kind, label, collector, _device_type in collectors:
+        if kind != PrinterKind.BAMBU:
+            continue
+        try:
+            collector.close()
+        except Exception:
+            logger.debug('[%s] close failed', label, exc_info=True)
 
 
 def _display_label(pid, fallback):
@@ -124,6 +139,17 @@ def _build_grace_status(prev_item, reason, now, device_type):
         device_type=device_type,
         grace_period_active=True,
     )
+
+
+def _error_notification(template, label, last_error):
+    """Telegram error text. It goes out with parse_mode=HTML: the template's own
+    markup stays, the label and the printer's error text are escaped (labels are
+    free-form, and Bambu's HMS texts contain '>', e.g. «Настройки > Калибровка»;
+    either would reject the whole message)."""
+    msg = template.replace('{label}', html.escape(str(label)))
+    if last_error:
+        msg += f': {html.escape(str(last_error))}'
+    return msg
 
 
 def _fmt_time(seconds):
@@ -309,7 +335,8 @@ def poll_loop(
                                     repeat_due = (now - last) >= interval
                                 if entered or repeat_due:
                                     try:
-                                        msg = scfg['telegram_finish_template'].format(label=disp_label)
+                                        # parse_mode=HTML: the free-form label is escaped.
+                                        msg = scfg['telegram_finish_template'].format(label=html.escape(str(disp_label)))
                                         # Only anchor the repeat timer if the message
                                         # was actually dispatched. Marking it on a
                                         # no-op (bot down / no chat) would suppress
@@ -330,7 +357,7 @@ def poll_loop(
                         if tg is not None and scfg.get('telegram_notify_on_paused'):
                             if effective_prev == PrinterState.PRINTING and status.state == PrinterState.PAUSED:
                                 try:
-                                    msg = scfg['telegram_paused_template'].replace('{label}', str(disp_label))
+                                    msg = scfg['telegram_paused_template'].replace('{label}', html.escape(str(disp_label)))
                                     tg.notify(msg)
                                     logger.info('[%s] Telegram paused notification sent', label)
                                 except Exception as e:
@@ -338,9 +365,7 @@ def poll_loop(
                         if tg is not None and scfg.get('telegram_notify_on_error'):
                             if effective_prev is not None and status.state == PrinterState.ERROR and effective_prev not in (PrinterState.ERROR, PrinterState.OFFLINE):
                                 try:
-                                    msg = scfg['telegram_error_template'].replace('{label}', str(disp_label))
-                                    if status.last_error:
-                                        msg += f': {status.last_error}'
+                                    msg = _error_notification(scfg['telegram_error_template'], disp_label, status.last_error)
                                     tg.notify(msg)
                                     logger.info('[%s] Telegram error notification sent', label)
                                 except Exception as e:
@@ -456,15 +481,20 @@ def main():
         for pid, kind, label, c, device_type in collectors:
             if kind == PrinterKind.BAMBU:
                 try:
-                    c.connect()
-                    logger.info('[%s] Connected', label)
+                    c.connect()   # non-blocking: the MQTT listener connects in the background
+                    logger.info('[%s] MQTT connect started', label)
                 except Exception as e:
                     logger.warning('[%s] connect failed: %s', label, e)
     threading.Thread(target=_connect_bambu, daemon=True).start()
 
     # Run the poll loop on the main thread — it blocks forever and keeps the
     # process alive while the server runs in its daemon thread.
-    poll_loop(store, collectors, tg, fail_start={}, ams_store=ams_store)
+    try:
+        poll_loop(store, collectors, tg, fail_start={}, ams_store=ams_store)
+    finally:
+        # Ctrl+C / SystemExit: stop the MQTT listeners and watchdogs cleanly.
+        # (Under systemd SIGTERM ends the process at once; every lib thread is a daemon.)
+        _close_bambu_collectors(collectors)
 
 
 if __name__ == '__main__':

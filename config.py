@@ -7,6 +7,11 @@ MAX_WORKERS = int(os.environ.get("MAX_WORKERS", "10"))
 WEB_HOST = os.environ.get("WEB_HOST", "127.0.0.1")
 WEB_PORT = int(os.environ.get("WEB_PORT", "8000"))
 
+# Bambu MQTT TLS: verify the printer certificate against Bambu's CAs bundled in
+# app/vendor/pybambu/certs. Empty (default) = encrypted but unverified, like
+# pybambu 1.0.1. "*" = every Bambu printer; or a comma list of models, e.g. "X1C,P2S".
+BAMBU_TLS_VERIFY = os.environ.get("FORGE_BAMBU_TLS_VERIFY", "")
+
 # Парк принтеров живёт в БД — таблица printers в printer_history.db,
 # редактируется из админки (вкладка «Администрирование» → «Принтеры»).
 # Списки PRINTERS/CREALITY_PRINTERS/KLIPPER_PRINTERS/MKS_PRINTERS удалены:

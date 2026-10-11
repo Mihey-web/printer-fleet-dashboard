@@ -127,7 +127,7 @@ def _bambu_collector_with_device(online: bool):
 
 
 def test_bambu_fetch_stale_device_raises():
-    # pybambu creates the Device object in the client constructor, so
+    # The (vendored) pybambu creates the Device object in the client constructor, so
     # get_device() never returns None — after the printer powers off it keeps
     # handing out the last cached telemetry with info.online=False. fetch()
     # must surface that as a connection error (grace -> offline in poll_loop)
@@ -229,7 +229,7 @@ def test_klipper_get_data_empty_before_any_telemetry():
 
 
 def test_bambu_send_command_publish_error_keeps_connected():
-    # A publish exception must NOT clear self.connected: pybambu's listener thread
+    # A publish exception must NOT clear self.connected: the vendored pybambu's listener thread
     # owns reconnection, and a fresh connect() would spawn a duplicate mqtt client
     # + listener alongside the live one.
     c, _ = _bambu_collector_with_device(online=True)

@@ -73,6 +73,78 @@ def test_format_status_text_uses_fresh_display_label(monkeypatch):
     assert "OldName" not in text
 
 
+def test_error_notification_escapes_printer_error_text():
+    # Telegram messages go out with parse_mode=HTML. Bambu's Russian HMS texts
+    # contain '>' («Настройки > Калибровка»), which would 400 the whole send.
+    # The template's own markup stays as is.
+    msg = main._error_notification("❌ <b>{label}</b> — ошибка", "P1",
+                                   "HMS_0C00_0300_0003_000B: нажмите «Настройки > Калибровка» [common]")
+    assert msg == ("❌ <b>P1</b> — ошибка: "
+                   "HMS_0C00_0300_0003_000B: нажмите «Настройки &gt; Калибровка» [common]")
+    assert main._error_notification("{label} упал", "P1", None) == "P1 упал"
+    # Labels are free-form (Admin → Printers): escaped too.
+    assert (main._error_notification("<b>{label}</b> ошибка", "X1C <test> & Co", "a > b")
+            == "<b>X1C &lt;test&gt; &amp; Co</b> ошибка: a &gt; b")
+
+
+def test_poll_loop_notifications_escape_printer_label(monkeypatch):
+    # Finish / pause / error notifications all go out with parse_mode=HTML; a
+    # raw "<test>" in the label makes Telegram reject the message.
+    import time
+    from types import SimpleNamespace
+
+    import pytest
+
+    sent = []
+
+    class _Tg:
+        def notify(self, text):
+            sent.append(text)
+            return True
+
+    class _Store:
+        def __init__(self):
+            self.items = {}
+
+        def upsert(self, status):
+            self.items[status.id] = status
+
+        def get_one(self, pid):
+            return self.items.get(pid)
+
+        def record_snapshot(self, status):
+            pass
+
+    class _Collector:
+        def __init__(self, state):
+            self.state = state
+
+        def fetch(self):
+            return {"state": self.state}
+
+    class _OneCycle(Exception):
+        pass
+
+    def _sleep(_seconds):
+        raise _OneCycle
+
+    monkeypatch.setattr(main, "time", SimpleNamespace(time=time.time, monotonic=time.monotonic, sleep=_sleep))
+    monkeypatch.setattr(main, "_display_label", lambda pid, fallback: fallback)
+    monkeypatch.setattr(main.settings_service, "get_all", lambda: {
+        "telegram_notify_on_finish": True, "telegram_notify_on_paused": True,
+        "telegram_notify_on_error": True, "telegram_finish_template": "✅ {label}",
+        "telegram_paused_template": "⏸ <b>{label}</b>", "telegram_error_template": "🔴 {label}"})
+    label = "X1C <test> & Co"
+    collectors = [(pid, PrinterKind.MKS, label, _Collector(state), "mks")
+                  for pid, state in (("p-fin", "finish"), ("p-pause", "paused"), ("p-err", "error"))]
+    with pytest.raises(_OneCycle):
+        main.poll_loop(_Store(), collectors, _Tg(),
+                       prev_states={pid: PrinterState.PRINTING for pid, *_rest in collectors})
+    assert sorted(sent) == sorted(["✅ X1C &lt;test&gt; &amp; Co",
+                                   "⏸ <b>X1C &lt;test&gt; &amp; Co</b>",
+                                   "🔴 X1C &lt;test&gt; &amp; Co"])
+
+
 # --- #321: grace status must preserve ALL fields (ams/fans/light_on/fw) -------
 
 def test_build_grace_status_preserves_all_fields():

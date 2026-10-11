@@ -4,30 +4,106 @@ from typing import Any, Dict, Optional
 
 from app.domain.models import PrinterKind, PrinterStatus, PrinterState, now_ts
 from app.services.utils import map_state, as_float, as_int, safe_job_name
-
-try:
-    from pybambu.const import FansEnum
-except Exception:  # pragma: no cover - pybambu absent only in exotic envs
-    FansEnum = None
+# Hard import: a broken vendored tree must fail loudly, not silently drop the fans.
+from app.vendor.pybambu.const import FansEnum
+from app.vendor.pybambu.utils import get_HMS_severity
 
 
 logger = logging.getLogger(__name__)
+
+# Sanity range for a chamber reading (°C). device.ctc.info.temp is packed
+# (target << 16) | current, and the vendored lib unpacks it without a range check.
+_CHAMBER_MAX = 200
+# The vendored lib marks a loaded spool with no material assigned as "?"
+# (const.UNKNOWN_TRAY_LABEL).
+_UNKNOWN_TRAY = "?"
+# pybambu 1.0.1 linked every HMS code to its own wiki page; the vendored lib
+# falls back to the wiki's HMS home page for codes missing from its link table.
+_HMS_WIKI_HOME = "/hms/home"
+_HMS_WIKI_PAGE = "https://wiki.bambulab.com/en/x1/troubleshooting/hmscode/"
+# Bambu's own tables have an empty text for some HMS codes (ru and en alike: 90
+# codes, 11 of them fatal and 67 serious), and the lib drops those from
+# hms.errors. These severities are still shown, as "unknown" with the code's
+# wiki page, the way pybambu 1.0.1 showed every code it had no text for.
+_SILENT_HMS_SHOWN = ("fatal", "serious")
 
 
 def kind_debug_enabled(state: PrinterState) -> bool:
     return state == PrinterState.PRINTING
 
 
+def _read(obj: Any, name: str) -> Any:
+    """getattr for the vendored lib's index-based properties.
+
+    active_nozzle_* / active_*_index look the active extruder up in a dict
+    keyed 0/1/15 and raise KeyError for any other index; getattr's default only
+    swallows AttributeError.
+    """
+    try:
+        return getattr(obj, name, None)
+    except (KeyError, IndexError, TypeError):
+        return None
+
+
+def _in_chamber_range(value: Optional[float]) -> bool:
+    return value is not None and 0 < value < _CHAMBER_MAX
+
+
+def _hms_wiki(code: Any, wiki: Any) -> Optional[str]:
+    """The lib's wiki link for an HMS code, or the code's own page when the lib
+    only has the generic HMS home page."""
+    wiki = str(wiki or "")
+    if wiki and not wiki.rstrip("/").endswith(_HMS_WIKI_HOME):
+        return wiki
+    bare = str(code or "")
+    if bare.startswith("HMS_"):
+        bare = bare[len("HMS_"):]
+    return f"{_HMS_WIKI_PAGE}{bare}" if bare else (wiki or None)
+
+
+def _hms_raw_code(item: Any) -> tuple:
+    """("HMS_xxxx_xxxx_xxxx_xxxx", severity) of a raw hms entry, named as the lib names it."""
+    attr, code = int(item["attr"]), int(item["code"])
+    if attr <= 0 or code <= 0:
+        return "HMS_", get_HMS_severity(code)
+    return f"HMS_{attr >> 16:04X}_{attr & 0xFFFF:04X}_{code >> 16:04X}_{code & 0xFFFF:04X}", get_HMS_severity(code)
+
+
+def _with_silent_hms(entries: list, raw: Any) -> list:
+    """Put the fatal / serious codes the lib dropped for lack of text back, in
+    the printer's order. hms.errors keeps the raw order minus those codes, so
+    walking the raw list (hms._hms_list) alongside it finds them."""
+    if not isinstance(raw, list):
+        return entries
+    pending, merged = list(entries), []
+    for item in raw:
+        try:
+            code, severity = _hms_raw_code(item)
+        except (KeyError, TypeError, ValueError):
+            continue
+        if pending and pending[0][0] == code:
+            merged.append(pending.pop(0))
+        elif code != "HMS_" and severity in _SILENT_HMS_SHOWN:
+            merged.append((code, "unknown", severity, None))
+    # The MQTT thread replaces hms.errors and the raw list one after the other:
+    # anything the raw list does not explain is kept as the lib reported it.
+    return merged + pending
+
+
 def _bambu_error_text(hms_obj: Any, print_error_code: Optional[int]) -> Optional[str]:
     """Turn Bambu's HMS list + print_error code into one readable line.
 
-    pybambu's ``hms.errors`` is a flat dict keyed by index:
-    ``{"0-Error": "HMS_xxxx_yyyy: <text>", "0-Severity": "fatal", "0-Wiki": url, ...}``.
-    We keep the resolved text (and severity tag) and append the raw print_error
-    code in hex — the same form the printer's own screen shows. Returns None when
+    The vendored pybambu's ``hms.errors`` is a flat dict keyed by a 1-based index:
+    ``{"Count": n, "1-Code": "HMS_xxxx_xxxx_xxxx_xxxx", "1-Error": "<text>",
+    "1-Wiki": url, "1-Severity": "fatal"}``. The text comes from Bambu's own
+    tables in the client's language (ru, falling back to en); codes whose table
+    text is empty are dropped by the lib, and the fatal / serious ones are put
+    back from the raw list. Each entry renders as
+    ``"<code>: <text> [<severity>]"``, and the raw print_error code is appended
+    in hex — the same form the printer's own screen shows. Returns None when
     there is nothing wrong, so a healthy printer keeps last_error empty.
     """
-    messages = []
+    entries = []   # (code, text, severity, wiki) in the printer's order
     errors = getattr(hms_obj, "errors", None) or {}
     if isinstance(errors, dict):
         def _idx(key: str) -> int:
@@ -37,20 +113,25 @@ def _bambu_error_text(hms_obj: Any, print_error_code: Optional[int]) -> Optional
                 return 0
 
         for key in sorted((k for k in errors if str(k).endswith("-Error")), key=_idx):
-            text = errors.get(key)
+            text = str(errors.get(key) or "").strip()
             if not text:
                 continue
             prefix = str(key)[:-len("-Error")]
-            severity = errors.get(f"{prefix}-Severity")
-            msg = f"{text} [{severity}]" if severity else str(text)
-            # pybambu's bundled HMS table doesn't cover newer models (e.g. P2S),
-            # so the code resolves to "unknown". Append the wiki link so the code
-            # is still actionable — the user can look the exact fault up.
-            resolved = str(text).split(":", 1)[-1].strip().lower()
-            wiki = errors.get(f"{prefix}-Wiki")
-            if resolved in ("", "unknown") and wiki:
+            entries.append((errors.get(f"{prefix}-Code"), text,
+                            errors.get(f"{prefix}-Severity"), errors.get(f"{prefix}-Wiki")))
+
+    messages = []
+    for code, text, severity, wiki in _with_silent_hms(entries, getattr(hms_obj, "_hms_list", None)):
+        line = f"{code}: {text}" if code else text
+        msg = f"{line} [{severity}]" if severity else line
+        # Codes without a text in Bambu's tables read "unknown". Append the
+        # wiki link so the code is still actionable — the user can look the
+        # exact fault up.
+        if text.lower() == "unknown":
+            wiki = _hms_wiki(code, wiki)
+            if wiki:
                 msg = f"{msg} (см. {wiki})"
-            messages.append(msg)
+        messages.append(msg)
 
     if print_error_code:  # non-zero raw code
         messages.append(f"Код ошибки печати: 0x{print_error_code:08X}")
@@ -58,21 +139,59 @@ def _bambu_error_text(hms_obj: Any, print_error_code: Optional[int]) -> Optional
     return " | ".join(messages) if messages else None
 
 
+def _snapshot_items(data: dict) -> list:
+    """Sorted copy of ams.data: the MQTT thread inserts AMS units while we read
+    (a resize mid-copy raises RuntimeError — just copy again)."""
+    for _ in range(3):
+        try:
+            return sorted(list(data.items()), key=lambda kv: kv[0])
+        except RuntimeError:
+            continue
+    return []
+
+
+def _tray_now(ams_obj: Any, units: list) -> Optional[int]:
+    """Active slot in the 1.0.1 ``tray_now`` convention, from the lib's
+    active_ams_index / active_tray_index.
+
+    255 = nothing loaded, 254 = external spool; otherwise the cumulative slot
+    index over the units shown (a classic AMS has 4 slots, an AMS HT 1) — the
+    same numbering as app.js amsChip and /api/ams/current.
+    """
+    a = as_int(_read(ams_obj, "active_ams_index"))
+    t = as_int(_read(ams_obj, "active_tray_index"))
+    if a is None or t is None:
+        return None
+    if a == 255:   # snow 0xFFFF / legacy 255 = none; 0xFF00 / legacy 254 = external
+        return 255 if t in (3, 255) else 254
+    if a == 254:   # second external spool (H2D vir_slot)
+        return 254
+    base = 0
+    for unit in units:
+        n = len(unit["slots"])
+        if unit["index"] == a:
+            return base + t if 0 <= t < n else None
+        base += n
+    return None
+
+
 def _build_ams(ams_obj: Any) -> Optional[Dict[str, Any]]:
     """Compact AMS snapshot for PrinterStatus.ams.
 
-    pybambu pre-creates 4 AMSInstance placeholders even with no AMS attached
-    (X1C fleet: tray_now=254, tray=[]), so units without trays are dropped and
-    "no real units" collapses to None — the frontend hides the chip on that.
-    A tray's own ``empty`` flag is False even for empty slots (P2S, verified
-    live), so emptiness is derived from color/type instead. Colors arrive as
-    RRGGBBAA; the alpha byte is stripped here so the frontend gets a
-    CSS-ready RRGGBB.
+    The vendored lib keeps AMS units in a dict keyed by the unit id (0-3, AMS HT
+    128-135). Units without trays are dropped and "no real units" collapses to
+    None — the frontend hides the chip on that. Emptiness is derived from the
+    material type / colour rather than the tray's own flag. Colors arrive as
+    RRGGBBAA; the alpha byte is stripped here so the frontend gets a CSS-ready
+    RRGGBB.
     """
     if not ams_obj:
         return None
+    data = getattr(ams_obj, "data", None)
+    if not isinstance(data, dict):
+        return None
     units = []
-    for phys_idx, unit in enumerate(getattr(ams_obj, "data", None) or []):
+    for unit_id, unit in _snapshot_items(data):
         trays = getattr(unit, "tray", None) or []
         if not trays:
             continue
@@ -80,36 +199,41 @@ def _build_ams(ams_obj: Any) -> Optional[Dict[str, Any]]:
         for tray in trays:
             color = getattr(tray, "color", None) or ""
             mat_type = getattr(tray, "type", None) or ""
+            name = getattr(tray, "name", None)
+            # "?" = spool loaded, material not set: the 1.0.1 meaning was an
+            # empty type (empty only if the colour is empty too) and no name.
+            if mat_type == _UNKNOWN_TRAY:
+                mat_type = ""
+            if name == _UNKNOWN_TRAY:
+                name = None
             # An empty slot is signalled either by no colour + no material, or by
-            # an explicit type marker ("Empty" on X1C). The marker slot still
-            # carries a leftover colour, so keying emptiness only on colour left it
-            # rendered as a black-filament chip.
+            # an explicit type marker ("Empty"). The marker slot may still carry a
+            # leftover colour, so keying emptiness only on colour left it rendered
+            # as a black-filament chip.
             is_empty_marker = mat_type.strip().lower() == "empty"
             empty = is_empty_marker or (color[:8] in ("", "00000000") and not mat_type)
             slots.append({
                 "type": None if empty else (mat_type or None),
                 "color": None if empty else color[:6],
-                "name": None if empty else getattr(tray, "name", None),
+                "name": None if empty else name,
                 "remain_pct": as_int(getattr(tray, "remain", None)),
                 "empty": empty,
             })
         units.append({
-            # Stable physical unit position in ams_obj.data. History must be keyed
-            # by this, not by the position in the filtered `units` list — dropping
-            # tray-less placeholder units would otherwise shift indices and mix
-            # different physical units' history under one unit_index.
-            "index": phys_idx,
+            # The physical unit id (dict key). History is keyed by it, never by
+            # the position in the filtered `units` list.
+            "index": unit_id,
             "humidity": as_int(getattr(unit, "humidity_index", None)),
-            # humidity_raw and dry_time are grafted onto AMSInstance by
-            # bambu_collector's print_update wrapper (pybambu discards both).
-            "humidity_pct": as_int(getattr(unit, "humidity_raw", None)),
-            "dry_time": as_int(getattr(unit, "dry_time", None)),
+            # humidity = % from humidity_raw (AMS 2 Pro / HT), remaining_drying_time
+            # = minutes left; the lib defaults both to 0 when never reported.
+            "humidity_pct": as_int(getattr(unit, "humidity", None)) or None,
+            "dry_time": as_int(getattr(unit, "remaining_drying_time", None)) or None,
             "temp": as_float(getattr(unit, "temperature", None)),
             "slots": slots,
         })
     if not units:
         return None
-    return {"tray_now": as_int(getattr(ams_obj, "tray_now", None)), "units": units}
+    return {"tray_now": _tray_now(ams_obj, units), "units": units}
 
 
 def normalize_bambu(printer_id: str, label: str, result: Any, device_type: Optional[str] = None) -> PrinterStatus:
@@ -130,18 +254,21 @@ def normalize_bambu(printer_id: str, label: str, result: Any, device_type: Optio
     state = map_state(raw_state)
 
     temp_obj = getattr(result, "temperature", None)
-    nozzle_temp = as_float(getattr(temp_obj, "nozzle_temp", None)) if temp_obj else None
+    # The nozzle lives per extruder (H2D has two): read the active one.
+    nozzle_temp = as_float(_read(temp_obj, "active_nozzle_temperature")) if temp_obj else None
     bed_temp = as_float(getattr(temp_obj, "bed_temp", None)) if temp_obj else None
     chamber_temp = as_float(getattr(temp_obj, "chamber_temp", None)) if temp_obj else None
-    if chamber_temp is not None and chamber_temp <= 0:
-        chamber_temp = None
-    # Цель камеры есть только у моделей с активным подогревом (H2-серия); её
-    # распаковывает монкипатч ctc в bambu_collector. 0 = нагрев выключен —
-    # отдаём None, чтобы карточка не рисовала стрелку «→0°».
+    # Only models with an active chamber heater (H2 series) have a target; the lib
+    # unpacks it from device.ctc. 0 = heater off -> None, so the card draws no
+    # "→0°" arrow. A current value out of range means the whole packed reading is
+    # garbage, so the target is dropped with it.
     target_chamber_temp = as_float(getattr(temp_obj, "target_chamber_temp", None)) if temp_obj else None
-    if target_chamber_temp is not None and target_chamber_temp <= 0:
+    if not _in_chamber_range(chamber_temp):
+        chamber_temp = None
         target_chamber_temp = None
-    target_nozzle_temp = as_float(getattr(temp_obj, "target_nozzle_temp", None)) if temp_obj else None
+    if not _in_chamber_range(target_chamber_temp):
+        target_chamber_temp = None
+    target_nozzle_temp = as_float(_read(temp_obj, "active_nozzle_target_temperature")) if temp_obj else None
     target_bed_temp = as_float(getattr(temp_obj, "target_bed_temp", None)) if temp_obj else None
 
     info_obj = getattr(result, "info", None)
@@ -162,22 +289,23 @@ def normalize_bambu(printer_id: str, label: str, result: Any, device_type: Optio
     fans = None
     if fans_obj:
         try:
-            fan_speed_pct = as_int(fans_obj.get_fan_speed(fans_obj.PART_COOLING))
+            # PART_COOLING is a FansEnum member; the Fans object has no such attribute.
+            fan_speed_pct = as_int(fans_obj.get_fan_speed(FansEnum.PART_COOLING))
         except Exception as e:
             logger.debug("[%s] fan_speed read failed: %s", label, e)
-        if FansEnum is not None:
-            def _fan(member):
-                try:
-                    return as_int(fans_obj.get_fan_speed(member))
-                except Exception:
-                    return None
-            fans = {
-                "aux": _fan(FansEnum.AUXILIARY),
-                "chamber": _fan(FansEnum.CHAMBER),
-                "heatbreak": _fan(FansEnum.HEATBREAK),
-            }
-            if all(v is None for v in fans.values()):
-                fans = None
+
+        def _fan(member):
+            try:
+                return as_int(fans_obj.get_fan_speed(member))
+            except Exception:
+                return None
+        fans = {
+            "aux": _fan(FansEnum.AUXILIARY),
+            "chamber": _fan(FansEnum.CHAMBER),
+            "heatbreak": _fan(FansEnum.HEATBREAK),
+        }
+        if all(v is None for v in fans.values()):
+            fans = None
 
 
 
@@ -221,12 +349,12 @@ def normalize_bambu(printer_id: str, label: str, result: Any, device_type: Optio
     hms_obj = getattr(result, "hms", None)
     if hms_obj:
         debug["hms_errors"] = getattr(hms_obj, "errors", None)
-        debug["hms_error_count"] = getattr(hms_obj, "count", None)
+        debug["hms_error_count"] = getattr(hms_obj, "error_count", None)
 
     # Build a human-readable error line so the dashboard can show *what* is wrong
-    # instead of a bare red badge. pybambu already resolves HMS codes to text in
-    # hms.errors ("{i}-Error" -> "HMS_xxxx: <text>", "{i}-Severity" -> level);
-    # print_error is a raw code the printer shows in hex.
+    # instead of a bare red badge. The lib already resolves HMS codes to text in
+    # hms.errors ("{i}-Code" -> "HMS_xxxx...", "{i}-Error" -> text, "{i}-Severity"
+    # -> level); print_error is a raw code the printer shows in hex.
     last_error = _bambu_error_text(hms_obj, as_int(getattr(pj, "print_error", None)))
 
     lights_obj = getattr(result, "lights", None)
@@ -241,16 +369,17 @@ def normalize_bambu(printer_id: str, label: str, result: Any, device_type: Optio
 
     if info_obj:
         debug["nozzle_info"] = {
-            "diameter": getattr(info_obj, "nozzle_diameter", None),
-            "type": getattr(info_obj, "nozzle_type", None),
+            "diameter": _read(info_obj, "active_nozzle_diameter"),
+            "type": _read(info_obj, "active_nozzle_type"),   # e.g. "hardened_steel"
         }
 
     home_obj = getattr(result, "home_flag", None)
     if home_obj:
         debug["home_flags"] = {
-            "door_open": getattr(home_obj, "door_open", None),
+            # X1 reports the door in home_flag, newer models in stat; the lib merges both.
+            "door_open": getattr(info_obj, "door_open", None),
             "homed": getattr(home_obj, "homed", None),
-            "sdcard": getattr(home_obj, "sdcard_present", None),
+            "sdcard": getattr(home_obj, "sdcard_status", None),   # normal / abnormal / missing
             "is_220v": getattr(home_obj, "is_220V", None),
         }
 
@@ -278,12 +407,13 @@ def normalize_bambu(printer_id: str, label: str, result: Any, device_type: Optio
         state = PrinterState.IDLE
 
     # pybambu reports remaining_time in minutes (see get_end_time in
-    # pybambu/utils.py). Convert to seconds for our unified status.
+    # app/vendor/pybambu/utils.py). Convert to seconds for our unified status.
     raw_remaining_time = as_int(getattr(pj, "remaining_time", None))
     eta_seconds = raw_remaining_time * 60 if raw_remaining_time is not None else None
 
     # PrintJob has no ``print_time`` attribute; derive elapsed seconds from
-    # start_time if it's available.
+    # start_time if it's available (the lib stamps it, UTC-aware, when it sees
+    # the printer go from idle to busy; None after a restart mid-print).
     print_time_seconds = None
     start_time = getattr(pj, "start_time", None)
     if start_time is not None:
