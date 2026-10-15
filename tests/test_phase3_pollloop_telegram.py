@@ -199,3 +199,42 @@ def test_notify_dispatches_on_background_thread_when_chat_known():
     # a hung network call can't stall the poll loop that called notify().
     assert r.notify("hi") is True
     assert done.wait(2) is True
+
+
+def test_poll_loop_notes_the_command_signature_of_bambu_printers(monkeypatch):
+    # print.fun tells whether the printer takes unsigned print commands; the poll
+    # loop hands it to printer_commands after every Bambu normalize.
+    import time
+    from types import SimpleNamespace
+
+    import pytest
+    from app.services import printer_commands
+
+    class _OneCycle(Exception):
+        pass
+
+    def _sleep(_seconds):
+        raise _OneCycle
+
+    class _Store:
+        def upsert(self, status):
+            pass
+
+        def get_one(self, pid):
+            return None
+
+        def record_snapshot(self, status):
+            pass
+
+    class _Collector:
+        def fetch(self):
+            return object()
+
+    noted = []
+    monkeypatch.setattr(main, "time", SimpleNamespace(time=time.time, monotonic=time.monotonic, sleep=_sleep))
+    monkeypatch.setattr(main, "normalize_bambu",
+                        lambda pid, label, result, device_type=None: _status(id=pid, signature_required=False))
+    monkeypatch.setattr(printer_commands, "note_signature", lambda pid, required: noted.append((pid, required)))
+    with pytest.raises(_OneCycle):
+        main.poll_loop(_Store(), [("b1", PrinterKind.BAMBU, "B1", _Collector(), "P2S")])
+    assert noted == [("b1", False)]

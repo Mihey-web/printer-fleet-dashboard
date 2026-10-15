@@ -24,4 +24,6 @@ class KlipperCollector:
         return data
 
     def send_command(self, command: str, param: str = None) -> dict:
+        """Deprecated, no caller left (printer_commands uses client.run_action);
+        KlipperClient.send_command warns. To be removed in a cleanup."""
         return self.client.send_command(command, param)

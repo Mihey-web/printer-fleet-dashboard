@@ -66,7 +66,18 @@ def _ams_db_path():
     )
 
 
-def _current_labels():
+def _registry_rows():
+    """The registry rows (with soft-deleted printers), or [] when unreadable.
+    They hold access codes and serials: callers take only what they need."""
+    try:
+        from app.services import printer_registry
+        return printer_registry.list_printers(include_deleted=True)
+    except Exception:
+        logger.debug("registry lookup failed", exc_info=True)
+        return []
+
+
+def _current_labels(rows=None):
     """Map printer_id -> current display name from the registry.
 
     History rows (and the collector's own status.label) store the name
@@ -77,12 +88,10 @@ def _current_labels():
     stored label for ids no longer in the registry (e.g. hard-deleted printers).
 
     include_deleted=True so soft-deleted printers still resolve to their name in
-    historical views.
+    historical views. `rows`: registry rows already read for this request.
     """
     try:
-        from app.services import printer_registry
-        return {p["id"]: p["label"]
-                for p in printer_registry.list_printers(include_deleted=True)}
+        return {p["id"]: p["label"] for p in (_registry_rows() if rows is None else rows)}
     except Exception:
         logger.debug("current labels lookup failed", exc_info=True)
         return {}
@@ -230,11 +239,12 @@ def _query_state_durations(db, fr, to):
                 WHERE recorded_at >= ? AND recorded_at <= ?
             )
             SELECT printer_id, MAX(label) AS label, state,
-                   CAST(SUM(CASE WHEN next_ts > recorded_at THEN next_ts - recorded_at ELSE 0 END) AS INTEGER) AS duration_sec
+                   CAST(SUM(CASE WHEN next_ts > recorded_at THEN MIN(next_ts - recorded_at, ?) ELSE 0 END) AS INTEGER) AS duration_sec,
+                   CAST(SUM(CASE WHEN next_ts - recorded_at > ? THEN next_ts - recorded_at - ? ELSE 0 END) AS INTEGER) AS gap_sec
             FROM intervals
             GROUP BY printer_id, state
             ORDER BY printer_id, duration_sec DESC
-        """, (to, fr, to)).fetchall()
+        """, (to, fr, to, HISTORY_GAP_CAP_S, HISTORY_GAP_CAP_S, HISTORY_GAP_CAP_S)).fetchall()
     finally:
         conn.close()
 
@@ -244,7 +254,17 @@ def _query_state_durations(db, fr, to):
         if pid not in printers:
             printers[pid] = {"printer_id": pid, "label": r["label"], "states": {}}
         printers[pid]["states"][r["state"]] = r["duration_sec"]
+        if r["gap_sec"]:
+            states = printers[pid]["states"]
+            states["nodata"] = states.get("nodata", 0) + r["gap_sec"]
     return printers
+
+
+# A history row is written every poll (~80 s, ≤ ~200 s across a Pi reboot). A
+# state lasts at most this long past its row; a longer gap is "no data", not
+# the last state: 07–11.10.2026 a dying SSD wrote no history for ~5 days, and
+# the summary showed those days as "printing" or "offline" (owner's screenshot).
+HISTORY_GAP_CAP_S = 600
 
 
 def _cached_state_durations(db, fr, to):
@@ -264,6 +284,30 @@ def _cached_state_durations(db, fr, to):
         for k in [k for k, v in _states_summary_cache.items() if v[0] <= now]:
             del _states_summary_cache[k]
     return printers
+
+
+def _live_raw(store, printer_id):
+    """Bambu only, in any printer state: the report bit fields the vendored lib
+    drops (app/collectors/bambu_raw.py) and its loaded-slot indices, from the
+    live MQTT telemetry. For checking AMS / filament-change telemetry on a real
+    printer; no names or other job data."""
+    get_collector = getattr(store, 'get_collector', None)
+    collector = get_collector(printer_id) if callable(get_collector) else None
+    live_device = getattr(collector, 'live_device', None)
+    device = live_device() if callable(live_device) else None
+    if device is None or not hasattr(device, 'forge_raw'):
+        return None
+    raw = device.forge_raw.snapshot()
+    raw['ams'] = {str(k): {'info': v['info'], 'sf': list(v['sf'] or [])} for k, v in raw['ams'].items()}
+    raw['extruders'] = {str(k): v for k, v in raw['extruders'].items()}
+    ams = getattr(device, 'ams', None)
+    for name in ('active_ams_index', 'active_tray_index'):
+        try:
+            raw[name] = getattr(ams, name, None)
+        except (KeyError, IndexError, TypeError):
+            raw[name] = None
+    raw['gcode_state'] = getattr(getattr(device, 'print_job', None), 'gcode_state', None)
+    return raw
 
 
 class JWTAuthMiddleware(BaseHTTPMiddleware):
@@ -326,10 +370,16 @@ def create_app(store: StateStore) -> FastAPI:
     @app.get('/api/printers')
     def printers():
         from app.services import printer_commands
-        labels = _current_labels()
+        registry = _registry_rows()
+        labels = _current_labels(registry)
+        reg_models = {p["id"]: p.get("model") for p in registry}
         rows = []
         for s in store.get_all():
             d = s.to_dict()
+            # What the dashboard can do with this printer (True / False / None
+            # per control, see printer_commands.caps_for) and why print control
+            # is not available. Computed before debug is dropped, never from it.
+            caps, note = printer_commands.caps_for(d)
             # debug-блоб (raw_state, HMS-коды, сырые атрибуты AMS) закрыт до
             # admin-only /api/debug/printers/{id}; в общий листинг не отдаём —
             # фронт его не использует, а viewer-роль не должна его видеть.
@@ -338,15 +388,20 @@ def create_app(store: StateStore) -> FastAPI:
             # переименование видно на карточках и в браузерных уведомлениях
             # (фронт шлёт p.label) сразу, без ожидания рестарта.
             d["label"] = labels.get(d["id"], d["label"])
+            d["caps"], d["caps_note"] = caps, note
             # True/False/None: доступно ли управление печатью. У Bambu это
             # вердикт зонда (прошивка может блокировать print-класс), у Creality
-            # — просто живая WS-сессия. Фронт прячет кнопки на всём, кроме True.
+            # — просто живая WS-сессия, у Klipper — готовность klippy (caps).
+            # Вкладка AMS и старый код читают его; карточка — caps.
             cap = printer_commands.capability_for(d["id"], d.get("kind"), d.get("online"))
-            if cap is not None or d.get("kind") == "bambu":
+            if d.get("kind") == "klipper":
+                cap = caps["pause"]
+            if cap is not None or d.get("kind") in ("bambu", "klipper"):
                 d["print_cmds"] = cap
             # Активный подогрев камеры (M141) — только H2-серия; на остальных
-            # моделях чип камеры остаётся некликабельным показометром.
-            if printer_commands.has_chamber_heater(d.get("device_type")):
+            # моделях чип камеры остаётся некликабельным показометром. Та же
+            # цепочка модели, что у команд: статус, затем реестр.
+            if printer_commands.has_chamber_heater(d.get("device_type") or reg_models.get(d["id"])):
                 d["chamber_ctl"] = True
             rows.append(d)
         return rows
@@ -372,7 +427,8 @@ def create_app(store: StateStore) -> FastAPI:
         if item is None:
             raise HTTPException(status_code=404, detail='Printer not found')
         return {'id': item.id, 'label': _current_labels().get(item.id, item.label),
-                'state': item.state.value, 'online': item.online, 'debug': item.debug}
+                'state': item.state.value, 'online': item.online, 'debug': item.debug,
+                'raw': _live_raw(store, printer_id)}
 
     @app.get('/api/cameras')
     def cameras_list():
@@ -396,6 +452,7 @@ def create_app(store: StateStore) -> FastAPI:
             base = 0
             for idx, unit in enumerate(ams["units"]):
                 dry_time = unit.get("dry_time")
+                dry = unit.get("dry")
                 nslots = len(unit.get("slots") or [])
                 out.append({
                     "printer_id": s.id,
@@ -409,13 +466,23 @@ def create_app(store: StateStore) -> FastAPI:
                     "humidity_pct": unit.get("humidity_pct"),
                     "temp": unit.get("temp"),
                     "dry_time": dry_time,
-                    "drying": bool(dry_time and dry_time > 0),
+                    # AMS 2 Pro / AMS HT report their own drying status (dry.active);
+                    # without it the remaining time is the only hint.
+                    "drying": bool(dry["active"]) if dry else bool(dry_time and dry_time > 0),
+                    "dry": dry,
                     "slots": unit.get("slots") or [],
                     "tray_now_local": (tray_now - base) if tray_now is not None
                         and base <= tray_now < base + nslots else None,
                 })
                 base += nslots
         return out
+
+    @app.get("/api/ams/autodry")
+    def ams_autodry():
+        # AMS auto-drying for every logged-in user: rules, per-unit status and
+        # plans, the journal (editing and commands: /api/admin/ams/autodry*).
+        from app.services import ams_autodry_engine
+        return ams_autodry_engine.snapshot()
 
     @app.get("/api/ams/history")
     def ams_history(printer_id: str, unit: int = Query(0, ge=0),
@@ -495,7 +562,7 @@ def create_app(store: StateStore) -> FastAPI:
         result = []
         for pid, data in printers.items():
             resp = {"states": {}}
-            for s in ("printing", "idle", "paused", "error", "finished", "offline", "unknown"):
+            for s in ("printing", "idle", "paused", "error", "finished", "offline", "unknown", "nodata"):
                 if data["states"].get(s, 0) > 0:
                     resp["states"][s] = data["states"][s]
             if resp["states"]:

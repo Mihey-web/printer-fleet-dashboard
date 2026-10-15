@@ -272,6 +272,42 @@ def test_tee_receives_every_raw_message(fake_paho, make_collector, monkeypatch):
     assert teed == [(SERIAL, payload) for payload in sent]
 
 
+def test_device_feeds_raw_report_then_the_lib(offline_collector, monkeypatch):
+    # Every report reaches RawReport (fields the lib drops) and then the lib itself,
+    # both from paho's on_message and from a direct device.print_update(data=...).
+    from app.collectors.bambu_raw import RawReport
+
+    collector = offline_collector("P2S")
+    device = collector.client.get_device()
+    kit.deliver(collector, {"print": {"command": "push_status", "msg": 0, "gcode_state": "IDLE", "fun": "20000000"}})
+    assert device.forge_raw.snapshot()["fun"] == 0x20000000
+    assert device.print_job.gcode_state == "IDLE"
+    device.print_update(data={"fun2": "3973", "gcode_state": "RUNNING"})
+    assert device.forge_raw.snapshot()["fun2"] == 0x3973
+    assert device.print_job.gcode_state == "RUNNING"
+
+    def boom(self, data):
+        raise RuntimeError("raw report broke")
+
+    monkeypatch.setattr(RawReport, "update", boom)
+    kit.deliver(collector, {"print": {"command": "push_status", "msg": 0, "gcode_state": "FINISH"}})
+    assert device.print_job.gcode_state == "FINISH"     # the lib still parsed the report
+
+
+def test_live_device_only_while_telemetry_is_live(no_network, offline_collector, monkeypatch):
+    # Commands checked against live telemetry: the Device while info.online,
+    # else None. Unlike fetch() it never connects or schedules a rebuild.
+    collector = offline_collector("P2S")
+    monkeypatch.setattr(collector, "connect", lambda: pytest.fail("live_device() must not connect"))
+    assert collector.live_device() is None                 # nothing received yet
+    kit.deliver(collector, PUSH)
+    assert collector.live_device() is collector.client.get_device()
+    collector.client.get_device().info.set_online(False)   # link drop / watchdog
+    assert collector.live_device() is None
+    monkeypatch.setattr(collector.client, "get_device", lambda: (_ for _ in ()).throw(RuntimeError("x")))
+    assert collector.live_device() is None
+
+
 # --- liveness, refused logins, rebuilds ------------------------------------------
 
 def test_link_drop_marks_offline_without_rebuild(fake_paho, make_collector):

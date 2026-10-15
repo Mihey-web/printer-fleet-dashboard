@@ -31,6 +31,13 @@ SEVERITY = {1: "fatal", 2: "serious", 3: "common", 4: "info"}
 SILENT_CODES = {"0500_0600_0002_0070"}
 WIKI_PAGE = "https://wiki.bambulab.com/en/x1/troubleshooting/hmscode/"
 CYRILLIC = re.compile("[А-Яа-яЁё]")
+# ams.ams[].info: type bits 0-3 (3 AMS 2 Pro, 4 AMS HT), dry status bits 4-7,
+# dry phase bits 22-23. Status only when fun2 bit 5 (remote drying) is set.
+DRY_TYPES = {3: "n3f", 4: "n3s"}
+DRY_STATUS = {0: "off", 1: "checking", 2: "drying", 3: "cooling", 4: "stopping", 5: "error",
+              6: "overheat", 7: "testing"}
+DRY_KEYS = ("type", "status", "phase", "active", "remaining_min", "temp", "hours", "filament",
+            "blocker_codes", "feeding")
 
 
 def _fan_pct(raw) -> int:
@@ -42,6 +49,15 @@ def _hms_code(attr: int, code: int) -> str:
     return f"{attr >> 16:04X}_{attr & 0xFFFF:04X}_{code >> 16:04X}_{code & 0xFFFF:04X}"
 
 
+def _nozzle_slug(code: str) -> str:
+    """Nozzle type code ("HS01") -> slug: 2nd letter U = TPU high flow, H/E =
+    high flow; digits 3-4 = material."""
+    if code[1] == "U":
+        return "tpu_high_flow"
+    flow = "high_flow_" if code[1] in ("H", "E") else ""
+    return flow + {"00": "stainless_steel", "01": "hardened_steel", "05": "tungsten_carbide"}.get(code[2:4], "unknown")
+
+
 def _tray_loaded(tray: dict) -> bool:
     if "state" in tray:
         state = int(tray["state"])
@@ -51,8 +67,14 @@ def _tray_loaded(tray: dict) -> bool:
     return bool(tray.get("tray_info_idx")) or tray.get("tray_type", "") not in ("", "Empty")
 
 
-def expected(p: dict) -> dict:
-    """Expected PrinterStatus fields from the merged `print` block alone."""
+# Models without a chamber sensor: their chamber_temper is bogus (the P1S
+# reports a constant 5), so the status carries no chamber reading.
+NO_CHAMBER_SENSOR = ("P1P", "P1S", "A1", "A1MINI")
+
+
+def expected(p: dict, model: str = "") -> dict:
+    """Expected PrinterStatus fields from the merged `print` block alone (and
+    the printer model, which decides whether there is a chamber sensor)."""
     e = {
         "state": map_state(p["gcode_state"]),
         "progress_pct": float(p["mc_percent"]),
@@ -82,11 +104,13 @@ def expected(p: dict) -> dict:
         cur, tgt = packed & 0xFFFF, packed >> 16
     else:
         cur, tgt = round(p["chamber_temper"]), 0
-    e["chamber_temp"] = float(cur) if 0 < cur < 200 else None
+    e["chamber_temp"] = float(cur) if 0 < cur < 200 and model not in NO_CHAMBER_SENSOR else None
     e["target_chamber_temp"] = float(tgt) if e["chamber_temp"] is not None and 0 < tgt < 200 else None
     e["stage"] = STAGES[int(p["stg_cur"])]
     lights = {x["node"]: x["mode"] for x in p.get("lights_report", [])}
-    e["light_on"] = {"on": True, "off": False}.get(lights.get("chamber_light"))
+    # Either lamp lit = lit (H2/X2 have two); off only when lamp 2 is not on either.
+    l1, l2 = lights.get("chamber_light"), lights.get("chamber_light2")
+    e["light_on"] = True if "on" in (l1, l2) else False if l1 == "off" and l2 in (None, "off", "unknown") else None
     e["fan_speed_pct"] = _fan_pct(p.get("cooling_fan_speed"))
     e["fans"] = {"aux": _fan_pct(p.get("big_fan1_speed")),
                  "chamber": _fan_pct(p.get("big_fan2_speed")),
@@ -96,26 +120,62 @@ def expected(p: dict) -> dict:
     e["job_name"] = p.get("subtask_name") or p.get("gcode_file") or None
     e["firmware_version"] = "unknown"    # no fixture carries a get_version reply
     e["print_time_seconds"] = None       # captured mid-print: no idle->busy transition
+    # A filament change runs while device.extruder.state bit 19 is set (legacy: ams_status main 1).
+    busy = bool(ext.get("state", 0) >> 19 & 1) if "info" in ext else (p.get("ams_status", 0) >> 8) & 0xFF == 1
+    assert not busy, "the captures carry no filament change"
+    e["filament_change"] = None
+    # Filament in the extruder: info bit 1 of the active extruder (legacy: tray_now != 255).
+    if "info" in ext:
+        e["filament_loaded"] = bool(next(i["info"] for i in ext["info"] if i["id"] == active) & 0b10)
+    else:
+        raw_now = (p.get("ams") or {}).get("tray_now")
+        e["filament_loaded"] = None if raw_now is None else int(raw_now) != 255
+    e["dual_nozzle"] = (ext.get("state", 0) & 0xF) > 1
+    e["filament_swap_ok"] = None          # firmware version unknown: no get_version in the captures
     hms = [(_hms_code(h["attr"], h["code"]), SEVERITY.get(h["code"] >> 16, "unknown")) for h in p.get("hms", [])]
     e["hms"] = [(code, sev, code in SILENT_CODES) for code, sev in hms
                 if code not in SILENT_CODES or sev in ("fatal", "serious")]
 
     ams = p.get("ams") or {}
+    fun2 = int(p["fun2"], 16) if "fun2" in p else None
+    e["ams_dry_ok"] = None if fun2 is None else bool(fun2 >> 5 & 1)
+    # print.fun bit 29: unsigned print-class commands are refused (None without fun: P1).
+    e["signature_required"] = bool(int(p["fun"], 16) & 0x20000000) if "fun" in p else None
+    # Indicators. The door sensor needs the firmware version (no get_version in
+    # the captures). SD card: home_flag bits 8-9; a missing card on a printer
+    # that prints from eMMC (fun2 bit 0) is not shown. Nozzle: the active
+    # extruder's device.nozzle entry, else the flat fields (P1).
+    e["door_open"] = None
+    hf = p.get("home_flag")
+    sd = None if hf is None else ("missing", "normal", "abnormal", "abnormal")[(hf >> 8) & 3]
+    e["sdcard"] = None if sd == "missing" and fun2 is not None and fun2 & 1 else sd
+    nozzles = (dev.get("nozzle") or {}).get("info")
+    if isinstance(nozzles, list):
+        n = next(x for x in nozzles if x["id"] == active)
+        e["nozzle"] = {"diameter": float(n["diameter"]), "type": _nozzle_slug(n["type"])}
+    else:
+        e["nozzle"] = {"diameter": float(p["nozzle_diameter"]), "type": p["nozzle_type"]}
+    feeding_unit = None
+    if e["state"] in (PrinterState.PRINTING, PrinterState.PAUSED) and "info" in ext:
+        feeding_unit = next(i["snow"] for i in ext["info"] if i["id"] == active) >> 8
     units = []
     for u in sorted(ams.get("ams", []), key=lambda u: int(u["id"])):
         raw_pct = int(u.get("humidity_raw", 0))
         slots = []
         for t in u["tray"]:
             if _tray_loaded(t):
+                lo, hi = int(t.get("nozzle_temp_min") or 0), int(t.get("nozzle_temp_max") or 0)
                 slots.append({"type": t["tray_type"], "color": t["tray_color"][:6],
                               "name": FILAMENTS[t["tray_info_idx"]], "remain_pct": t.get("remain", -1),
-                              "empty": False})
+                              "empty": False, "nozzle_temp": [lo, hi] if lo > 0 and hi > 0 else None})
             else:
-                slots.append({"type": None, "color": None, "name": None, "remain_pct": -1, "empty": True})
+                slots.append({"type": None, "color": None, "name": None, "remain_pct": -1, "empty": True,
+                              "nozzle_temp": None})
         units.append({"index": int(u["id"]), "humidity": int(u["humidity"]),
                       "humidity_pct": raw_pct if 1 <= raw_pct <= 100 else None,
                       "dry_time": int(u.get("dry_time", 0)) or None,
-                      "temp": float(u["temp"]), "slots": slots})
+                      "temp": float(u["temp"]), "slots": slots,
+                      "dry": _expected_dry(p, u, feeding_unit)})
     if units:
         if "info" in ext:
             snow = next(i["snow"] for i in ext["info"] if i["id"] == active)
@@ -136,6 +196,43 @@ def expected(p: dict) -> dict:
     else:
         e["ams"] = None
     return e
+
+
+def _expected_dry(p: dict, u: dict, feeding_unit) -> dict:
+    """The payload-derived part of a unit's `dry` block (the policy part —
+    limits, suggestion, presets — is pinned by test_replay_anchors)."""
+    info = int(u["info"], 16)
+    fun2 = int(p["fun2"], 16) if "fun2" in p else None
+    remote = fun2 is not None and bool(fun2 >> 5 & 1)
+    status = DRY_STATUS.get((info >> 4) & 0xF) if remote else None
+    setting = u.get("dry_setting") or {}
+    remaining = int(u.get("dry_time", 0)) or None
+    return {
+        "type": DRY_TYPES[info & 0xF],
+        "status": status,
+        "phase": {1: "heating", 2: "dehumidify"}.get(info >> 22 & 3) if status in ("checking", "drying") else None,
+        "active": status in ("checking", "drying", "error", "overheat") if status else bool(remaining),
+        "remaining_min": remaining,
+        "temp": max(setting.get("dry_temperature", 0), 0) or None,
+        "hours": max(setting.get("dry_duration", 0), 0) or None,
+        "filament": setting.get("dry_filament") or None,
+        "blocker_codes": [c for c in u.get("dry_sf_reason", []) if c != 6] if remote else [],
+        "feeding": feeding_unit == int(u["id"]),
+    }
+
+
+def _dry_view(ams):
+    """status.ams with each unit's dry block reduced to DRY_KEYS."""
+    if not ams:
+        return ams
+    units = []
+    for unit in ams["units"]:
+        dry = unit.get("dry")
+        if dry is not None:
+            dry = {k: dry[k] for k in DRY_KEYS if k in dry}
+            dry["blocker_codes"] = [b["code"] for b in unit["dry"]["blockers"]]
+        units.append(dict(unit, dry=dry))
+    return dict(ams, units=units)
 
 
 def _hms_matches(last_error, want) -> bool:
@@ -164,10 +261,13 @@ def test_replay_matches_payload(model, offline_collector):
     count = 0
     for i, merged, status in _replay(collector, model):
         count += 1
-        for key, want in expected(merged).items():
+        for key, want in expected(merged, model).items():
             if key == "hms":
                 if not _hms_matches(status.last_error, want):
                     mismatches.append((i, "last_error", want, status.last_error))
+            elif key == "ams":
+                if _dry_view(status.ams) != want:
+                    mismatches.append((i, key, want, _dry_view(status.ams)))
             elif getattr(status, key) != want:
                 mismatches.append((i, key, want, getattr(status, key)))
     assert count == len(kit.load_fixture(model))
@@ -195,6 +295,15 @@ def test_replay_anchors(offline_collector):
     silent = f"HMS_0500_0600_0002_0070: unknown [serious] (см. {WIKI_PAGE}0500_0600_0002_0070)"
     assert all(s.last_error.split(" | ")[0] == silent for s in statuses["P2S"])
 
+    # Drying limits while that AMS feeds the print (Bambu Studio's print caps):
+    # PETG at most 55 °C; on the H2S the PETG spool caps the PA-CF one too.
+    for model in ("P2S", "H2S"):
+        dry = statuses[model][-1].ams["units"][0]["dry"]
+        assert (dry["type"], dry["status"], dry["feeding"]) == ("n3f", "off", True)
+        assert (dry["max_temp"], dry["max_by"]) == (55, "PETG")
+        assert dry["suggest"] == {"filament": "PETG", "temp": 55, "hours": 12}
+        assert statuses[model][-1].ams_dry_ok is True
+
     h2s = statuses["H2S"]
     assert {s.chamber_temp for s in h2s} <= {34.0, 35.0}
     assert h2s[-1].ams["units"][0]["humidity_pct"] == 14
@@ -203,7 +312,8 @@ def test_replay_anchors(offline_collector):
 
     p1s = statuses["P1S"]
     assert len(p1s) == 24
-    assert all(s.chamber_temp == 5.0 and s.ams is None for s in p1s)
+    # The P1S has no chamber sensor: its constant chamber_temper 5 is not shown.
+    assert all(s.chamber_temp is None and s.target_chamber_temp is None and s.ams is None for s in p1s)
     # 23 delta-only messages after the pushall: missing keys keep their values.
     assert p1s[-1].state == PrinterState.PRINTING
     assert p1s[-1].bed_temp == 70.0
@@ -229,6 +339,28 @@ def test_replay_tee_online_and_no_side_effects(model, monkeypatch, no_network, o
     assert collector.client.ftp_enabled is False
     assert collector.client.camera_enabled is False
     assert not os.path.exists(collector.client.cache_path)
+
+
+@pytest.mark.parametrize("model,version,door", [
+    ("X1C", "01.09.00.00", False),   # X1: home_flag bit 23 (its stat bit 23 is set throughout)
+    ("P2S", "01.02.00.00", False),   # stat bit 23
+    ("H2S", "01.02.00.00", False),
+    ("P1S", "01.08.00.00", None),    # no door sensor
+])
+def test_replay_with_a_known_firmware(model, version, door, offline_collector, caplog):
+    # The captures carry no get_version reply (see the fixture README), so a
+    # synthetic one goes first: the firmware-gated paths (AMS_SWITCH_COMMAND,
+    # DOOR_SENSOR) then run on the real reports. The door bits are clear in
+    # every captured report.
+    collector = offline_collector(model)
+    kit.deliver(collector, {"info": {"command": "get_version", "sequence_id": "0", "module": [
+        {"name": "ota", "sw_ver": version, "hw_ver": "OTA", "sn": kit.FAKE_SERIALS[model]}]}})
+    with caplog.at_level("ERROR"):
+        statuses = [status for _i, _p, status in _replay(collector, model)]
+    assert {s.firmware_version for s in statuses} == {version}
+    assert {s.filament_swap_ok for s in statuses} == {True}
+    assert {s.door_open for s in statuses} == {door}
+    assert not [r for r in caplog.records if "supports_feature" in r.getMessage()]
 
 
 def test_get_version_sets_firmware(offline_collector):

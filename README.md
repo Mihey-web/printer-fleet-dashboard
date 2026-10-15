@@ -27,10 +27,23 @@ temperatures, AMS slots, and Wi-Fi signal. (Screenshot uses a synthetic demo fle
   summaries backed by SQLite.
 - **Telegram notifications** — configurable alerts on finish / pause / error,
   with an optional outbound proxy pool, all editable from the UI.
-- **Remote control** — pause/resume/stop on Bambu and Creality; nozzle, bed, fan,
-  and speed control on Bambu, plus chamber temperature on models with an actively
-  heated chamber (H2 series). Bambu firmware is capability-probed, so controls
-  only appear where the printer actually accepts them.
+- **Remote control** — a control row on every card for admins: light,
+  pause/resume, stop, cool down, bed down, AMS and print speed on Bambu;
+  pause/resume/stop on Creality; pause/resume/cancel and the light (an
+  `output_pin`, found automatically) on Klipper. Nozzle, bed, fan, and speed
+  control on Bambu, plus chamber temperature on models with an actively heated
+  chamber (H2 series). AMS on Bambu: load and unload filament (idle printers
+  only, checked against live telemetry) and AMS 2 Pro / AMS HT drying with
+  Bambu Studio's temperature limits. Each control appears only where the
+  printer can carry it out (the firmware's acceptance is read from the
+  printer's reports, or probed), the server refuses commands the printer's live
+  state forbids (no cooling or bed move mid-print), and the card shows each
+  printer's answer. A fleet bar switches every light at once and pauses or
+  resumes chosen printers.
+- **AMS auto-drying** — dries an AMS 2 Pro / AMS HT by time when its humidity
+  at rest stays high, measures again once the unit has cooled, and repeats up
+  to a limit; never stops a drying itself, leaves drying started elsewhere
+  alone, and starts in a journal-only shadow mode (rules on the AMS tab).
 - **Auth & roles** — JWT cookie sessions, `admin` and `viewer` roles, login rate
   limiting, refresh-token rotation, and an audit log.
 - **Fleet managed from the UI** — add, edit, and remove printers in the admin
@@ -122,7 +135,10 @@ All runtime configuration is optional and has safe defaults. See
 
 The **Telegram bot token, chat id, notification templates, and proxy list** are
 managed in the database and edited from **Settings** in the UI — not via env or
-code.
+code. One expert setting has no UI: `printer_light_enabled`, a list of printer
+ids whose light control is not verified yet (Creality `lightSw`), set with
+`PUT /api/admin/settings` `{"printer_light_enabled": ["<printer id>"]}` after
+checking it on that printer.
 
 Run behind a TLS reverse proxy (e.g. nginx) in production and keep
 `COOKIE_SECURE=1`. Serve the app with a process manager such as a systemd
@@ -145,7 +161,9 @@ python -m pytest -q
 
 Самостоятельно размещаемая панель мониторинга фермы 3D-принтеров: Bambu Lab,
 Creality, Klipper/Moonraker и MKS WiFi на одной странице — состояние, прогресс,
-температуры, история, уведомления в Telegram и базовое управление. Парк
+температуры, история, уведомления в Telegram, управление с карточки,
+групповые команды «Вся ферма» (свет, пауза, продолжение) и автосушка AMS
+по влажности в покое (вкладка AMS; по умолчанию пробный режим). Парк
 принтеров, токен Telegram и прокси задаются в веб-интерфейсе (хранятся в БД), а
 не в коде. Быстрый старт и переменные окружения — см. разделы выше и
 [`.env.example`](./.env.example).

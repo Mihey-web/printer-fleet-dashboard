@@ -112,6 +112,11 @@ subclass (nothing is monkeypatched at class level):
 - a refused CONNACK (paho reports every one as rc=5) keeps paho's own reconnect loop running
   instead of ending the listener for good;
 - every raw report is teed to `printer_commands.note_local_reply` (command replies);
+- every `print` report also goes through `app/collectors/bambu_raw.py` (`RawReport`, as
+  `device.forge_raw`) before the lib parses it: the lib drops `fun2`, the AMS units' `info` bit
+  field and `dry_sf_reason`, `ams_status`, `ams.tray_tar` and most of `device.extruder` (and keeps
+  `fun` only as a private string). The hook is an instance attribute that wraps
+  `device.print_update`; a failure in it never stops the lib's own parse;
 - `publish()` is upstream's body with the paho client read once (`close()` and a rebuild swap
   it on another thread), and returns False when there is no paho client;
 - `BambuClient.connect()` (a coroutine) runs in a short-lived `bambu-connect-<label>` thread; a
@@ -163,7 +168,9 @@ Things worth knowing about the library itself:
    `connect`, `MqttThread`, `on_connect`, `on_disconnect`, `on_message`, `publish`, `disconnect`,
    `setup_tls`, `local_tls_context`) and `models.py` (`Temperature`, `Fans`, `AMSList`,
    `AMSInstance`, `AMSTray`, `HMSList` incl. `_hms_list`, `PrintJob` incl. its cache pruning,
-   `Info`, `StageAction`, `Extruder`), against the adapter and normalizer assumptions above.
+   `Info`, `StageAction`, `Extruder`, `PrintFun`, `HomeFlag`, `PrintError`, `Device.print_update`
+   and `Device.supports_feature`), against the adapter and normalizer assumptions above. When
+   upstream starts parsing a field that `RawReport` reads itself, drop it from `RawReport`.
 7. Run the test suite. The golden replay (`tests/test_bambu_golden.py`), the 1.0.1 parity
    (`tests/test_bambu_contract_parity.py`), the adapter tests and the guards are the gate; new
    stage ids fail the stage-label test until `app/web/app.js` gets Russian labels for them.

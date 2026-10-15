@@ -9,7 +9,7 @@
   <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
   <!-- favicon replaced inline below -->
     <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='7' fill='%231e293b'/><polygon points='16,3 29,12 29,24 16,30 3,24 3,12' fill='none' stroke='%2360a5fa' stroke-width='2.5'/><circle cx='16' cy='16' r='3' fill='%2360a5fa'/></svg>">
-    <link rel="stylesheet" href="/static/styles.css?v=64" />
+    <link rel="stylesheet" href="/static/styles.css?v=78" />
 
 </head>
 <body>
@@ -24,13 +24,9 @@
         <button type="button" class="view-tab" data-view="admin" id="adminTab" style="display: none;" title="Управление пользователями и журнал аудита">Администрирование</button>
       </nav>
       <div class="topbar-side">
-        <div class="status-chip">
+        <div class="status-chip" title="Данные с принтеров идут · время последнего обновления">
           <span class="status-dot-live"></span>
-          <span>Телеметрия</span>
-          <strong>LIVE</strong>
-        </div>
-        <div class="status-chip">
-          <span>Последнее обновление</span>
+          <strong>на связи</strong>
           <span id="lastUpdate">—</span>
         </div>
         <button type="button" class="view-tab settings-tab" data-view="settings" id="settingsTab" title="Настройки"><span class="settings-tab-gear">⚙</span> Настройки</button>
@@ -65,12 +61,13 @@
             </div>
           </div>
           <label class="alerts-toggle" id="alertsToggleWrap">
-            <span class="alerts-label">Алерты вверх</span>
+            <span class="alerts-label">Проблемные сверху</span>
             <span class="toggle-switch">
               <input type="checkbox" id="alertsTopToggle" checked />
               <span class="toggle-slider"></span>
             </span>
           </label>
+          <div id="fleetBulk"></div>
         </div>
         <div id="printerGrid" class="printer-grid"></div>
       </section>
@@ -91,7 +88,7 @@
       <!-- === Meta row === -->
       <section class="dash-meta-row">
         <span class="dash-meta-item"><svg class="dash-meta-ic" aria-hidden="true"><use href="#i-gauge"></use></svg>Загрузка <strong id="metaUtil">0%</strong></span>
-        <span class="dash-meta-item"><svg class="dash-meta-ic" aria-hidden="true"><use href="#i-clock"></use></svg>ETA <strong id="metaNextFinish">&mdash;</strong></span>
+        <span class="dash-meta-item"><svg class="dash-meta-ic" aria-hidden="true"><use href="#i-clock"></use></svg>Ближайший финиш <strong id="metaNextFinish">&mdash;</strong></span>
         <span class="dash-meta-item"><svg class="dash-meta-ic" aria-hidden="true"><use href="#i-hourglass"></use></svg>Освободятся <strong id="metaFarmIdle" class="dash-meta-finish">&mdash;</strong></span>
         <span class="dash-meta-item"><svg class="dash-meta-ic" aria-hidden="true"><use href="#i-nozzle"></use></svg>Сопло <strong id="metaNozzle">&mdash;</strong></span>
         <span class="dash-meta-item"><svg class="dash-meta-ic" aria-hidden="true"><use href="#i-bed"></use></svg>Стол <strong id="metaBed">&mdash;</strong></span>
@@ -117,6 +114,7 @@
           <span><i class="seg-error"></i>ошибка</span>
           <span><i class="seg-finished"></i>завершено</span>
           <span><i class="seg-offline"></i>офлайн</span>
+          <span><i class="seg-nodata"></i>нет данных</span>
         </div>
         <div id="statsList" class="dash-stats-list">
           <div class="dash-stats-empty">Выберите период для загрузки статистики.</div>
@@ -240,10 +238,155 @@
           <span><i class="z-ok"></i>сухо ≤25%</span>
           <span><i class="z-warn"></i>норма ≤40%</span>
           <span><i class="z-bad"></i>влажно &gt;40%</span>
+          <span class="ad-lg" hidden><i class="ln start"></i>старт автосушки <b id="lgStart">25</b>%</span>
+          <span class="ad-lg" hidden><i class="ln target"></i>цель <b id="lgTarget">20</b>%</span>
+          <span><i class="z-dry"></i>шла сушка</span>
         </div>
+        <button type="button" class="ams-ad-jump" id="amsAdJump" hidden><i class="d"></i>Автосушка: <b id="amsAdJumpState">выкл</b> ⚙</button>
       </div>
       <div id="amsGrid" class="ams-grid"></div>
       <div id="amsEmpty" class="ams-empty" style="display:none">Нет принтеров с AMS.</div>
+      <section class="section-panel autodry" id="autodry">
+        <div class="panel-head">
+          <div class="panel-title-group">
+            <h3>Автосушка AMS</h3>
+            <p>Сама запускает сушку, когда в AMS влажно, и повторяет прогоны, пока не станет сухо.</p>
+          </div>
+          <span class="admin-chip" id="adRoleChip">только просмотр</span>
+        </div>
+        <div class="ad-banner" id="adBanner" hidden></div>
+        <div class="ad-na" id="adUnavailable" hidden>Автосушка недоступна</div>
+        <div id="adBody">
+          <div class="setting-row ad-master">
+            <div class="setting-text">
+              <strong>Автосушка включена</strong>
+              <span id="adMasterSub">Следит за блоками AMS и запускает сушку по правилам ниже. Выключение не гасит уже идущие прогоны.</span>
+            </div>
+            <label class="toggle-switch"><input type="checkbox" id="adMaster" aria-label="Автосушка включена" /><span class="toggle-slider"></span></label>
+          </div>
+
+          <div class="ad-cols">
+            <div class="ad-dim">
+              <div class="ad-cap">Общие правила</div>
+              <div class="rules">
+                <div class="rule ad-goal">
+                  <div class="setting-text"><strong>Держать влажность не выше</strong><span>Если в AMS влажнее — автосушка сушит блок циклами (прогон → остывание → замер), пока в покое не станет не выше этого числа.</span></div>
+                  <div class="rule-ctl"><input class="num" id="adTarget" inputmode="numeric" aria-label="Держать влажность не выше, %" /> %</div>
+                </div>
+                <div class="rule">
+                  <div class="setting-text"><strong>Повторять прогоны</strong><span>Если после прогона всё ещё влажнее нужного.</span></div>
+                  <div class="rule-ctl">
+                    <select class="sel" id="adLimit" aria-label="Повторять прогоны">
+                      <option value="0">пока не дойдёт до нужной</option>
+                      <option value="1">один прогон</option>
+                      <option value="2">не больше 2 подряд</option>
+                      <option value="3">не больше 3 подряд</option>
+                      <option value="4">не больше 4 подряд</option>
+                      <option value="6">не больше 6 подряд</option>
+                    </select>
+                  </div>
+                </div>
+                <div class="rule">
+                  <div class="setting-text"><strong>Режим по умолчанию</strong><span>Авто: смесь пластиков — t° самого нежного, время самого долгого. Потолок AMS 2 Pro — 65°.</span></div>
+                  <div class="rule-ctl">
+                    <select class="sel" id="adMode" aria-label="Режим по умолчанию">
+                      <option value="auto">Авто по пластику</option>
+                      <option value="pla">PLA 45° / 12 ч</option>
+                      <option value="petg">PETG 65° / 12 ч</option>
+                      <option value="tpu">TPU 65° / 12 ч</option>
+                      <option value="custom">Своё…</option>
+                    </select>
+                    <span class="inl" id="adCustom"><input class="num sm" id="adCustT" inputmode="numeric" aria-label="Температура, °C" />° · <input class="num sm" id="adCustH" inputmode="numeric" aria-label="Часы" /> ч <span class="lim" id="adCustLim">45–65°, 1–24 ч</span></span>
+                  </div>
+                </div>
+                <div class="rule">
+                  <div class="setting-text"><strong>Сушить во время печати</strong><span>Прошивка сама снизит t° для печатающего AMS: PETG → 55°, PLA → 45°.</span></div>
+                  <label class="toggle-switch"><input type="checkbox" id="adPrint" aria-label="Сушить во время печати" /><span class="toggle-slider"></span></label>
+                </div>
+                <details class="ad-more">
+                  <summary>Дополнительно</summary>
+                  <div class="rule">
+                    <div class="setting-text"><strong>Не дёргаться от скачков</strong><span>Сушку запускает, только если влажнее нужного дольше этого времени (открыли крышку — влажность скачет и сама спадает).</span></div>
+                    <div class="rule-ctl">дольше <input class="num" id="adHold" inputmode="numeric" aria-label="Сколько часов влажнее, ч" /> ч</div>
+                  </div>
+                  <div class="rule">
+                    <div class="setting-text"><strong>Пауза между прогонами</strong><span>Остывание, потом замер влажности.</span></div>
+                    <div class="rule-ctl"><input class="num" id="adPause" inputmode="numeric" aria-label="Пауза, ч" /> ч</div>
+                  </div>
+                  <div class="rule">
+                    <div class="setting-text"><strong>Окно запуска</strong><span>Вне окна старт ждёт. Идущий прогон не прерываем. Время фермы (МСК).</span></div>
+                    <div class="rule-ctl">
+                      <select class="sel" id="adWin" aria-label="Окно запуска">
+                        <option value="any">Любое время</option>
+                        <option value="night">Ночью 22:00–08:00</option>
+                        <option value="custom">Своё…</option>
+                      </select>
+                      <span class="inl" id="adWinCustom">с <input class="num" id="adWinFrom" placeholder="22:00" inputmode="numeric" aria-label="Начало окна" /> до <input class="num" id="adWinTo" placeholder="08:00" inputmode="numeric" aria-label="Конец окна" /></span>
+                    </div>
+                  </div>
+                  <div class="rule">
+                    <div class="setting-text"><strong>После ручной остановки</strong><span>Остановили в Handy, Studio или здесь — автосушка блок не перезапустит.</span></div>
+                    <div class="rule-ctl">не трогать <input class="num" id="adHoldOff" inputmode="numeric" aria-label="Часов не трогать" /> ч</div>
+                  </div>
+                  <p class="ad-more-note">С ограничением прогонов: серия не дошла до нужной влажности — следующая не раньше чем через 48 ч; чужая сушка тоже считается. Без ограничения сушит, пока не дойдёт.</p>
+                </details>
+              </div>
+            </div>
+
+            <div class="ad-side">
+              <div class="ad-cap">Как это работает</div>
+              <div class="ad-why">
+                <h4><span class="i">i</span>Почему не выключаем по влажности</h4>
+                <p>Во время сушки датчик врёт: при нагреве RH падает от самой температуры, а влага из катушек поднимает её. Bambu и сама сушит по времени. Поэтому цикл такой:</p>
+                <div class="cycle">
+                  <span class="cyc"><b>1</b>Покой: RH ≥ <span data-b="start">25</span>% <span data-b="hold">2</span> ч</span><span class="cyc-arr">→</span>
+                  <span class="cyc"><b>2</b>Прогон по времени</span><span class="cyc-arr">→</span>
+                  <span class="cyc"><b>3</b>Остывание ≥ <span data-b="pause">1</span> ч</span><span class="cyc-arr">→</span>
+                  <span class="cyc"><b>4</b>Замер</span>
+                </div>
+                <div class="cycle-out">
+                  <span class="cyc ok">≤ <span data-b="target">20</span>% → готово, ждём нового старта</span>
+                  <span class="cyc loop">&gt; <span data-b="target">20</span>% → снова шаг 2, <span data-b="limitText">до 2 прогонов подряд</span></span>
+                  <span class="cyc">остановили вручную → пауза <span data-b="mhold">24</span> ч</span>
+                </div>
+                <p class="facts">По истории фермы: за прогон влажность в покое падает на 2–3 п.п., а во время сушки часто растёт. Эффект копится по дням; обратного отскока после остывания нет. Тёплый AMS показывает заниженную влажность, поэтому замер — когда блок остынет почти до температуры до сушки (+3°), но не позже паузы + 2 ч.</p>
+              </div>
+            </div>
+          </div>
+
+          <div class="ad-block">
+            <div class="ad-cap-row">
+              <div class="ad-cap">По блокам</div>
+              <div class="ad-now-btns ad-admin">
+                <button type="button" class="ad-btn" id="adDryAll">🔥 Сушить все сейчас</button>
+                <button type="button" class="ad-btn danger" id="adStopAll">■ Остановить все</button>
+              </div>
+            </div>
+            <div class="ad-dim">
+              <div class="adm-table-wrap ad-table-wrap">
+                <table class="adm-table ad-table">
+                  <thead><tr><th>Блок</th><th>Пластик</th><th>Авто</th><th>Режим</th><th>Прогон</th><th>Статус</th></tr></thead>
+                  <tbody id="adRows"></tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+
+          <div class="ad-save ad-admin">
+            <span class="dirty" id="adDirty"><i></i>Есть несохранённые изменения</span>
+            <span class="saved-flash" id="adSaved"><span class="sf-dot"></span>Сохранено</span>
+            <div class="settings-error" id="adError" hidden></div>
+            <button type="button" class="ad-btn" id="adReset">Отменить правки</button>
+            <button type="button" class="pill-btn" id="adSave" disabled>Сохранить</button>
+          </div>
+
+          <div class="ad-block">
+            <div class="ad-cap">Журнал автосушки</div>
+            <div class="jr" id="adJournal"></div>
+            <div class="jr-more"><button type="button" class="ad-link" id="adJournalMore" hidden>Показать все</button><span>RH: до → после остывания</span></div>
+          </div>
+        </div>
+      </section>
     </section>
     <section class="view-panel" data-panel="admin">
       <div class="apply-bar" id="printersApplyBar" style="display:none">
@@ -286,7 +429,7 @@
             <div class="fld" data-kinds="klipper mks"><label for="prnModelText">Модель (не обязательно)</label><input type="text" id="prnModelText" /></div>
             <div class="fld" data-kinds="bambu creality klipper mks"><label for="prnHost">IP-адрес</label><input type="text" id="prnHost" class="mono" /></div>
             <div class="fld" data-kinds="klipper mks"><label for="prnPort">Порт</label><input type="number" id="prnPort" class="mono" min="1" max="65535" /></div>
-            <div class="fld" data-kinds="bambu"><label for="prnAccessCode">Access code</label><div class="withbtn"><input type="password" id="prnAccessCode" /><button type="button" class="eye" id="prnAccessEye">&#128065;</button></div><div class="fld-hint">Экран принтера → Настройки → Сеть</div></div>
+            <div class="fld" data-kinds="bambu"><label for="prnAccessCode">Код доступа</label><div class="withbtn"><input type="password" id="prnAccessCode" /><button type="button" class="eye" id="prnAccessEye">&#128065;</button></div><div class="fld-hint">Экран принтера → Настройки → Сеть</div></div>
             <div class="fld" data-kinds="bambu"><label for="prnSerial">Серийный номер</label><input type="text" id="prnSerial" class="mono" /></div>
           </div>
           <div class="form-actions">
@@ -326,7 +469,7 @@
         </div>
         <div class="adm-table-wrap">
         <table class="adm-table" id="adminAuditTable">
-          <thead><tr><th>Время</th><th>Пользователь</th><th>Действие</th><th>IP</th><th>User Agent</th></tr></thead>
+          <thead><tr><th>Время</th><th>Пользователь</th><th>Действие</th><th>IP</th><th>Браузер</th></tr></thead>
           <tbody></tbody>
         </table>
         </div>
@@ -447,7 +590,7 @@
             <div class="fld-hint">Выдаёт @BotFather. Смена токена перезапустит бота.</div>
           </div>
           <div class="fld">
-            <label for="tgChatId">Разрешённый chat ID</label>
+            <label for="tgChatId">Разрешённый ID чата</label>
             <input type="text" id="tgChatId" inputmode="numeric" autocomplete="off" />
             <div class="fld-hint">Бот отвечает только этому чату. Пусто — без ограничения.</div>
           </div>
@@ -522,6 +665,16 @@
         <div class="settings-error" id="proxyError" style="display:none"></div>
       </section>
 
+      <section class="section-panel" id="autodryLink">
+        <div class="panel-head">
+          <div class="panel-title-group">
+            <h3>Автосушка AMS</h3>
+            <p>Правила, блоки и журнал — на вкладке AMS, внизу.</p>
+          </div>
+          <button type="button" class="pill-btn" id="autodryLinkBtn">Открыть</button>
+        </div>
+      </section>
+
       <section class="section-panel settings-foot-panel">
         <div class="settings-foot-row">
           <span class="ver-chip" id="appVersion">&mdash;</span>
@@ -545,12 +698,23 @@
       <symbol id="i-file" viewBox="0 0 24 24"><path d="M14 3v4a1 1 0 0 0 1 1h4"/><path d="M17 21h-10a2 2 0 0 1 -2 -2v-14a2 2 0 0 1 2 -2h7l5 5v11a2 2 0 0 1 -2 2z"/></symbol>
       <symbol id="i-hourglass" viewBox="0 0 24 24"><path d="M6.5 7h11"/><path d="M6.5 17h11"/><path d="M6 20v-2a6 6 0 1 1 12 0v2a1 1 0 0 1 -1 1h-10a1 1 0 0 1 -1 -1z"/><path d="M6 4v2a6 6 0 1 0 12 0v-2a1 1 0 0 0 -1 -1h-10a1 1 0 0 0 -1 1z"/></symbol>
       <symbol id="i-steam" viewBox="0 0 24 24"><path d="M7 20c-1.5 -1.6 -1.5 -3.4 0 -5c1.5 -1.6 1.5 -3.4 0 -5"/><path d="M12 20c-1.5 -1.6 -1.5 -3.4 0 -5c1.5 -1.6 1.5 -3.4 0 -5"/><path d="M17 20c-1.5 -1.6 -1.5 -3.4 0 -5c1.5 -1.6 1.5 -3.4 0 -5"/></symbol>
-      <symbol id="i-gear" viewBox="0 0 24 24"><path d="M10.325 4.317c.426 -1.756 2.924 -1.756 3.35 0a1.724 1.724 0 0 0 2.573 1.066c1.543 -.94 3.31 .826 2.37 2.37a1.724 1.724 0 0 0 1.065 2.572c1.756 .426 1.756 2.924 0 3.35a1.724 1.724 0 0 0 -1.066 2.573c.94 1.543 -.826 3.31 -2.37 2.37a1.724 1.724 0 0 0 -2.572 1.065c-.426 1.756 -2.924 1.756 -3.35 0a1.724 1.724 0 0 0 -2.573 -1.066c-1.543 .94 -3.31 -.826 -2.37 -2.37a1.724 1.724 0 0 0 -1.065 -2.572c-1.756 -.426 -1.756 -2.924 0 -3.35a1.724 1.724 0 0 0 1.066 -2.573c-.94 -1.543 .826 -3.31 2.37 -2.37c1 .608 2.296 .07 2.572 -1.065z"/><path d="M9 12a3 3 0 1 0 6 0a3 3 0 0 0 -6 0"/></symbol>
+      <symbol id="i-door" viewBox="0 0 24 24"><path d="M14 12v.01"/><path d="M3 21h18"/><path d="M6 21v-16a2 2 0 0 1 2 -2h8a2 2 0 0 1 2 2v16"/></symbol>
+      <symbol id="i-sd" viewBox="0 0 24 24"><path d="M7 21h10a2 2 0 0 0 2 -2v-14a2 2 0 0 0 -2 -2h-6.172a2 2 0 0 0 -1.414 .586l-3.828 3.828a2 2 0 0 0 -.586 1.414v10.172a2 2 0 0 0 2 2z"/><path d="M13 6v2"/><path d="M16 6v2"/><path d="M10 7v1"/></symbol>
       <symbol id="i-spool" viewBox="0 0 24 24"><path d="M12 12m-8 0a8 8 0 1 0 16 0a8 8 0 1 0 -16 0"/><path d="M12 12m-2.5 0a2.5 2.5 0 1 0 5 0a2.5 2.5 0 1 0 -5 0"/><path d="M14.5 12h6"/></symbol>
+      <!-- the card's control row (light, pause, play, stop, cool, bed down, ⋯, locked) -->
+      <symbol id="i-bulb" viewBox="0 0 24 24"><path d="M3 12h1m8 -9v1m8 8h1m-15.4 -6.4l.7 .7m12.1 -.7l-.7 .7"/><path d="M9 16a5 5 0 1 1 6 0a3.5 3.5 0 0 0 -1 3a2 2 0 0 1 -4 0a3.5 3.5 0 0 0 -1 -3"/><path d="M9.7 17l4.6 0"/></symbol>
+      <symbol id="i-pause" viewBox="0 0 24 24"><path d="M6 5m0 1a1 1 0 0 1 1 -1h2a1 1 0 0 1 1 1v12a1 1 0 0 1 -1 1h-2a1 1 0 0 1 -1 -1z"/><path d="M14 5m0 1a1 1 0 0 1 1 -1h2a1 1 0 0 1 1 1v12a1 1 0 0 1 -1 1h-2a1 1 0 0 1 -1 -1z"/></symbol>
+      <symbol id="i-play" viewBox="0 0 24 24"><path d="M7 4v16l13 -8z"/></symbol>
+      <symbol id="i-stop" viewBox="0 0 24 24"><path d="M5 5m0 2a2 2 0 0 1 2 -2h10a2 2 0 0 1 2 2v10a2 2 0 0 1 -2 2h-10a2 2 0 0 1 -2 -2z"/></symbol>
+      <symbol id="i-snow" viewBox="0 0 24 24"><path d="M12 3v18"/><path d="M4.2 7.5l15.6 9"/><path d="M4.2 16.5l15.6 -9"/><path d="M9.5 4.5l2.5 2l2.5 -2"/><path d="M9.5 19.5l2.5 -2l2.5 2"/></symbol>
+      <symbol id="i-bed-down" viewBox="0 0 24 24"><path d="M4 6h16"/><path d="M12 9v10"/><path d="M8.5 15.5l3.5 3.5l3.5 -3.5"/></symbol>
+      <symbol id="i-dots" viewBox="0 0 24 24"><path stroke-width="3.2" d="M5 12h.01M12 12h.01M19 12h.01"/></symbol>
+      <symbol id="i-lock" viewBox="0 0 24 24"><path d="M5 13a2 2 0 0 1 2 -2h10a2 2 0 0 1 2 2v6a2 2 0 0 1 -2 2h-10a2 2 0 0 1 -2 -2v-6z"/><path d="M11 16a1 1 0 1 0 2 0a1 1 0 0 0 -2 0"/><path d="M8 11v-4a4 4 0 1 1 8 0v4"/></symbol>
     </svg>
+    <div class="ad-dlg-back" id="adDlgBack"><div class="ad-dlg" role="dialog" aria-modal="true" id="adDlg"></div></div>
     <div class="app-toast" id="appToast"></div>
     <script src="/static/theme.js?v=2"></script>
-  <script src="/static/app.js?v=67"></script>
+  <script src="/static/app.js?v=90"></script>
 
   <button type="button" class="scroll-top-btn" id="scrollTopBtn" aria-label="Наверх" title="Вверх">↑</button>
 </body>

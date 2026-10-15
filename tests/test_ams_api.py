@@ -75,6 +75,27 @@ def test_current_returns_only_bambu_with_ams(client):
     assert u["tray_now_local"] == 1
 
 
+def test_current_passes_the_drying_block(monkeypatch, tmp_path):
+    dry = {"type": "n3f", "status": "drying", "active": True, "remaining_min": 90}
+    s = _bambu_with_ams()
+    s.ams["units"][0]["dry"] = dry
+    s.ams["units"][0]["slots"][1]["nozzle_temp"] = [190, 230]
+    stopped = dict(dry, status="cooling", active=False)
+    s.ams["units"].append({"index": 1, "humidity": 2, "dry_time": 15, "dry": stopped, "slots": []})
+    import config as cfg
+    monkeypatch.setattr(cfg, "JWT_SECRET", "test-secret", raising=False)
+    monkeypatch.setattr(auth_service, "get_user_from_token", lambda *a, **k: ("admin", "admin"))
+    monkeypatch.setattr(auth_service, "decode_token", lambda *a, **k: {"iat": 0})
+    monkeypatch.setattr(api_auth, "token_subject_active", lambda *a, **k: True)
+    c = TestClient(api_main.create_app(FakeStore([s])))
+    c.cookies.set("access_token", "stub")
+    units = c.get("/api/ams/current").json()
+    assert units[0]["dry"] == dry and units[0]["drying"] is True
+    assert units[0]["slots"][1]["nozzle_temp"] == [190, 230]
+    # `drying` follows the unit's own status when it reports one (cooling: not drying)
+    assert units[1]["dry"] == stopped and units[1]["drying"] is False
+
+
 def test_history_returns_series(client):
     r = client.get("/api/ams/history?printer_id=b1&unit=0&fr=0&to=9999999999")
     assert r.status_code == 200

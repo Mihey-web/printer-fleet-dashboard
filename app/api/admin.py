@@ -1,6 +1,8 @@
-from fastapi import APIRouter, Request, HTTPException, Cookie, Query
+from fastapi import APIRouter, Body, Request, HTTPException, Cookie, Query
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
-from typing import List, Optional
+from typing import Any, List, Optional
+import logging
 import sqlite3
 import time
 
@@ -14,6 +16,7 @@ from app.api.auth import (
 )
 
 router = APIRouter(prefix="/api/admin", tags=["admin"])
+logger = logging.getLogger(__name__)
 
 # NOTE: authentication and the admin-role check for every /api/admin/* route are
 # enforced once, centrally, by JWTAuthMiddleware (app/api/main.py). It rejects
@@ -332,6 +335,14 @@ def _validate_settings(values: dict):
     if "telegram_token" in values and not isinstance(values["telegram_token"], str):
         raise HTTPException(status_code=400, detail="telegram_token must be a string")
 
+    if "auto_ignore_print_errors" in values:
+        import re as _re
+        v = values["auto_ignore_print_errors"]
+        if (not isinstance(v, list) or len(v) > 32
+                or not all(isinstance(c, str) and _re.fullmatch(r"[0-9A-F]{4}_[0-9A-F]{4}", c) for c in v)):
+            raise HTTPException(status_code=400,
+                                detail="auto_ignore_print_errors: список кодов вида 0500_8062")
+
     if "proxy_list" in values:
         from urllib.parse import urlparse
         v = values["proxy_list"]
@@ -339,11 +350,42 @@ def _validate_settings(values: dict):
             raise HTTPException(status_code=400, detail="proxy_list must be a list of URLs")
         if len(v) != len(set(v)):
             raise HTTPException(status_code=400, detail="proxy_list contains duplicates")
+        from proxy_checker import _split_credentials, mask_proxy
         for p in v:
-            u = urlparse(p)
-            if u.scheme not in ("http", "https") or not u.hostname or not u.port:
+            # Parse only scheme://host:port: urlparse raises (500 + traceback with
+            # the password in the journal) or misreads the userinfo when the
+            # password holds a raw '/', '?' or '#'. Details echo the masked URL.
+            prefix, userinfo, hostport = _split_credentials(p)
+            if userinfo is not None and any(c in userinfo for c in "/?#"):
                 raise HTTPException(status_code=400,
-                                    detail=f"Некорректный прокси-URL (нужно http(s)://[логин:пароль@]хост:порт): {u.hostname or p}")
+                                    detail="Символы / ? # @ в логине или пароле прокси нужно закодировать "
+                                           "(%2F %3F %23 %40); '@' в пути прокси-URL не поддерживается: "
+                                           + mask_proxy(p))
+            try:
+                u = urlparse(prefix + hostport)
+                ok = u.scheme in ("http", "https") and bool(u.hostname) and bool(u.port)
+            except ValueError:
+                ok = False
+            if not ok:
+                raise HTTPException(status_code=400,
+                                    detail="Некорректный прокси-URL (нужно http(s)://[логин:пароль@]хост:порт): "
+                                           + mask_proxy(p))
+
+    if "printer_light_enabled" in values:
+        v = values["printer_light_enabled"]
+        if (not isinstance(v, list) or len(v) > 200
+                or any(not isinstance(x, str) or not x or len(x) > 64 for x in v)):
+            raise HTTPException(status_code=400,
+                                detail="printer_light_enabled: ожидается список id принтеров")
+
+
+# Auto-drying owns these keys (validated config, engine state, journal): the
+# AMS tab edits them through /api/admin/ams/autodry, never the generic PUT.
+ENGINE_KEYS = ("ams_autodry", "ams_autodry_state", "ams_autodry_journal")
+
+
+def _public_settings(values: dict) -> dict:
+    return {k: v for k, v in values.items() if k not in ENGINE_KEYS}
 
 
 @router.get("/settings")
@@ -352,7 +394,7 @@ def get_settings(request: Request,
     from app.services import settings_service, telegram_manager
     # The raw token/proxy credentials go out as-is: this endpoint is admin-only
     # and the settings page needs them for the reveal-eye editing UX.
-    return {"values": settings_service.get_all(), "telegram": telegram_manager.status()}
+    return {"values": _public_settings(settings_service.get_all()), "telegram": telegram_manager.status()}
 
 
 @router.put("/settings")
@@ -364,6 +406,9 @@ def update_settings(body: dict, request: Request,
     unknown = [k for k in body if k not in settings_service.DEFAULTS]
     if unknown:
         raise HTTPException(status_code=400, detail="Unknown settings keys: " + ", ".join(unknown))
+    engine = [k for k in body if k in ENGINE_KEYS]
+    if engine:
+        raise HTTPException(status_code=400, detail="Автосушка настраивается на вкладке AMS: " + ", ".join(engine))
     current = settings_service.get_all()
     changed = {k: v for k, v in body.items() if current.get(k) != v}
     _validate_settings(changed)
@@ -375,7 +420,7 @@ def update_settings(body: dict, request: Request,
         _audit(request, "settings_update")
     else:
         applied = {"bot_restarting": False}
-    return {"values": settings_service.get_all(), "telegram": telegram_manager.status(),
+    return {"values": _public_settings(settings_service.get_all()), "telegram": telegram_manager.status(),
             "changed": sorted(changed.keys()), **applied}
 
 
@@ -397,17 +442,162 @@ class PrinterCommandRequest(BaseModel):
     chamber: Optional[int] = None
     nozzle: Optional[int] = None
     bed: Optional[int] = None
-    slot: Optional[int] = None
-    obj_list: Optional[List[int]] = None
+    ams: Optional[int] = None          # AMS unit id (ams_load, dry_start, dry_stop)
+    slot: Optional[int] = None         # slot within that unit (ams_load)
+    filament: Optional[str] = None     # drying preset material (dry_start)
+
+
+# AMS commands record their parameters in the audit log (which unit / slot /
+# drying settings); every command line ends with its outcome (st=<status>):
+# "printer_command:<action>:<id>:[params,]st=confirmed|sent|rejected|refused".
+_AUDITED_PARAMS = {"ams_load": ("ams", "slot"), "dry_start": ("ams", "temp", "hours", "filament"),
+                   "dry_stop": ("ams",)}
 
 
 @router.post("/printers/{printer_id}/command")
 def printer_command(printer_id: str, body: PrinterCommandRequest, request: Request,
                     access_token_cookie: Optional[str] = Cookie(None, alias="access_token")):
-    from app.services import printer_commands
+    from app.services import ams_autodry_engine, printer_commands
     params = {k: v for k, v in body.__dict__.items() if k != "action" and v is not None}
-    r = printer_commands.send(printer_id, body.action, params)
-    _audit(request, "printer_command:%s:%s" % (body.action, printer_id))
+    drying = body.action in ("dry_start", "dry_stop")
+    # The unit stays claimed until the engine knows about this command: a check
+    # landing meanwhile would take our start for a foreign one, our stop for an interruption.
+    if drying and not ams_autodry_engine.claim(printer_id, params.get("ams")):
+        raise HTTPException(status_code=409,
+                            detail="Автосушка сейчас отправляет команду этому блоку — повторите через несколько секунд")
+    try:
+        r = printer_commands.send(printer_id, body.action, params)
+        if drying and r.get("success"):
+            try:                              # a manual run / stop the auto-dry engine must know about
+                ams_autodry_engine.note_user_command(printer_id, body.action, params)
+            except Exception:
+                logger.debug("autodry hook failed", exc_info=True)
+    finally:
+        if drying:
+            ams_autodry_engine.unclaim(printer_id, params.get("ams"))
+    shown = ["%s=%s" % (k, params[k]) for k in _AUDITED_PARAMS.get(body.action, ()) if k in params]
+    shown.append("st=%s" % r.get("status", "rejected"))
+    _audit(request, "printer_command:%s:%s:%s" % (body.action, printer_id, ",".join(shown)))
     if not r["success"]:
-        raise HTTPException(status_code=400, detail=r["detail"])
-    return r
+        return JSONResponse(status_code=400, content={"detail": r["detail"], "status": r.get("status", "rejected")})
+    return {"success": True, "status": r.get("status", "sent"), "detail": r["detail"],
+            "replied": r.get("replied", False)}
+
+
+class BulkCommandRequest(BaseModel):
+    action: str
+    printer_ids: List[str]
+    dry_run: bool = False
+
+
+def _registry_labels() -> dict:
+    """printer_id -> current name from the registry (as app.api.main._current_labels;
+    not imported from there: no router -> app import cycle)."""
+    try:
+        return {p["id"]: p["label"] for p in printer_registry.list_printers(include_deleted=True)}
+    except Exception:
+        return {}
+
+
+@router.post("/printers/bulk-command")
+def printers_bulk_command(body: BulkCommandRequest, request: Request,
+                          access_token_cookie: Optional[str] = Cookie(None, alias="access_token")):
+    """One action (light_on / light_off / pause / resume) for many printers at
+    once; blocks up to fleet_commands.BULK_DEADLINE (sync: runs in the threadpool)."""
+    from app.services import fleet_commands, printer_commands
+    try:
+        out = fleet_commands.run_bulk(body.action, body.printer_ids, store=printer_commands.get_store(),
+                                      labels=_registry_labels(), dry_run=body.dry_run)
+    except fleet_commands.BulkError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except fleet_commands.BulkBusy as e:
+        raise HTTPException(status_code=409, detail=str(e))
+    if not out["dry_run"]:
+        for r in out["results"]:
+            if r["status"] != "skipped":
+                _audit(request, "printer_command:%s:%s:bulk=%s,st=%s"
+                       % (out["action"], r["id"], out["batch"], r["status"]))
+        s = out["summary"]
+        _audit(request, "printer_bulk:%s:%s:confirmed=%d,sent=%d,rejected=%d,skipped=%d"
+               % (out["action"], out["batch"], s["confirmed"], s["sent"], s["rejected"], s["skipped"]))
+    return out
+
+
+# --- AMS auto-drying (the AMS tab) --------------------------------------------------------
+# Reads: GET /api/ams/autodry (any user). Writes and commands are admin-only.
+
+MAX_UNIT_KEYS = 32
+
+
+def _unit_keys(body: Any, required: bool = True) -> Optional[List[str]]:
+    """The unit keys of a {"units": [...]} body (deduplicated, request order);
+    None when not required and absent."""
+    if body is None or (isinstance(body, dict) and body.get("units") is None):
+        if not required:
+            return None
+        raise HTTPException(status_code=400, detail="Выберите хотя бы один блок")
+    units = body.get("units") if isinstance(body, dict) else None
+    if (not isinstance(units, list) or len(units) > MAX_UNIT_KEYS
+            or any(not isinstance(k, str) or not 0 < len(k) <= 80 for k in units)):
+        raise HTTPException(status_code=400, detail="Некорректный список блоков")
+    if not units:
+        raise HTTPException(status_code=400, detail="Выберите хотя бы один блок")
+    return list(dict.fromkeys(units))
+
+
+def _unit_audit(prefix: str, key: str) -> str:
+    from app.services import ams_autodry
+    pk = ams_autodry.parse_key(key)
+    return "%s:%s:%s" % (prefix, pk[0], pk[1]) if pk else "%s:%s" % (prefix, key)
+
+
+@router.put("/ams/autodry")
+def put_autodry(request: Request, body: Any = Body(None),
+                access_token_cookie: Optional[str] = Cookie(None, alias="access_token")):
+    from app.services import ams_autodry, ams_autodry_engine
+    try:
+        cfg = ams_autodry.validate_config(body)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    ams_autodry_engine.save_config(cfg)
+    _audit(request, "autodry_config")
+    return ams_autodry_engine.snapshot()
+
+
+@router.post("/ams/autodry/run-now")
+def autodry_run_now(request: Request, body: Any = Body(None),
+                    access_token_cookie: Optional[str] = Cookie(None, alias="access_token")):
+    """«Сушить все сейчас»: blocks up to ~10 s (the printers' replies, in parallel)."""
+    from app.services import ams_autodry_engine
+    keys = _unit_keys(body)
+    results = ams_autodry_engine.run_now(keys)
+    for r in results:
+        if r["status"] != "skipped" and r.get("plan"):
+            p = r["plan"]
+            _audit(request, "%s:%s/%s/%s" % (_unit_audit("autodry_run_now", r["key"]), p["temp"], p["hours"],
+                                             p["filament"]))
+    return {"results": results, "snapshot": ams_autodry_engine.snapshot()}
+
+
+@router.post("/ams/autodry/stop-all")
+def autodry_stop_all(request: Request, body: Any = Body(None),
+                     access_token_cookie: Optional[str] = Cookie(None, alias="access_token")):
+    """«Остановить все»: no units = every drying unit (ours and foreign)."""
+    from app.services import ams_autodry_engine
+    keys = _unit_keys(body, required=False)
+    results = ams_autodry_engine.stop_all(keys)
+    for r in results:
+        if r["status"] != "skipped":
+            _audit(request, _unit_audit("autodry_stop", r["key"]))
+    return {"results": results, "snapshot": ams_autodry_engine.snapshot()}
+
+
+@router.post("/ams/autodry/release")
+def autodry_release(request: Request, body: Any = Body(None),
+                    access_token_cookie: Optional[str] = Cookie(None, alias="access_token")):
+    """«снять паузу» / «включить снова» (idempotent)."""
+    from app.services import ams_autodry_engine
+    keys = _unit_keys(body)
+    for key in ams_autodry_engine.release(keys):
+        _audit(request, _unit_audit("autodry_release", key))
+    return ams_autodry_engine.snapshot()

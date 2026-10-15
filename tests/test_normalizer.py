@@ -149,6 +149,8 @@ def test_bambu_no_remaining_time_leaves_eta_none():
 
 
 def test_bambu_hms_errors_surface_as_last_error():
+    from app.vendor.pybambu.utils import get_print_error_text
+
     # An errored printer must report WHAT is wrong, not just go red. The vendored
     # lib keeps the code in "<i>-Code" and only the (Russian) text in "<i>-Error".
     result = _bambu_result(gcode_state="failed", print_error=50348044)
@@ -170,7 +172,8 @@ def test_bambu_hms_errors_surface_as_last_error():
     assert s.last_error.split(" | ") == [
         "HMS_0300_0100_0001_0007: Неисправность датчика температуры сопла [fatal]",
         "HMS_0C00_0100_0002_0001: Температура стола вне нормы [serious]",
-        "Код ошибки печати: 0x0300400C",   # print_error rendered in hex
+        # print_error with its text from Bambu's (Russian) tables
+        "Ошибка печати 0300_400C: " + get_print_error_text("0300400C", "", "ru"),
     ]
 
 
@@ -272,7 +275,7 @@ def test_bambu_ams_real_unit_extracted():
     assert unit["temp"] == 39.9
     assert unit["slots"][3] == {
         "type": "PETG", "color": "FFF144", "name": "Generic PETG",
-        "remain_pct": -1, "empty": False,
+        "remain_pct": -1, "empty": False, "nozzle_temp": None,   # fakes carry no profile range
     }
 
 
@@ -320,8 +323,10 @@ def test_bambu_ams_unknown_material_sentinel():
     coloured = SimpleNamespace(color="FF0000FF", type="?", name="?", remain=-1)
     ams = SimpleNamespace(data={0: _unit([no_colour, coloured])}, active_ams_index=0, active_tray_index=1)
     slots = normalize_bambu("bambu-2", "P2S", _bambu_result_with_ams(ams)).ams["units"][0]["slots"]
-    assert slots[0] == {"type": None, "color": None, "name": None, "remain_pct": -1, "empty": True}
-    assert slots[1] == {"type": None, "color": "FF0000", "name": None, "remain_pct": -1, "empty": False}
+    assert slots[0] == {"type": None, "color": None, "name": None, "remain_pct": -1, "empty": True,
+                        "nozzle_temp": None}
+    assert slots[1] == {"type": None, "color": "FF0000", "name": None, "remain_pct": -1, "empty": False,
+                        "nozzle_temp": None}
 
 
 def _units(*sizes_by_index):
@@ -825,3 +830,444 @@ def test_bambu_chamber_target_zero_becomes_none():
     s = normalize_bambu("bambu-9", "P4", result, device_type="P2S")
     assert s.chamber_temp == 47.0
     assert s.target_chamber_temp is None
+
+
+# --- filament-change progress (device.extruder / ams_status) -------------------
+
+def _ext(state, **entry):
+    return {"device": {"extruder": {"state": state, "info": [dict({"id": 0}, **entry)]}}}
+
+
+@pytest.mark.parametrize("msg,want", [
+    # new protocol: state bit 19 = change running; star = (ams << 8) | slot of the target
+    (dict(_ext(1 | 1 << 19, stat=3, snow=0xFFFF, star=2, info=8)),
+     {"action": "load", "step": "cut", "ams": 0, "slot": 2}),
+    (dict(_ext(1 | 1 << 19, stat=4, snow=0x0001, star=0x00FF, info=10)),
+     {"action": "unload", "step": "pull", "ams": 0, "slot": None}),
+    # ams_status (mirrored in stat) wins for the step; 0x0B = check, 9 = waiting (no step)
+    (dict(_ext(1 | 1 << 19, stat=0x010B, star=0x0102), ams_status=0x010B),
+     {"action": "load", "step": "check", "ams": 1, "slot": 2}),
+    (dict(_ext(1 | 1 << 19, stat=0x0109, star=0x8000), ams_status=0x0109),
+     {"action": "load", "step": None, "ams": 128, "slot": 0}),
+    # loading into the extruder from the external spool: step 6 = confirm the extrusion
+    (dict(_ext(1 | 1 << 19, stat=0x0106, star=0xFF00), ams_status=0x0106),
+     {"action": "load", "step": "confirm", "ams": 255, "slot": 0}),
+    (dict(_ext(1 | 1 << 19, stat=0x0106, star=0x0003), ams_status=0x0106),
+     {"action": "load", "step": "push", "ams": 0, "slot": 3}),
+    # target unknown (0xFFFF): the action stays open
+    (dict(_ext(1 | 1 << 19, stat=2, star=0xFFFF)), {"action": None, "step": "heat", "ams": None, "slot": None}),
+    # not busy, or a cold pull (ams_status main 7): no progress
+    (dict(_ext(1, stat=3, star=2)), None),
+    (dict(_ext(1 | 1 << 19, stat=0x0703, star=2), ams_status=0x0703), None),
+])
+def test_filament_change_new_protocol(make_collector, msg, want):
+    _d, s = _normalized(make_collector, dict(msg, gcode_state="IDLE"), model="H2S")
+    assert s.filament_change == want
+
+
+@pytest.mark.parametrize("sub,step", [(2, "heat"), (3, None), (4, None), (5, "push"), (6, "confirm"),
+                                      (7, "purge"), (8, None), (0x0B, None)])
+def test_filament_change_from_the_external_spool_has_studios_steps(make_collector, sub, step):
+    # Loading from the external spool Bambu Studio has only these steps:
+    # nothing is cut or pulled back into an AMS.
+    for star, ams in ((0xFF00, 255), (0xFE00, 254)):
+        msg = dict(_ext(1 | 1 << 19, stat=0x0100 | sub, star=star), ams_status=0x0100 | sub)
+        _d, s = _normalized(make_collector, dict(msg, gcode_state="IDLE"), model="H2S")
+        assert s.filament_change == {"action": "load", "step": step, "ams": ams, "slot": 0}
+    _d, s = _normalized(make_collector, {"gcode_state": "IDLE", "ams_status": 0x0100 | sub,
+                                         "ams": {"tray_now": "255", "tray_tar": "254"}}, model="P1S")
+    assert s.filament_change == {"action": "load", "step": step, "ams": 255, "slot": 0}
+
+
+@pytest.mark.parametrize("ams_status,tray_tar,want", [
+    (0x0102, "255", {"action": "unload", "step": "heat", "ams": None, "slot": None}),
+    (0x0105, "6", {"action": "load", "step": "push", "ams": 1, "slot": 2}),
+    (0x0106, "254", {"action": "load", "step": "confirm", "ams": 255, "slot": 0}),
+    (0x0107, "128", {"action": "load", "step": "purge", "ams": 128, "slot": 0}),
+    (0x0108, "0", {"action": "load", "step": "check", "ams": 0, "slot": 0}),
+    (0x010C, "0", {"action": "load", "step": None, "ams": 0, "slot": 0}),
+    (768, "0", None),           # printing from the AMS (assist), no change
+    (0x0700, "255", None),      # cold pull
+])
+def test_filament_change_legacy_p1(make_collector, ams_status, tray_tar, want):
+    _d, s = _normalized(make_collector, {"gcode_state": "IDLE", "ams_status": ams_status,
+                                         "ams": {"tray_now": "255", "tray_tar": tray_tar}}, model="P1S")
+    assert s.filament_change == want
+
+
+def test_filament_change_none_without_raw_report():
+    # SimpleNamespace devices (no RawReport) degrade to None.
+    s = normalize_bambu("bambu-1", "P1", _bambu_result(gcode_state="IDLE"))
+    assert s.filament_change is None
+
+
+# --- AMS load / unload inputs: slot nozzle range, firmware gate, extruder ------
+
+def _get_version(device, sw="01.02.00.00"):
+    device.info_update(data={"command": "get_version", "sequence_id": "0", "module": [
+        {"name": "ota", "sw_ver": sw, "hw_ver": "OTA", "sn": "X"}]})
+
+
+def _tray_msg(i, ttype, lo, hi):
+    return {"id": str(i), "tray_type": ttype, "tray_color": "FF0000FF", "tray_info_idx": "GFG99",
+            "nozzle_temp_min": lo, "nozzle_temp_max": hi, "remain": 80, "state": 11}
+
+
+def test_slot_nozzle_temp_range(make_collector):
+    _d, s = _normalized(make_collector, {"ams": {"ams": [{"id": "0", "humidity": "3", "temp": "25.0", "tray": [
+        _tray_msg(0, "PETG", "230", "270"),
+        {"id": "1", "state": 0},
+        _tray_msg(2, "PLA", "0", "0"),
+        _tray_msg(3, "PLA", "x", "220"),
+    ]}]}})
+    assert [sl["nozzle_temp"] for sl in s.ams["units"][0]["slots"]] == [[230, 270], None, None, None]
+
+
+def test_filament_swap_ok_needs_the_firmware_version(make_collector, caplog):
+    import logging
+
+    caplog.set_level(logging.ERROR)
+    device, s = _normalized(make_collector, {"gcode_state": "IDLE"}, model="P2S")
+    assert s.filament_swap_ok is None
+    _get_version(device)
+    assert normalize_bambu("t-1", "t", device, device_type="P2S").filament_swap_ok is True
+    # X1C firmware below 01.05.06.01 has no ams_change_filament
+    device, _s = _normalized(make_collector, {"gcode_state": "IDLE"}, model="X1C")
+    _get_version(device, "01.05.00.00")
+    assert normalize_bambu("t-1", "t", device, device_type="X1C").filament_swap_ok is False
+    # the lib logs an ERROR when a feature is queried before the version is known
+    assert "supports_feature queried" not in caplog.text
+
+
+@pytest.mark.parametrize("ext_info,snow,want", [
+    (0b1010, 0x0000, True),     # info bit 1: filament in the extruder
+    (0b1000, 0x0000, False),
+    (0b1010, 0xFF00, True),     # from the external spool
+    (0b1000, 0xFFFF, False),
+])
+def test_filament_loaded_new_protocol(make_collector, ext_info, snow, want):
+    _d, s = _normalized(make_collector, {"gcode_state": "IDLE", "device": {"extruder": {"state": 1, "info": [
+        {"id": 0, "snow": snow, "info": ext_info}]}}}, model="H2S")
+    assert s.filament_loaded is want
+
+
+@pytest.mark.parametrize("tray_now,want", [("254", True), ("255", False), ("1", None)])
+def test_filament_loaded_legacy_from_tray_now(make_collector, tray_now, want):
+    # P1 without an extruder block: the legacy tray_now (255 = nothing loaded).
+    # "1" points into an AMS that is not reported: unknown.
+    _d, s = _normalized(make_collector, {"gcode_state": "IDLE", "ams": {"tray_now": tray_now}}, model="P1S")
+    assert s.filament_loaded is want
+
+
+def test_filament_loaded_unknown_without_raw_report():
+    assert normalize_bambu("bambu-1", "P1", _bambu_result(gcode_state="IDLE")).filament_loaded is None
+
+
+@pytest.mark.parametrize("msg,model,with_version,want", [
+    ({"device": {"extruder": {"state": 1, "info": [{"id": 0}]}}}, "H2S", True, False),
+    ({"device": {"extruder": {"state": 2, "info": [{"id": 0}, {"id": 1}]}}}, "H2S", False, True),   # 2 extruders
+    ({"ams": {"ams": [{"id": "0", "humidity": "3", "temp": "25", "info": "10000E03", "tray": []}]}},
+     "P2S", False, True),                                                                         # track switch
+    ({"gcode_state": "IDLE"}, "H2D", True, True),                                                 # lib: dual nozzle model
+    ({"gcode_state": "IDLE"}, "P1S", False, False),
+])
+def test_dual_nozzle(make_collector, msg, model, with_version, want):
+    device, _s = _normalized(make_collector, msg, model=model)
+    if with_version:
+        _get_version(device)
+    assert normalize_bambu("t-1", "t", device, device_type=model).dual_nozzle is want
+
+
+# --- AMS drying: unit `dry` block, printer ams_dry_ok -------------------------
+
+def _drying_report(fun2="3973", gcode="IDLE", snow=0xFFFF, **unit):
+    u = {"id": "0", "humidity": "3", "humidity_raw": "20", "temp": "48.0", "info": "10942023",
+         "dry_time": 633, "dry_sf_reason": [6],
+         "dry_setting": {"dry_temperature": 55, "dry_duration": 12, "dry_filament": "PETG"},
+         "tray": [_tray_msg(0, "PETG", "230", "270"), _tray_msg(1, "PETG", "230", "270"),
+                  {"id": "2", "state": 0}, {"id": "3", "state": 0}]}
+    u.update(unit)
+    msg = {"gcode_state": gcode, "ams": {"ams": [u]},
+           "device": {"extruder": {"state": 1, "info": [{"id": 0, "snow": snow, "info": 10}]}}}
+    if fun2 is not None:
+        msg["fun2"] = fun2
+    return msg
+
+
+def test_drying_unit_from_a_live_shaped_report(make_collector):
+    _d, s = _normalized(make_collector, _drying_report())
+    dry = s.ams["units"][0]["dry"]
+    assert {k: dry[k] for k in ("type", "status", "phase", "active", "remaining_min", "temp", "hours",
+                                "filament", "blockers", "feeding")} == {
+        "type": "n3f", "status": "drying", "phase": "dehumidify", "active": True, "remaining_min": 633,
+        "temp": 55, "hours": 12, "filament": "PETG", "blockers": [], "feeding": False}
+    assert (dry["max_temp"], dry["max_by"]) == (65, None)
+    assert s.ams_dry_ok is True
+    assert s.ams["units"][0]["dry_time"] == 633          # kept for the AMS history and older clients
+
+
+def test_drying_status_needs_fun2(make_collector):
+    _d, s = _normalized(make_collector, _drying_report(fun2=None))
+    dry = s.ams["units"][0]["dry"]
+    assert (dry["status"], dry["active"], dry["remaining_min"]) == (None, True, 633)
+    assert s.ams_dry_ok is None
+    _d, s = _normalized(make_collector, _drying_report(fun2="1"))
+    assert (s.ams_dry_ok, s.ams["units"][0]["dry"]["status"]) == (False, None)
+
+
+@pytest.mark.parametrize("gcode,state", [("RUNNING", PrinterState.PRINTING), ("PAUSE", PrinterState.PAUSED)])
+def test_drying_unit_feeding_a_print_gets_the_print_caps(make_collector, gcode, state):
+    # A paused print still has its filament in this AMS: the print caps stay.
+    _d, s = _normalized(make_collector, _drying_report(gcode=gcode, snow=0x0001, info="10142003",
+                                                       dry_time=0, dry_sf_reason=[]))
+    assert s.state == state
+    dry = s.ams["units"][0]["dry"]
+    assert (dry["status"], dry["active"], dry["feeding"], dry["max_temp"], dry["max_by"]) == (
+        "off", False, True, 55, "PETG")
+    assert dry["suggest"] == {"filament": "PETG", "temp": 55, "hours": 12}
+
+
+@pytest.mark.parametrize("gcode", ["IDLE", "FINISH"])
+def test_drying_unit_loaded_but_not_printing_gets_the_idle_caps(make_collector, gcode):
+    # The extruder still points at this AMS (snow), but no print runs.
+    _d, s = _normalized(make_collector, _drying_report(gcode=gcode, snow=0x0001, info="10142003",
+                                                       dry_time=0, dry_sf_reason=[]))
+    dry = s.ams["units"][0]["dry"]
+    assert (dry["feeding"], dry["max_temp"], dry["max_by"]) == (False, 65, None)
+    assert dry["suggest"] == {"filament": "PETG", "temp": 65, "hours": 12}
+
+
+def test_classic_ams_has_no_drying(make_collector):
+    _d, s = _normalized(make_collector, _drying_report(info="10002001"))
+    assert s.ams["units"][0]["dry"] is None
+
+
+# --- print_error: text from Bambu's tables ---------------------------------------
+
+def test_print_error_line_texts():
+    from app.services.bambu_extras import print_error_line
+    from app.vendor.pybambu.utils import get_print_error_text
+
+    cancelled = get_print_error_text("0300400C", "", "ru")
+    assert CYRILLIC_RE.search(cancelled)
+    assert print_error_line(50348044, "") == "Ошибка печати 0300_400C: " + cancelled
+    # codes >= 0x10000000: the lib's own formatting breaks on them (8 hex digits here)
+    line = print_error_line(0x12008001, "P2S")
+    assert line.startswith("Ошибка печати 1200_8001: ") and CYRILLIC_RE.search(line)
+    # empty table text (ru and en) and a code missing from the tables: code only
+    assert print_error_line(0x05008030, "") == "Ошибка печати 0500_8030"
+    assert print_error_line(0x0FFF0001, "X1C") == "Ошибка печати 0FFF_0001"
+
+
+def test_print_error_shown_where_the_lib_has_no_text(make_collector):
+    device, s = _normalized(make_collector, {"gcode_state": "FAILED", "print_error": 0x12008001})
+    assert device.print_error.error is None     # the lib formats it as "0120_0800": no text
+    assert s.last_error.startswith("Ошибка печати 1200_8001: ")
+
+
+def test_print_error_uses_the_detected_model(make_collector, monkeypatch):
+    from app.services import bambu_extras
+
+    seen = []
+    monkeypatch.setattr(bambu_extras, "get_print_error_text",
+                        lambda code, dt, lang: seen.append((code, str(dt), lang)) or "текст")
+    bambu_extras.print_error_line.cache_clear()
+    _d, s = _normalized(make_collector, {"gcode_state": "FAILED", "print_error": 0x07008002}, model="H2S")
+    assert s.last_error == "Ошибка печати 0700_8002: текст"
+    assert seen == [("07008002", "H2S", "ru")]
+    bambu_extras.print_error_line.cache_clear()
+
+
+CYRILLIC_RE = __import__("re").compile("[А-Яа-яЁё]")
+
+
+# --- indicators: door, SD card, nozzle ---------------------------------------------
+
+_FW = {"X1C": "01.11.02.00", "P2S": "01.02.00.00", "H2S": "01.02.00.00", "P1S": "01.09.00.00"}
+
+
+@pytest.mark.parametrize("model,door,sdcard,nozzle", [
+    ("X1C", False, "normal", {"diameter": 0.4, "type": "hardened_steel"}),     # HX01
+    ("P2S", False, None, {"diameter": 0.4, "type": "hardened_steel"}),         # eMMC: no card needed
+    ("H2S", False, None, {"diameter": 0.4, "type": "hardened_steel"}),
+    ("P1S", None, "normal", {"diameter": 0.4, "type": "stainless_steel"}),     # P1: no door sensor
+])
+def test_indicators_from_the_fixtures(offline_collector, model, door, sdcard, nozzle):
+    import bambu_testkit as kit
+
+    collector = offline_collector(model)
+    for line in kit.load_fixture(model):
+        kit.deliver(collector, line["msg"])
+    s = normalize_bambu("t-1", "t", collector.fetch(), device_type=model)
+    assert s.door_open is None                  # the door sensor needs the firmware version
+    assert (s.sdcard, s.nozzle) == (sdcard, nozzle)
+    _get_version(collector.client.get_device(), _FW[model])
+    s = normalize_bambu("t-1", "t", collector.fetch(), device_type=model)
+    assert (s.door_open, s.sdcard, s.nozzle) == (door, sdcard, nozzle)
+
+
+@pytest.mark.parametrize("model,msg,want", [
+    ("P2S", {"stat": "1001040A18030"}, True),          # stat bit 23
+    ("P2S", {"stat": "1001040218030"}, False),
+    ("H2S", {"stat": "46A58008"}, True),
+    ("X1C", {"home_flag": 0x00800000, "stat": "0"}, True),   # X1: home_flag bit 23
+    ("X1C", {"home_flag": 0, "stat": "800000"}, False),      # ... and not stat
+])
+def test_door_open(make_collector, model, msg, want):
+    device, _s = _normalized(make_collector, dict(msg, gcode_state="IDLE"), model=model)
+    _get_version(device, _FW[model])
+    assert normalize_bambu("t-1", "t", device, device_type=model).door_open is want
+
+
+@pytest.mark.parametrize("msg,want", [
+    ({"home_flag": 0x100}, "normal"),
+    ({"home_flag": 0}, "missing"),
+    ({"home_flag": 0x200}, "abnormal"),
+    ({"home_flag": 0x300}, "abnormal"),
+    ({"home_flag": 0, "fun2": "3973"}, None),          # prints from eMMC (fun2 bit 0): a missing card is fine
+    ({"home_flag": 0x200, "fun2": "3973"}, "abnormal"),  # ... but a faulty one still shows
+    ({"home_flag": 0, "fun2": "1"}, None),             # bit 0 alone (real fun2 values set bits 0 and 1)
+    ({"home_flag": 0, "fun2": "2"}, "missing"),        # bit 1 is not the eMMC
+    ({"gcode_state": "IDLE"}, None),                   # no home_flag reported yet
+])
+def test_sdcard_status(make_collector, msg, want):
+    _d, s = _normalized(make_collector, msg, model="P1S")
+    assert s.sdcard == want
+
+
+def test_nozzle_unknown_degrades_to_none(make_collector):
+    _d, s = _normalized(make_collector, {"gcode_state": "IDLE"}, model="P1S")
+    assert s.nozzle is None
+    assert normalize_bambu("bambu-1", "P1", _bambu_result(gcode_state="IDLE")).nozzle is None
+    _d, s = _normalized(make_collector, {"device": {"nozzle": {"info": [{"id": 0, "diameter": 0.6, "type": "HH01"}]}}},
+                        model="H2S")
+    assert s.nozzle == {"diameter": 0.6, "type": "high_flow_hardened_steel"}
+
+
+# --- passive command-signature detection: print.fun bit 29 -------------------------
+
+@pytest.mark.parametrize("model,want", [("X1C", False), ("P2S", False), ("H2S", False), ("P1S", None)])
+def test_signature_required_from_the_fixtures(offline_collector, model, want):
+    import bambu_testkit as kit
+
+    collector = offline_collector(model)
+    for line in kit.load_fixture(model):
+        kit.deliver(collector, line["msg"])
+    assert normalize_bambu("t-1", "t", collector.fetch(), device_type=model).signature_required is want
+
+
+@pytest.mark.parametrize("fun,want", [("3EC1AFFF9CFF", True), ("3EC18FFF9CFF", False), (None, None)])
+def test_signature_required_bit(make_collector, fun, want):
+    # ha-bambulab's examples: Developer Mode off (bit 29 set) / on; no fun: unknown
+    msg = {"gcode_state": "IDLE"} if fun is None else {"gcode_state": "IDLE", "fun": fun}
+    _d, s = _normalized(make_collector, msg)
+    assert s.signature_required is want
+
+
+# --- lights: both H2 lamps, WS light state, Klipper control fields --------------
+
+@pytest.mark.parametrize("l1,l2,want", [
+    ("on", "unknown", True),
+    ("off", "on", True),        # H2/X2: either lamp lit = lit (the lib's is_chamber_light_on)
+    ("on", "off", True),
+    ("off", "off", False),
+    ("off", "unknown", False),  # one-lamp models keep chamber_light2 "unknown"
+    ("off", None, False),
+    ("unknown", "unknown", None),
+    ("unknown", "off", None),
+    (None, None, None),
+])
+def test_bambu_light_from_both_lamps(l1, l2, want):
+    lights = SimpleNamespace(chamber_light=l1, chamber_light2=l2, work_light="flashing")
+    result = SimpleNamespace(print_job=SimpleNamespace(gcode_state="RUNNING"), lights=lights)
+    s = normalize_bambu("p-h1", "H1", result, device_type="H2S")
+    assert s.light_on is want
+    assert s.debug["lights"] == {"chamber_light": l1, "chamber_light2": l2, "work_light": "flashing"}
+
+
+@pytest.mark.parametrize("value,want", [(True, True), (False, False), (1, None), ("on", None), (None, None)])
+def test_ws_light_on_passthrough_bool_only(value, want):
+    for kind in (PrinterKind.CREALITY, PrinterKind.KLIPPER):
+        s = normalize_ws_dict("x-1", "X", kind, {"state": "standby", "light_on": value})
+        assert s.light_on is want
+
+
+def _moonraker(state="standby", webhooks="ready", **extra):
+    data = {"state": state, "progress": 0, "remaining_time": 0, "debug": {"webhooks_state": webhooks}}
+    data.update(extra)
+    return data
+
+
+@pytest.mark.parametrize("data,state", [
+    (_moonraker("standby"), PrinterState.IDLE),
+    (_moonraker("paused", progress=40, remaining_time=600), PrinterState.PAUSED),
+    (_moonraker("printing", progress=40, remaining_time=600), PrinterState.PRINTING),
+])
+@pytest.mark.parametrize("pin,light_ctl", [("caselight", True), ("", False), (None, None)])
+def test_klipper_control_fields_in_every_state(data, state, pin, light_ctl):
+    # Not read from `debug`: the status carries debug only while printing, and
+    # an idle or paused Klipper must stay controllable.
+    data = dict(data)
+    if pin is not None:
+        data["light_pin"] = pin
+    s = normalize_ws_dict("klipper-1", "Ghost 6", PrinterKind.KLIPPER, data)
+    assert s.state == state
+    assert (s.ctl_ready, s.light_ctl) == (True, light_ctl)
+    if state != PrinterState.PRINTING:
+        assert s.debug == {}
+
+
+@pytest.mark.parametrize("webhooks,want", [("shutdown", False), ("error", False), ("startup", False),
+                                           ("Ready", True), (None, None)])
+def test_klipper_ctl_ready_from_the_host_state(webhooks, want):
+    data = _moonraker()
+    if webhooks is None:
+        del data["debug"]
+    else:
+        data["debug"]["webhooks_state"] = webhooks
+    assert normalize_ws_dict("klipper-1", "Ghost 6", PrinterKind.KLIPPER, data).ctl_ready is want
+
+
+def test_control_fields_none_for_creality_and_offline():
+    s = normalize_ws_dict("creality-1", "K1", PrinterKind.CREALITY,
+                          dict(_moonraker(), light_pin="caselight"))
+    assert (s.ctl_ready, s.light_ctl) == (None, None)
+    s = normalize_ws_dict("klipper-1", "Ghost 6", PrinterKind.KLIPPER, {})
+    assert (s.online, s.ctl_ready, s.light_ctl, s.light_on) == (False, None, None, None)
+
+
+def test_grace_status_keeps_the_klipper_control_fields():
+    import main
+
+    s = normalize_ws_dict("klipper-1", "Ghost 6", PrinterKind.KLIPPER,
+                          _moonraker(light_pin="caselight", light_on=True))
+    grace = main._build_grace_status(s, reason="timeout", now=1.0, device_type="generic")
+    assert (grace.ctl_ready, grace.light_ctl, grace.light_on) == (True, True, True)
+    assert grace.to_dict()["ctl_ready"] is True
+
+
+# --- no chamber reading without a chamber sensor (P1P / P1S / A1) ------------------
+
+@pytest.mark.parametrize("model,chamber", [("P1S", None), ("P1P", None), ("A1", None), ("A1MINI", None),
+                                           ("X1C", 35.0), ("P2S", 35.0), ("H2S", 35.0)])
+@pytest.mark.parametrize("known_fw", [False, True])
+def test_chamber_only_on_models_with_a_sensor(make_collector, model, chamber, known_fw):
+    # The P1S reports a constant bogus 5° (no sensor): the lib's
+    # Features.CHAMBER_TEMPERATURE once the firmware is known, the same model
+    # family test before that.
+    device = make_collector("t", "192.0.2.10", "00000000", "22E00A000000000", model).client.get_device()
+    if known_fw:
+        _get_version(device, "01.09.00.00")
+    device.print_update(data={"gcode_state": "RUNNING", "chamber_temper": 35})
+    s = normalize_bambu("t-1", "t", device, device_type=model)
+    assert (s.chamber_temp, s.target_chamber_temp) == (chamber, None)
+
+
+def test_chamber_sensor_fallback_without_any_model():
+    temp = SimpleNamespace(chamber_temp=30.0, target_chamber_temp=0)
+    result = SimpleNamespace(print_job=SimpleNamespace(gcode_state="IDLE"), temperature=temp)
+    assert normalize_bambu("b-1", "B", result, device_type="P1S").chamber_temp is None
+    assert normalize_bambu("b-1", "B", result, device_type="X1C").chamber_temp == 30.0
+    # the live device's own model wins over the registry's
+    result.info = SimpleNamespace(device_type="P1S")
+    assert normalize_bambu("b-1", "B", result, device_type="X1C").chamber_temp is None

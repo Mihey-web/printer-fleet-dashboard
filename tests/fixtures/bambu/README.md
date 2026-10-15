@@ -22,6 +22,12 @@ How the data was captured: one read-only MQTT client (TLS 8883, user `bblp`) sub
 report topic and published a single `{"pushing":{"sequence_id":"1","command":"pushall"}}`. It then
 recorded for 70 s. It sent no other commands.
 
+No `get_version` was requested, so the captures carry no firmware version: replayed alone they give
+`firmware_version "unknown"`, and the paths the library gates on the version (`filament_swap_ok`,
+`door_open`) stay `None`. `test_replay_with_a_known_firmware` feeds a synthetic `get_version` reply
+first. **Next capture:** also publish `{"info":{"sequence_id":"0","command":"get_version"}}` and keep
+the reply (replace `module[].sn` like the serials below).
+
 ## Files
 
 | File | Printer | Fake SN | Msgs | Cadence | First msg | Notes |

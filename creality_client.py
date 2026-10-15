@@ -212,6 +212,10 @@ class CrealityK1Client:
                     debug['position'] = str(data['curPosition'])
                 if 'lightSw' in data:
                     debug['light_on'] = bool(data['lightSw'])
+                    try:
+                        self.data['light_on'] = bool(int(data['lightSw']))
+                    except (TypeError, ValueError):
+                        pass
                 if 'err' in data:
                     debug['err'] = data['err']
                 if 'model' in data:
@@ -278,7 +282,9 @@ class CrealityK1Client:
     def send_command(self, command, param=None):
         """Send a print-control command via the Creality port-9999 'set' method.
 
-        Supported: pause, resume, stop, gcode_line.
+        Supported: pause, resume, stop, light_on, light_off, gcode_line.
+        light_* (lightSw) is not live-verified yet; printer_commands sends it
+        only to printers listed in the printer_light_enabled setting.
         """
         if not self.connected or not self.ws:
             return {"success": False, "detail": "Not connected"}
@@ -287,6 +293,8 @@ class CrealityK1Client:
             "pause": {"pause": 1},
             "resume": {"pause": 0},
             "stop": {"stop": 1},
+            "light_on": {"lightSw": 1},
+            "light_off": {"lightSw": 0},
         }
 
         try:

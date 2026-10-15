@@ -272,3 +272,240 @@ def test_creality_unknown_numeric_state_is_not_idle():
     c.on_message(None, '{"state": 42}')
     c.connected = True
     assert c.get_data()["state"] == "unknown"
+
+
+# --- Klipper: light pin discovery, acknowledged commands (run_action) -------------
+
+from klipper_client import pick_light_pin
+
+
+@pytest.mark.parametrize("objects,want", [
+    (["output_pin caselight", "output_pin beeper"], "caselight"),
+    (["output_pin led_strip", "output_pin chamber_light"], "chamber_light"),   # "light" before "led"
+    (["output_pin Case_Light", "output_pin chamber_light"], "Case_Light"),     # caselight / case_light first
+    (["output_pin top_lamp", "output_pin led_bar"], "led_bar"),
+    (["output_pin top_lamp"], "top_lamp"),
+    (["output_pin light;M112", "output_pin bad name light"], None),           # unsafe for G-code: ignored
+    (["output_pin beeper", "fan", "heater_bed", "led caselight"], None),       # only output_pin
+    ([], None),
+    (None, None),
+    # whole words only: "enabled", "disabled", "cooled", "controlled", "sled" hold "led",
+    # "flight", "highlight" hold "light" — none of them is a light (SET_PIN would switch it)
+    (["output_pin motors_enabled"], None),
+    (["output_pin stepper_disabled"], None),
+    (["output_pin hotend_cooled"], None),
+    (["output_pin fan_speed_controlled"], None),
+    (["output_pin sled_lock"], None),
+    (["output_pin flight_mode"], None),
+    (["output_pin highlight_unused"], None),
+    (["output_pin motors_enabled", "output_pin top_lamp"], "top_lamp"),
+    (["output_pin led_strip"], "led_strip"),
+    (["output_pin chamber_light"], "chamber_light"),
+    (["output_pin light_2", "output_pin leds"], "light_2"),                    # digits split words; plurals
+    (["output_pin LEDStrip", "output_pin top_lamps"], "LEDStrip"),             # camelCase
+    (["output_pin ChamberLight", "output_pin LEDStrip"], "ChamberLight"),
+    (["output_pin CaseLight", "output_pin ChamberLight"], "CaseLight"),
+    (["output_pin my_caselight", "output_pin led_bar"], "my_caselight"),
+])
+def test_pick_light_pin(objects, want):
+    assert pick_light_pin(objects) == want
+
+
+class _FakeWs:
+    """Records sent requests; `answer(req)` may return a reply delivered at once."""
+
+    def __init__(self, client, answer=None):
+        self.client, self.answer, self.sent = client, answer, []
+
+    def send(self, raw):
+        req = json.loads(raw)
+        self.sent.append(req)
+        reply = self.answer(req) if self.answer else None
+        if reply is not None:
+            self.client.on_message(None, json.dumps(dict(reply, jsonrpc="2.0", id=req["id"])))
+
+
+def _ready_klipper(answer=None, pin=None):
+    k = KlipperClient("host", 7125, "Ghost 6")
+    k.ws = _FakeWs(k, answer)
+    k.connected = True
+    if pin is not None:
+        k.light_pin = pin
+    return k
+
+
+@pytest.mark.parametrize("action,method", [("pause", "printer.print.pause"), ("resume", "printer.print.resume"),
+                                           ("stop", "printer.print.cancel")])
+def test_klipper_run_action_confirmed(action, method):
+    k = _ready_klipper(lambda req: {"result": "ok"})
+    assert k.run_action(action, timeout=1) == {"success": True, "replied": True, "detail": "подтверждено принтером"}
+    assert [r["method"] for r in k.ws.sent] == [method]
+    assert k._pending == {}
+
+
+def test_klipper_run_action_rejected_silent_or_disconnected():
+    k = _ready_klipper(lambda req: {"error": {"code": 400, "message": "Print not paused <x>"}})
+    r = k.run_action("resume", timeout=1)
+    assert r == {"success": False, "replied": True, "detail": "Klipper отклонил: Print not paused <x>"}
+    k = _ready_klipper()                                    # Moonraker never answers
+    assert k.run_action("pause", timeout=0.05) == {"success": True, "replied": False,
+                                                   "detail": "отправлено (без подтверждения)"}
+    assert k._pending == {}
+    k.connected = False
+    assert k.run_action("pause", timeout=0.05) == {"success": False, "replied": False,
+                                                   "detail": "Нет связи с Moonraker"}
+
+    class _Broken:
+        def send(self, raw):
+            raise OSError("socket closed")
+
+    k = _ready_klipper()
+    k.ws = _Broken()
+    assert k.run_action("stop", timeout=0.05) == {"success": False, "replied": False, "detail": "socket closed"}
+    assert k._pending == {}
+
+
+def test_klipper_send_command_is_deprecated():
+    # printer_commands sends Klipper actions through run_action; the old fire-and-forget pair
+    # (client + collector) has no caller left and warns until a cleanup removes it
+    from app.collectors.klipper_collector import KlipperCollector
+
+    k = KlipperClient("host", 7125, "L")
+    with pytest.warns(DeprecationWarning, match="run_action"):
+        assert k.send_command("pause") == {"success": False, "detail": "Not connected"}
+    with pytest.warns(DeprecationWarning, match="run_action"):
+        KlipperCollector("L", "host", 7125).send_command("pause")
+
+
+def test_klipper_light_through_set_pin():
+    k = _ready_klipper(lambda req: {"result": "ok"}, pin="caselight")
+    assert k.run_action("light_on", timeout=1)["replied"] is True
+    assert k.run_action("light_off", timeout=1)["success"] is True
+    assert [r["params"]["script"] for r in k.ws.sent] == ["SET_PIN PIN=caselight VALUE=1",
+                                                          "SET_PIN PIN=caselight VALUE=0"]
+    assert [r["method"] for r in k.ws.sent] == ["printer.gcode.script"] * 2
+    k = _ready_klipper(lambda req: {"result": "ok"}, pin="")
+    r = k.run_action("light_on", timeout=1)
+    assert r["success"] is False and "пин подсветки" in r["detail"] and k.ws.sent == []
+    assert _ready_klipper().run_action("explode")["success"] is False
+
+
+def test_klipper_confirmed_light_is_in_the_data_at_once():
+    # Klipper pushes the pin's value on its own schedule (~250 ms, later during a print): a
+    # confirmed light is in get_data() from the reply on, so the store refresh that follows
+    # it in printer_commands already carries the new state.
+    k = _ready_klipper(lambda req: {"result": "ok"}, pin="caselight")
+    k.parse_status({"print_stats": {"state": "standby"}, "output_pin caselight": {"value": 0}})
+    assert k.get_data()["light_on"] is False
+    assert k.run_action("light_on", timeout=1)["replied"] is True
+    assert k.get_data()["light_on"] is True
+    assert k.run_action("light_off", timeout=1)["replied"] is True
+    assert k.get_data()["light_on"] is False
+    # unanswered or refused: it may not have switched — the data waits for Klipper's own push
+    k.ws.answer = None
+    assert k.run_action("light_on", timeout=0.05)["replied"] is False
+    assert k.get_data()["light_on"] is False
+    k.ws.answer = lambda req: {"error": {"message": "Unknown pin"}}
+    assert k.run_action("light_on", timeout=1)["success"] is False
+    assert k.get_data()["light_on"] is False
+    k.ws.answer = lambda req: {"result": "ok"}
+    assert k.run_action("pause", timeout=1)["replied"] is True          # only a light touches it
+    assert k.get_data()["light_on"] is False
+
+
+def test_klipper_reply_is_routed_not_parsed_as_status():
+    k = _ready_klipper(lambda req: {"result": {"status": {"print_stats": {"state": "printing"}}}})
+    assert k.run_action("pause", timeout=1)["replied"] is True
+    assert k.get_data() == {}                    # the reply was not taken for telemetry
+    assert k.last_message_ts == 0.0
+
+
+_OBJECTS = {"objects": ["webhooks", "print_stats", "output_pin beeper", "output_pin CaseLight", "fan"]}
+
+
+def _discovering_klipper(objects=_OBJECTS, scale=255):
+    def answer(req):
+        if req["method"] == "printer.objects.list":
+            return {"result": objects}
+        if req["method"] == "printer.objects.query" and "configfile" in req["params"]["objects"]:
+            # Klipper lower-cases the section names of configfile.settings
+            return {"result": {"status": {"configfile": {"settings": {
+                "output_pin caselight": {"pwm": False, "scale": scale}}}}}}
+        return None
+    return _ready_klipper(answer)
+
+
+def test_klipper_discovers_the_light_pin_and_its_scale():
+    k = _discovering_klipper()
+    k.on_open(k.ws)
+    methods = [r["method"] for r in k.ws.sent]
+    assert methods[:3] == ["printer.objects.subscribe", "printer.objects.query", "printer.objects.list"]
+    assert k.light_pin == "CaseLight" and k.light_scale == 255.0
+    # Moonraker replaces a connection's subscription: the full set again, plus the pin
+    subs = [r for r in k.ws.sent if r["method"] == "printer.objects.subscribe"]
+    assert len(subs) == 2
+    assert subs[-1]["params"]["objects"]["output_pin CaseLight"] == ["value"]
+    assert "print_stats" in subs[-1]["params"]["objects"]
+    k.parse_status({"print_stats": {"state": "standby"}})
+    assert k.get_data()["light_pin"] == "CaseLight"
+    k.ws.answer = lambda req: {"result": "ok"}
+    k.run_action("light_on", timeout=1)
+    assert k.ws.sent[-1]["params"]["script"] == "SET_PIN PIN=CaseLight VALUE=255"
+
+
+def test_klipper_without_a_light_pin_or_with_an_error():
+    k = _discovering_klipper(objects={"objects": ["webhooks", "output_pin beeper"]})
+    k.on_open(k.ws)
+    k.parse_status({"print_stats": {"state": "standby"}})
+    assert k.light_pin == "" and k.get_data()["light_pin"] == ""
+    assert [r["method"] for r in k.ws.sent].count("printer.objects.subscribe") == 1
+    k = _ready_klipper(lambda req: {"error": {"message": "Klippy Host not connected"}}
+                       if req["method"] == "printer.objects.list" else None)
+    k.on_open(k.ws)
+    k.parse_status({"print_stats": {"state": "standby"}})
+    assert k.light_pin is None and "light_pin" not in k.get_data()
+
+
+def test_klipper_rediscovers_when_klippy_becomes_ready():
+    k = _ready_klipper()                       # the objects.list request stays unanswered
+    k.on_message(None, json.dumps({"jsonrpc": "2.0", "method": "notify_status_update",
+                                   "params": [{"webhooks": {"state": "shutdown", "state_message": "MCU"}}]}))
+    assert [r["method"] for r in k.ws.sent] == []
+    k.on_message(None, json.dumps({"jsonrpc": "2.0", "method": "notify_status_update",
+                                   "params": [{"webhooks": {"state": "ready"}}]}))
+    assert [r["method"] for r in k.ws.sent] == ["printer.objects.list"]
+    # still ready (or the same discovery in flight): no second request
+    k.on_message(None, json.dumps({"jsonrpc": "2.0", "method": "notify_status_update",
+                                   "params": [{"webhooks": {"state": "ready"}}]}))
+    assert [r["method"] for r in k.ws.sent] == ["printer.objects.list"]
+
+
+def test_klipper_light_state_from_the_pin_value():
+    k = _ready_klipper(pin="caselight")
+    k.subscribe_to_status()
+    assert k.ws.sent[0]["params"]["objects"]["output_pin caselight"] == ["value"]
+    k.parse_status({"output_pin caselight": {"value": 0.5}})
+    assert k.get_data()["light_on"] is True
+    k.parse_status({"output_pin caselight": {"value": 0}})
+    assert k.get_data()["light_on"] is False
+    k.parse_status({"output_pin beeper": {"value": 1}})
+    assert k.get_data()["light_on"] is False
+
+
+# --- Creality: light state and the (not yet live-verified) light switch -----------
+
+def test_creality_light_state_and_switch():
+    c = CrealityK1Client("host", "K1")
+    c.on_message(None, '{"lightSw": 1}')
+    c.connected = True
+    assert c.get_data()["light_on"] is True
+    c.on_message(None, '{"lightSw": 0}')
+    assert c.get_data()["light_on"] is False
+    c.on_message(None, '{"lightSw": "x", "nozzleTemp": 20}')       # unparseable: last value kept
+    assert c.get_data()["light_on"] is False
+
+    sent = []
+    c.ws = type("W", (), {"send": lambda self, raw: sent.append(json.loads(raw))})()
+    assert c.send_command("light_off")["success"] is True
+    assert c.send_command("light_on")["success"] is True
+    assert sent == [{"method": "set", "params": {"lightSw": 0}}, {"method": "set", "params": {"lightSw": 1}}]

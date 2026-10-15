@@ -11,6 +11,7 @@ import time
 import uuid
 from pathlib import Path
 
+from app.collectors.bambu_raw import RawReport
 from app.vendor.pybambu import BambuClient
 from app.vendor.pybambu import bambu_client as _vendor_bambu_client
 from app.vendor.pybambu.const import LOGGER as _PYBAMBU_LOGGER
@@ -124,6 +125,22 @@ class _ForgeBambuClient(BambuClient):
         print_job = self._device.print_job
         print_job.prune_print_history_files = _noop
         print_job.prune_timelapse_files = _noop
+        # Report fields the lib drops (fun2, AMS info / dry_sf_reason, ams_status,
+        # extruder state): every `print` report goes through RawReport first. The
+        # lib calls self._device.print_update(data=...), which finds this
+        # instance attribute; a failing RawReport must not cost the lib its parse.
+        device = self._device
+        device.forge_raw = RawReport()
+        lib_print_update = device.print_update
+
+        def print_update(data):
+            try:
+                device.forge_raw.update(data)
+            except Exception:
+                logger.debug("raw report update failed", exc_info=True)
+            return lib_print_update(data=data)
+
+        device.print_update = print_update
         # Set while the printer refuses the MQTT login (CONNACK 4 / 5); see on_disconnect().
         self._login_refused = False
         self._unanswered = 0            # attempts in a row that ended otherwise, during a refused login
@@ -428,6 +445,21 @@ class BambuCollector:
             # (see connect()'s note). The publish error is surfaced to the caller;
             # real liveness is judged by info.online in fetch().
             return {"success": False, "detail": str(e)}
+
+    def live_device(self):
+        """The lib's Device while its telemetry is live (info.online), else None.
+
+        For commands that must be checked against the printer's current state
+        (AMS load / unload, drying). Unlike fetch() it never connects, never
+        schedules a rebuild and never raises.
+        """
+        try:
+            device = self.client.get_device()
+            if device is not None and getattr(getattr(device, "info", None), "online", False):
+                return device
+        except Exception:
+            logger.debug("[%s] live_device failed", self.label, exc_info=True)
+        return None
 
     def _listener_dead(self) -> bool:
         """True when nothing will bring telemetry back without a new connect():

@@ -147,6 +147,33 @@ def test_state_durations_merge_across_rename(tmp_path):
     assert printers["bambu-1"]["states"]["printing"] == 120
 
 
+def test_state_durations_do_not_stretch_a_state_over_a_history_gap(tmp_path):
+    """07–11.10.2026 the history was not written for ~5 days (dying SSD); the last
+    state before the gap used to fill all of it — "printing" or "offline" for days.
+    A state now lasts at most HISTORY_GAP_CAP_S past its row; the rest is "nodata"."""
+    db = str(tmp_path / "h.db")
+    cap = api_main.HISTORY_GAP_CAP_S
+    _seed(db, [
+        ("p1", "P1", "printing", None, None, 1000.0),
+        ("p1", "P1", "printing", None, None, 1080.0),      # normal cadence: 80 s
+        ("p1", "P1", "idle", None, None, 1160.0 + 5 * 86400),   # 5 days without rows
+        ("p1", "P1", "idle", None, None, 1240.0 + 5 * 86400),
+    ])
+    st = api_main._query_state_durations(db, 0, 1240.0 + 5 * 86400)["p1"]["states"]
+    gap = 1160.0 + 5 * 86400 - 1080.0
+    assert st["printing"] == 80 + cap
+    assert st["nodata"] == int(gap - cap)
+    assert st["idle"] == 80
+    # a printer whose rows stopped long ago: its last state does not run up to `to`
+    st = api_main._query_state_durations(db, 0, 1240.0 + 6 * 86400)["p1"]["states"]
+    assert st["idle"] == 80 + cap
+
+
+def test_states_summary_passes_nodata_through():
+    import inspect
+    assert '"nodata"' in inspect.getsource(api_main.create_app)
+
+
 def test_cached_state_durations_memoizes_within_ttl(tmp_path, monkeypatch):
     db = str(tmp_path / "h.db")
     _seed(db, [

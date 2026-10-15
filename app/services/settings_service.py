@@ -18,6 +18,8 @@ import time
 from threading import Lock
 from typing import Any, Dict, Optional
 
+from app.services import ams_autodry
+
 logger = logging.getLogger(__name__)
 
 DB_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "printer_history.db")
@@ -43,6 +45,21 @@ DEFAULTS: Dict[str, Any] = {
     # Персистится, чтобы после рестарта не считать capability «неизвестной»
     # (=по умолчанию можно) и не предлагать управление там, где оно отклонится.
     "printer_capability": {},
+    # printer ids whose not-yet-verified light control is enabled (Creality
+    # lightSw) after a live check; set via PUT /api/admin/settings, no UI.
+    "printer_light_enabled": [],
+    # AMS auto-drying (app/services/ams_autodry*): the rules (edited on the AMS
+    # tab), the engine's per-unit state and its journal. Nested defaults are
+    # shared objects: readers deep-copy. Not editable via the generic PUT.
+    "ams_autodry": ams_autodry.DEFAULT_CONFIG,
+    "ams_autodry_state": {},
+    "ams_autodry_journal": [],
+    # Print errors answered «Ignore and resume» automatically (app/services/
+    # auto_ignore.py): build-plate marker not detected — 0500_8062 (P2S/H2 family,
+    # «strong light on the plate») and 0C00_8009 (localization marker, X1 and others).
+    # Both have Studio's «Ignore this and Resume» button. The owner's plates have worn
+    # markers and move between printers, so on every Bambu (15.10).
+    "auto_ignore_print_errors": ["0500_8062", "0C00_8009"],
 }
 
 # config.py attribute -> settings key, for the one-time migration seed.

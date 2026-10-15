@@ -107,6 +107,29 @@ def test_stage_labels_cover_vendored_stage_ids():
     assert sorted(expected - keys) == []
 
 
+def _js_object_keys(name: str) -> set:
+    js = (ROOT / "app" / "web" / "app.js").read_text(encoding="utf-8")
+    m = re.search(r"var %s = \{(.*?)\};" % name, js, re.S)
+    assert m, "%s not found in app.js" % name
+    return set(re.findall(r"([a-z_]+)\s*:", m.group(1)))
+
+
+def test_ams_ui_labels_cover_the_backend_slugs():
+    # Every slug the backend sends for drying, filament changes and nozzles has
+    # a Russian label in app.js (unknown ones would show nothing or "тип неизвестен").
+    from app.services import ams_drying, bambu_extras
+
+    assert set(ams_drying.DRY_STATUS.values()) <= _js_object_keys("DRY_STATUS_LABELS")
+    assert set(ams_drying.DRY_PHASE.values()) <= _js_object_keys("DRY_PHASE_LABELS")
+    steps = set(bambu_extras.FILAMENT_STEPS.values()) | set(bambu_extras.EXTERNAL_LOAD_STEPS.values())
+    assert steps <= _js_object_keys("FILAMENT_STEP_LABELS")
+    assert {"load", "unload"} <= _js_object_keys("FILAMENT_ACTION_LABELS")
+    # The lib's nozzle slugs (Info._nozzle_type_name; high_flow_<material> is
+    # labelled by prefix) and P1's raw values.
+    nozzle_slugs = {"stainless_steel", "hardened_steel", "tungsten_carbide", "tpu_high_flow"}
+    assert nozzle_slugs <= _js_object_keys("NOZZLE_TYPE_LABELS")
+
+
 def _ams_unit_name_js() -> str:
     js = (ROOT / "app" / "web" / "app.js").read_text(encoding="utf-8")
     assert "amsUnitName(u.unit_index)" in js           # the AMS card title uses it

@@ -19,13 +19,32 @@ from app.domain.models import PrinterKind, PrinterState, PrinterStatus, now_ts
 from app.services.normalizer import normalize_bambu, normalize_ws_dict
 from app.services.state_store import StateStore
 from app.services.ams_store import AmsStore
-from app.services import settings_service
+from app.services import ams_autodry_engine, printer_commands, settings_service
+from proxy_checker import RedactingFilter
 import config
 
 # The vendored pybambu (logger app.vendor.pybambu) and paho: ERROR only, rate-limited.
 quiet_vendor_logging()
-logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] %(message)s')
+# Proxy URLs carry login:password: our own root handler masks them in every record
+# and traceback. basicConfig is a no-op when root already has handlers (pytest),
+# so foreign handlers are never touched.
+_log_handler = logging.StreamHandler()
+_log_handler.addFilter(RedactingFilter())
+logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] %(message)s',
+                    handlers=[_log_handler])
 logger = logging.getLogger(__name__)
+
+
+def _redact_uvicorn_logs() -> None:
+    """Give uvicorn's own handlers the same masking (call after uvicorn.Config).
+
+    uvicorn's error handler does not propagate to root (it prints ASGI
+    tracebacks itself). uvicorn.access is left alone: its formatter needs
+    record.args, and it logs no credentials.
+    """
+    for h in logging.getLogger('uvicorn').handlers:
+        if not any(isinstance(f, RedactingFilter) for f in h.filters):
+            h.addFilter(RedactingFilter())
 
 POLL_INTERVAL = max(getattr(config, 'POLL_INTERVAL', 60), 30)
 MAX_WORKERS = getattr(config, 'MAX_WORKERS', 10)
@@ -64,6 +83,15 @@ def build_collectors():
         elif r['kind'] == 'mks':
             items.append((pid, PrinterKind.MKS, label, MksWifiCollector(label, host, int(r.get('port') or 8080)), r.get('model') or 'mks'))
     return items
+
+
+def _note_signature(pid, status):
+    """print.fun says whether the printer takes unsigned print commands
+    (print_cmds without a probe). Never breaks the poll loop."""
+    try:
+        printer_commands.note_signature(pid, status.signature_required)
+    except Exception:
+        logger.debug('[%s] note_signature failed', pid, exc_info=True)
 
 
 def _close_bambu_collectors(collectors):
@@ -304,6 +332,7 @@ def poll_loop(
                         result = fut.result()
                         if kind == PrinterKind.BAMBU:
                             status = normalize_bambu(pid, label, result, device_type=device_type)
+                            _note_signature(pid, status)
                         else:
                             status = normalize_ws_dict(pid, label, kind, result if isinstance(result, dict) else {}, device_type=device_type)
 
@@ -453,11 +482,18 @@ def main():
     # request (one-time migration from config.py happens here too).
     settings_service.load(config)
 
-    # Команды с карточек идут через printer_commands (облако -> локальный
-    # fallback через клиент коллектора).
-    from app.services import printer_commands
+    # Команды с карточек идут через printer_commands (локальный MQTT клиента
+    # коллектора).
     printer_commands.set_store(store)
     printer_commands.start_probe_loop(store)
+    from app.services import auto_ignore
+    auto_ignore.start(store)   # «Ignore and resume» for the print errors listed in settings
+
+    # AMS auto-drying: a daemon thread over the stored status and the AMS
+    # history; drying starts go through printer_commands. Ships in shadow mode
+    # (journal only) until an admin turns it off on the AMS tab.
+    ams_autodry_engine.set_sources(store, ams_store)
+    ams_autodry_engine.start()
 
     # Bind the HTTP port FIRST, in a background thread, before connecting to any
     # printer or probing the Telegram proxy. Those can take 60-90s when devices
@@ -466,6 +502,7 @@ def main():
     # the main thread, so running the server in a daemon thread is supported.
     app = create_app(store)
     server = uvicorn.Server(uvicorn.Config(app, host=WEB_HOST, port=WEB_PORT, log_level='info'))
+    _redact_uvicorn_logs()  # after Config: it creates uvicorn's handlers
     threading.Thread(target=server.run, daemon=True).start()
     logger.info('Web dashboard: http://%s:%s', WEB_HOST, WEB_PORT)
 

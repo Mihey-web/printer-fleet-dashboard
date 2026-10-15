@@ -55,6 +55,19 @@ class PrinterStatus:
     fans: Optional[Dict[str, Any]] = None
     fw_update: Optional[bool] = None
     light_on: Optional[bool] = None
+    # Bambu only (None elsewhere). A running filament change:
+    # {"action": "load"|"unload"|None, "step": slug|None, "ams": int|None, "slot": int|None}.
+    filament_change: Optional[Dict[str, Any]] = None
+    filament_swap_ok: Optional[bool] = None   # firmware takes ams_change_filament; None until its version is known
+    filament_loaded: Optional[bool] = None    # filament in the extruder; None when unknown
+    dual_nozzle: Optional[bool] = None        # two extruders / track switch: no load / unload from here
+    ams_dry_ok: Optional[bool] = None         # firmware supports remote AMS drying (fun2 bit 5); None without fun2
+    door_open: Optional[bool] = None          # models with a door sensor (firmware version known), else None
+    sdcard: Optional[str] = None              # "normal" | "missing" | "abnormal"; None when unknown / eMMC printers
+    nozzle: Optional[Dict[str, Any]] = None   # {"diameter": 0.4, "type": "hardened_steel"} (lib slugs)
+    signature_required: Optional[bool] = None  # print.fun bit 29: unsigned print commands refused; None without fun
+    ctl_ready: Optional[bool] = None   # Klipper: klippy host "ready" (commands accepted); None elsewhere / unknown
+    light_ctl: Optional[bool] = None   # Klipper: a light output_pin was found; None until looked up / elsewhere
 
     def to_dict(self) -> Dict[str, Any]:
         data = asdict(self)

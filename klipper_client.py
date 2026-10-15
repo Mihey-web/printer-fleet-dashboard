@@ -1,11 +1,59 @@
 import json
 import math
 import logging
+import re
 import websocket
 import threading
 import time
+import warnings
 
 logger = logging.getLogger(__name__)
+
+# Seconds an acknowledged command (run_action) waits for Moonraker's reply.
+REPLY_TIMEOUT = 8.0
+# A pending request without a reply is dropped after this long (the next
+# registration prunes it); also the age after which a discovery counts as lost.
+_PENDING_MAX_AGE = 60.0
+# Pin names that are safe to interpolate into G-code (SET_PIN PIN=...).
+_PIN_NAME = re.compile(r"^[A-Za-z0-9_]+$")
+_RPC_METHODS = {"pause": "printer.print.pause", "resume": "printer.print.resume",
+                "stop": "printer.print.cancel"}
+
+
+# Words of a pin name that make it a light, by preference (pick_light_pin).
+_LIGHT_WORDS = {"light": 1, "lights": 1, "caselight": 1, "led": 2, "leds": 2, "lamp": 3, "lamps": 3}
+_CAMEL_WORD = re.compile(r"[A-Z]+(?![a-z])|[A-Z]?[a-z]+")
+
+
+def _name_words(name):
+    """Lower-case words of a pin name, split on '_', digits and camelCase:
+    'chamber_light2' -> chamber, light; 'LEDStrip' -> led, strip."""
+    return [w.lower() for part in re.split(r"[_\d]+", name) for w in _CAMEL_WORD.findall(part)]
+
+
+def pick_light_pin(objects):
+    """The output_pin that drives a light: caselight / case_light first, then
+    a name with the word 'light', then 'led', then 'lamp' (ties: by name).
+    Whole words only — 'motors_enabled', 'hotend_cooled' or 'flight_mode' is
+    no light. Names outside [A-Za-z0-9_] are ignored; None when there is no
+    such pin."""
+    best = None
+    for o in objects or ():
+        if not isinstance(o, str) or not o.startswith("output_pin "):
+            continue
+        name = o.split(None, 1)[1].strip()
+        if not _PIN_NAME.match(name):
+            continue
+        if name.lower() in ("caselight", "case_light"):
+            rank = 0
+        else:
+            ranks = [_LIGHT_WORDS[w] for w in _name_words(name) if w in _LIGHT_WORDS]
+            if not ranks:
+                continue
+            rank = min(ranks)
+        if best is None or (rank, name) < best:
+            best = (rank, name)
+    return best[1] if best else None
 
 
 class KlipperClient:
@@ -46,7 +94,7 @@ class KlipperClient:
         # but never sent telemetry — showing a dead/empty host as online 'unknown'.
         self._got_telemetry = False
         # Guards self.data (WS thread vs reader thread) and request_id (WS thread
-        # subscribe vs API thread send_command).
+        # subscribe vs API thread run_action).
         self._lock = threading.Lock()
         self._stop_reconnect = threading.Event()
         self._reconnect_thread = None
@@ -56,6 +104,18 @@ class KlipperClient:
         # reconnect loop can call it. Without this the two drivers race and spawn
         # duplicate run_forever threads / leaked sockets. Mirrors the Bambu collector.
         self._connect_lock = threading.Lock()
+        # Light: the output_pin found by discovery (None = not looked up yet,
+        # "" = looked up, none found) and its configured scale (SET_PIN VALUE).
+        self.light_pin = None
+        self.light_scale = 1.0
+        # JSON-RPC requests awaiting their reply: id -> {"event", "result",
+        # "error", "on_result", "ts"}; guarded by self._lock.
+        self._pending = {}
+        # Set by parse_status when klippy becomes ready; on_message then runs
+        # the discovery outside the lock. _discover_ts: start of the discovery
+        # in flight (0 = none), so a second one is not sent meanwhile.
+        self._discover_needed = False
+        self._discover_ts = 0.0
 
     def _next_id(self):
         with self._lock:
@@ -109,8 +169,11 @@ class KlipperClient:
     def on_open(self, ws):
         logger.info("[%s] WebSocket подключен", self.label)
         self.connected = True
+        # A discovery sent on the previous socket will never be answered.
+        self._discover_ts = 0.0
         # Подписываемся на статус принтера
         self.subscribe_to_status()
+        self._discover()
 
     def subscribe_to_status(self):
         # Subscribe to printer status updates via Moonraker WebSocket
@@ -137,6 +200,9 @@ class KlipperClient:
                 },
                 "id": self._next_id()
             }
+            pin = self.light_pin
+            if pin:
+                request["params"]["objects"]["output_pin " + pin] = ["value"]
             self.ws.send(json.dumps(request))
 
             query_request = {
@@ -158,6 +224,8 @@ class KlipperClient:
     def on_message(self, ws, message):
         try:
             data = json.loads(message)
+            if self._route_reply(data):
+                return
 
             got_status = False
             if data.get('result') and isinstance(data['result'], dict):
@@ -179,8 +247,159 @@ class KlipperClient:
             if got_status:
                 self.last_message_ts = time.time()
 
+            with self._lock:
+                need, self._discover_needed = self._discover_needed, False
+            if need:
+                self._discover()   # outside the lock: _next_id takes it
+
         except Exception as e:
             logger.warning("[%s] Ошибка парсинга: %s", self.label, e, exc_info=True)
+
+    # --- JSON-RPC requests with replies --------------------------------------
+
+    def _route_reply(self, data):
+        """A reply to one of our pending requests: hand it over (and run its
+        callback outside the lock) instead of parsing it as status."""
+        rid = data.get("id") if isinstance(data, dict) else None
+        if rid is None:
+            return False
+        with self._lock:
+            entry = self._pending.pop(rid, None)
+        if entry is None:
+            return False
+        entry["result"], entry["error"] = data.get("result"), data.get("error")
+        entry["event"].set()
+        callback = entry.get("on_result")
+        if callback is not None:
+            try:
+                callback(entry["result"], entry["error"])
+            except Exception:
+                logger.warning("[%s] reply handler failed", self.label, exc_info=True)
+        return True
+
+    def _register(self, on_result=None):
+        """A new request id with its pending entry; drops entries that never got a reply."""
+        rid = self._next_id()
+        entry = {"event": threading.Event(), "result": None, "error": None,
+                 "on_result": on_result, "ts": time.monotonic()}
+        with self._lock:
+            stale = time.monotonic() - _PENDING_MAX_AGE
+            for key in [k for k, v in self._pending.items() if v["ts"] < stale]:
+                del self._pending[key]
+            self._pending[rid] = entry
+        return rid, entry
+
+    @staticmethod
+    def _send_request(ws, rid, method, params):
+        request = {"jsonrpc": "2.0", "method": method, "id": rid}
+        if params is not None:
+            request["params"] = params
+        ws.send(json.dumps(request))
+
+    def _rpc(self, method, params=None, timeout=REPLY_TIMEOUT):
+        """Send a request and wait for its reply (API threads only, never the
+        WS thread). Returns {"success", "replied", "detail"}."""
+        ws = self.ws
+        if not self.connected or ws is None:
+            return {"success": False, "replied": False, "detail": "Нет связи с Moonraker"}
+        rid, entry = self._register()
+        try:
+            self._send_request(ws, rid, method, params)
+        except Exception as e:
+            with self._lock:
+                self._pending.pop(rid, None)
+            return {"success": False, "replied": False, "detail": str(e)}
+        got = entry["event"].wait(timeout)
+        with self._lock:
+            self._pending.pop(rid, None)
+        if not got:
+            return {"success": True, "replied": False, "detail": "отправлено (без подтверждения)"}
+        error = entry["error"]
+        if error is not None:
+            message = error.get("message") if isinstance(error, dict) else None
+            return {"success": False, "replied": True,
+                    "detail": "Klipper отклонил: " + str(message or error)[:200]}
+        return {"success": True, "replied": True, "detail": "подтверждено принтером"}
+
+    def _rpc_async(self, method, params, on_result):
+        """Send a request whose reply goes to on_result(result, error); never
+        waits (safe from on_open / the WS thread). False when not sent."""
+        ws = self.ws
+        if ws is None:
+            return False
+        rid, _entry = self._register(on_result)
+        try:
+            self._send_request(ws, rid, method, params)
+            return True
+        except Exception as e:
+            with self._lock:
+                self._pending.pop(rid, None)
+            logger.warning("[%s] %s не отправлен: %s", self.label, method, e)
+            return False
+
+    # --- light pin discovery ---------------------------------------------------
+
+    def _discover(self):
+        """Look the light pin up (printer.objects.list), unless a lookup is in flight."""
+        now = time.monotonic()
+        with self._lock:
+            if self._discover_ts and now - self._discover_ts < _PENDING_MAX_AGE:
+                return
+            self._discover_ts = now
+        if not self._rpc_async("printer.objects.list", None, self._on_objects):
+            self._discover_ts = 0.0
+
+    def _on_objects(self, result, error):
+        self._discover_ts = 0.0
+        if error is not None:
+            # light_pin stays None: retried when klippy next becomes ready
+            logger.warning("[%s] objects.list: %s", self.label, error)
+            return
+        objects = result.get("objects") if isinstance(result, dict) else None
+        pin = pick_light_pin(objects) or ""
+        with self._lock:
+            self.light_pin = pin
+            self.data["light_pin"] = pin
+        if pin:
+            logger.info("[%s] light pin: %s", self.label, pin)
+            # Moonraker replaces a connection's subscription: the whole set again, with the pin
+            self.subscribe_to_status()
+            self._rpc_async("printer.objects.query", {"objects": {"configfile": ["settings"]}}, self._on_config)
+
+    def _on_config(self, result, error):
+        """The pin's scale (SET_PIN VALUE for "on"). Klipper lower-cases the
+        section names of configfile.settings."""
+        pin = self.light_pin
+        if error is not None or not pin or not isinstance(result, dict):
+            return
+        settings = ((result.get("status") or {}).get("configfile") or {}).get("settings") or {}
+        section = settings.get(("output_pin " + pin).lower()) or {}
+        try:
+            scale = float(section.get("scale", 1.0))
+        except (TypeError, ValueError):
+            scale = 1.0
+        self.light_scale = scale if scale > 0 else 1.0
+
+    def run_action(self, action, timeout=REPLY_TIMEOUT):
+        """pause / resume / stop / light_on / light_off with Moonraker's reply
+        as the verdict: {"success", "replied", "detail"}."""
+        if action in _RPC_METHODS:
+            return self._rpc(_RPC_METHODS[action], timeout=timeout)
+        if action in ("light_on", "light_off"):
+            pin = self.light_pin
+            if not pin:
+                return {"success": False, "replied": False,
+                        "detail": "У принтера не найден пин подсветки (output_pin с light/led в имени)"}
+            value = self.light_scale if action == "light_on" else 0
+            r = self._rpc("printer.gcode.script",
+                          {"script": "SET_PIN PIN=%s VALUE=%s" % (pin, "%g" % value)}, timeout=timeout)
+            if r.get("success") and r.get("replied"):
+                # Klipper ran SET_PIN; the pin's own push follows later (~250 ms,
+                # more during a print). Unanswered or refused: left to that push.
+                with self._lock:
+                    self.data['light_on'] = action == "light_on"
+            return r
+        return {"success": False, "replied": False, "detail": "Неподдерживаемая команда: %s" % action}
 
     def parse_status(self, status):
         try:
@@ -273,7 +492,11 @@ class KlipperClient:
                 if 'webhooks' in status:
                     wh = status['webhooks']
                     wh_state = wh.get('state')
-                    self.data.setdefault('debug', {})['webhooks_state'] = wh_state
+                    debug_wh = self.data.setdefault('debug', {})
+                    # klippy (re)started or its MCU came back: look the light pin up again
+                    if str(wh_state).lower() == 'ready' and str(debug_wh.get('webhooks_state')).lower() != 'ready':
+                        self._discover_needed = True
+                    debug_wh['webhooks_state'] = wh_state
                     # webhooks.state_message is a host-health string, not a print stage.
                     # When the host is operational its state is "ready" and the message is
                     # the constant "Printer is ready" (true even mid-print) — surfacing that
@@ -282,6 +505,14 @@ class KlipperClient:
                     # an actual diagnostic.
                     if wh.get('state_message') and str(wh_state).lower() != 'ready':
                         self.data['stage'] = str(wh['state_message'])
+
+                light_pin = self.light_pin
+                light = status.get('output_pin ' + light_pin) if light_pin else None
+                if isinstance(light, dict) and light.get('value') is not None:
+                    try:
+                        self.data['light_on'] = float(light['value']) > 0
+                    except (TypeError, ValueError):
+                        pass
 
                 if 'system_stats' in status:
                     ss = status['system_stats']
@@ -355,10 +586,12 @@ class KlipperClient:
             delay = min(delay * 2, self._max_reconnect_delay)
 
     def send_command(self, command, param=None):
-        """Send a print-control command via Moonraker JSON-RPC over the WebSocket.
-
-        Supported: pause, resume, stop (cancel), gcode_line.
+        """Deprecated, no caller left: printer_commands sends Klipper actions
+        through run_action (answered by Moonraker). Fire-and-forget print control
+        via Moonraker JSON-RPC: pause, resume, stop (cancel), gcode_line. To be
+        removed in a cleanup.
         """
+        warnings.warn("KlipperClient.send_command is deprecated: use run_action", DeprecationWarning, stacklevel=2)
         if not self.connected or not self.ws:
             return {"success": False, "detail": "Not connected"}
 

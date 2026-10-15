@@ -137,6 +137,21 @@ SILENT_P2S = ("HMS_0500_0600_0002_0070: unknown [serious] "
               "(см. https://wiki.bambulab.com/en/x1/troubleshooting/hmscode/0500_0600_0002_0070)")
 
 
+def ht_unit(value):
+    """The AMS HT scenario: the 1.0.1 literal plus the drying block of an idle
+    AMS HT holding PLA (capped at PLA's 45 °C heat-distortion temperature)."""
+    want = {"tray_now": 255, "units": [{
+        "index": 128, "humidity": 3, "humidity_pct": 30, "dry_time": None, "temp": 30.0,
+        "slots": [{"type": "PLA", "color": "FF0000", "name": "Generic PLA",
+                   "remain_pct": 80, "empty": False, "nozzle_temp": [190, 240]}]}]}
+    if not isinstance(value, dict) or len(value.get("units") or []) != 1:
+        return False
+    unit = dict(value["units"][0])
+    dry = unit.pop("dry", None) or {}
+    return (dict(value, units=[unit]) == want and dry.get("type") == "n3s" and dry.get("status") is None
+            and dry.get("active") is False and (dry.get("max_temp"), dry.get("max_by")) == (45, "PLA"))
+
+
 # Every intended difference from 1.0.1, with the new value.
 ALLOWED = {
     # The part-cooling fan is read at all now (the 1.0.1-era normalizer bug);
@@ -159,6 +174,10 @@ ALLOWED = {
     ("p2s_hms_silent_first", "last_error"): hms_parts(SILENT_P2S, ru_hms("HMS_0500_0100_0003_0007", "common")),
     # A common code without text is no longer shown (fatal / serious ones still are).
     ("x1c_hms_silent_common", "last_error"): None,
+    # print_error reads "Ошибка печати 0700_8002: <text>" from Bambu's Russian
+    # table instead of "Код ошибки печати: 0x07008002".
+    ("x1c_paused_runout", "last_error"): lambda v: (isinstance(v, str) and v.startswith("Ошибка печати 0700_8002: ")
+                                                    and CYRILLIC.search(v) is not None),
     # Empty slots report remain -1 (unknown) instead of 0; the UI hides it for empty slots.
     ("x1c_printing", "ams.units[0].slots[2].remain_pct"): -1,
     ("x1c_printing", "ams.units[0].slots[3].remain_pct"): -1,
@@ -169,10 +188,20 @@ ALLOWED = {
     ("p2s_ctc_ams2pro", "bed_temp"): 70.0,
     ("p2s_ctc_ams2pro", "target_bed_temp"): 70.0,
     # AMS HT units are parsed (1.0.1 raised IndexError and lost the whole AMS).
-    ("p2s_ams_ht", "ams"): {"tray_now": 255, "units": [{
-        "index": 128, "humidity": 3, "humidity_pct": 30, "dry_time": None, "temp": 30.0,
-        "slots": [{"type": "PLA", "color": "FF0000", "name": "Generic PLA",
-                   "remain_pct": 80, "empty": False}]}]},
+    ("p2s_ams_ht", "ams"): ht_unit,
+    # The drying block: without the info bit field or a get_version module list
+    # a 4-slot unit's type is unknown, so it gets none.
+    ("x1c_printing", "ams.units[0].dry"): None,
+    ("p2s_ctc_ams2pro", "ams.units[0].dry"): None,
+    # Slots carry the spool profile's nozzle range (AMS load / unload temperatures).
+    ("x1c_printing", "ams.units[0].slots[0].nozzle_temp"): [190, 240],
+    ("x1c_printing", "ams.units[0].slots[1].nozzle_temp"): [190, 240],
+    ("x1c_printing", "ams.units[0].slots[2].nozzle_temp"): None,
+    ("x1c_printing", "ams.units[0].slots[3].nozzle_temp"): None,
+    ("p2s_ctc_ams2pro", "ams.units[0].slots[0].nozzle_temp"): None,
+    ("p2s_ctc_ams2pro", "ams.units[0].slots[1].nozzle_temp"): None,
+    ("p2s_ctc_ams2pro", "ams.units[0].slots[2].nozzle_temp"): None,
+    ("p2s_ctc_ams2pro", "ams.units[0].slots[3].nozzle_temp"): [190, 240],
 }
 
 

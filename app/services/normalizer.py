@@ -3,9 +3,10 @@ import logging
 from typing import Any, Dict, Optional
 
 from app.domain.models import PrinterKind, PrinterStatus, PrinterState, now_ts
+from app.services import ams_drying, bambu_extras
 from app.services.utils import map_state, as_float, as_int, safe_job_name
 # Hard import: a broken vendored tree must fail loudly, not silently drop the fans.
-from app.vendor.pybambu.const import FansEnum
+from app.vendor.pybambu.const import FansEnum, Features
 from app.vendor.pybambu.utils import get_HMS_severity
 
 
@@ -49,6 +50,22 @@ def _in_chamber_range(value: Optional[float]) -> bool:
     return value is not None and 0 < value < _CHAMBER_MAX
 
 
+# Models with a chamber temperature sensor (the lib's Features.CHAMBER_TEMPERATURE:
+# H2 / P2 / X1 / X1E / X2), by model name prefix.
+_CHAMBER_SENSOR_PREFIXES = ("H2", "P2", "X1", "X2")
+
+
+def _has_chamber_sensor(device: Any, device_type: Optional[str]) -> bool:
+    """The lib's Features.CHAMBER_TEMPERATURE (a model-only flag); while the lib
+    cannot answer (firmware version unknown) the same model-family test on the
+    live device's model, else the registry's."""
+    flag = bambu_extras.feature(device, Features.CHAMBER_TEMPERATURE)
+    if flag is not None:
+        return flag
+    model = _read(getattr(device, "info", None), "device_type") or device_type or ""
+    return str(model).upper().startswith(_CHAMBER_SENSOR_PREFIXES)
+
+
 def _hms_wiki(code: Any, wiki: Any) -> Optional[str]:
     """The lib's wiki link for an HMS code, or the code's own page when the lib
     only has the generic HMS home page."""
@@ -90,7 +107,7 @@ def _with_silent_hms(entries: list, raw: Any) -> list:
     return merged + pending
 
 
-def _bambu_error_text(hms_obj: Any, print_error_code: Optional[int]) -> Optional[str]:
+def _bambu_error_text(hms_obj: Any, print_error_code: Optional[int], device_type: Optional[str] = None) -> Optional[str]:
     """Turn Bambu's HMS list + print_error code into one readable line.
 
     The vendored pybambu's ``hms.errors`` is a flat dict keyed by a 1-based index:
@@ -99,9 +116,10 @@ def _bambu_error_text(hms_obj: Any, print_error_code: Optional[int]) -> Optional
     tables in the client's language (ru, falling back to en); codes whose table
     text is empty are dropped by the lib, and the fatal / serious ones are put
     back from the raw list. Each entry renders as
-    ``"<code>: <text> [<severity>]"``, and the raw print_error code is appended
-    in hex — the same form the printer's own screen shows. Returns None when
-    there is nothing wrong, so a healthy printer keeps last_error empty.
+    ``"<code>: <text> [<severity>]"``, and the print_error code comes last as
+    ``"Ошибка печати XXXX_XXXX: <text>"`` (the code as the printer's screen
+    shows it, the text from the same tables when they have one). Returns None
+    when there is nothing wrong, so a healthy printer keeps last_error empty.
     """
     entries = []   # (code, text, severity, wiki) in the printer's order
     errors = getattr(hms_obj, "errors", None) or {}
@@ -134,7 +152,7 @@ def _bambu_error_text(hms_obj: Any, print_error_code: Optional[int]) -> Optional
         messages.append(msg)
 
     if print_error_code:  # non-zero raw code
-        messages.append(f"Код ошибки печати: 0x{print_error_code:08X}")
+        messages.append(bambu_extras.print_error_line(print_error_code, str(device_type or "")))
 
     return " | ".join(messages) if messages else None
 
@@ -150,6 +168,23 @@ def _snapshot_items(data: dict) -> list:
     return []
 
 
+def _nozzle_range(tray: Any) -> Optional[list]:
+    """[min, max] nozzle temperature of the spool's profile (the lib keeps the
+    raw strings, "0"/0 when unknown); None unless both are known."""
+    lo = as_int(getattr(tray, "nozzle_temp_min", None))
+    hi = as_int(getattr(tray, "nozzle_temp_max", None))
+    if lo is None or hi is None or lo <= 0 or hi <= 0:
+        return None
+    return [lo, hi]
+
+
+# PrinterStatus.ams["tray_now"]: nothing loaded / an external spool (either of
+# the H2D's two). Not the ams_id numbering of star / snow, where 255 is the
+# (main) external spool.
+TRAY_NONE = 255
+TRAY_EXTERNAL = 254
+
+
 def _tray_now(ams_obj: Any, units: list) -> Optional[int]:
     """Active slot in the 1.0.1 ``tray_now`` convention, from the lib's
     active_ams_index / active_tray_index.
@@ -163,9 +198,9 @@ def _tray_now(ams_obj: Any, units: list) -> Optional[int]:
     if a is None or t is None:
         return None
     if a == 255:   # snow 0xFFFF / legacy 255 = none; 0xFF00 / legacy 254 = external
-        return 255 if t in (3, 255) else 254
+        return TRAY_NONE if t in (3, 255) else TRAY_EXTERNAL
     if a == 254:   # second external spool (H2D vir_slot)
-        return 254
+        return TRAY_EXTERNAL
     base = 0
     for unit in units:
         n = len(unit["slots"])
@@ -175,7 +210,21 @@ def _tray_now(ams_obj: Any, units: list) -> Optional[int]:
     return None
 
 
-def _build_ams(ams_obj: Any) -> Optional[Dict[str, Any]]:
+def _dry_info(entry: Dict[str, Any], unit: Any, raw: Dict[str, Any], feeding: bool) -> Optional[Dict[str, Any]]:
+    """The unit's drying block (ams_drying.build_dry_info); never fails the status."""
+    setting = (as_int(getattr(unit, "drying_temperature", None)),
+               as_int(getattr(unit, "drying_duration", None)),
+               getattr(unit, "drying_filament", None) or None)
+    try:
+        return ams_drying.build_dry_info(entry, getattr(unit, "model", None),
+                                         (raw.get("ams") or {}).get(entry["index"]),
+                                         raw.get("fun2"), feeding, setting)
+    except Exception:
+        logger.debug("AMS %s drying info failed", entry.get("index"), exc_info=True)
+        return None
+
+
+def _build_ams(ams_obj: Any, raw: Optional[Dict[str, Any]] = None, printing: bool = False) -> Optional[Dict[str, Any]]:
     """Compact AMS snapshot for PrinterStatus.ams.
 
     The vendored lib keeps AMS units in a dict keyed by the unit id (0-3, AMS HT
@@ -183,13 +232,16 @@ def _build_ams(ams_obj: Any) -> Optional[Dict[str, Any]]:
     None — the frontend hides the chip on that. Emptiness is derived from the
     material type / colour rather than the tray's own flag. Colors arrive as
     RRGGBBAA; the alpha byte is stripped here so the frontend gets a CSS-ready
-    RRGGBB.
+    RRGGBB. `raw` (RawReport snapshot) and `printing` feed each unit's drying
+    block: an AMS 2 Pro / AMS HT that feeds a running print gets lower limits.
     """
     if not ams_obj:
         return None
     data = getattr(ams_obj, "data", None)
     if not isinstance(data, dict):
         return None
+    raw = raw or {}
+    feeding_unit = as_int(_read(ams_obj, "active_ams_index")) if printing else None
     units = []
     for unit_id, unit in _snapshot_items(data):
         trays = getattr(unit, "tray", None) or []
@@ -218,8 +270,9 @@ def _build_ams(ams_obj: Any) -> Optional[Dict[str, Any]]:
                 "name": None if empty else name,
                 "remain_pct": as_int(getattr(tray, "remain", None)),
                 "empty": empty,
+                "nozzle_temp": None if empty else _nozzle_range(tray),
             })
-        units.append({
+        entry = {
             # The physical unit id (dict key). History is keyed by it, never by
             # the position in the filtered `units` list.
             "index": unit_id,
@@ -230,10 +283,33 @@ def _build_ams(ams_obj: Any) -> Optional[Dict[str, Any]]:
             "dry_time": as_int(getattr(unit, "remaining_drying_time", None)) or None,
             "temp": as_float(getattr(unit, "temperature", None)),
             "slots": slots,
-        })
+        }
+        entry["dry"] = _dry_info(entry, unit, raw, feeding_unit == unit_id)
+        units.append(entry)
     if not units:
         return None
     return {"tray_now": _tray_now(ams_obj, units), "units": units}
+
+
+def _nozzle(info_obj: Any) -> Optional[Dict[str, Any]]:
+    """Diameter (mm) and type slug of the active nozzle, None when unknown."""
+    diameter = as_float(_read(info_obj, "active_nozzle_diameter"))
+    if diameter is None or diameter <= 0:
+        return None
+    return {"diameter": diameter, "type": _read(info_obj, "active_nozzle_type") or None}
+
+
+def _raw_snapshot(result: Any) -> Dict[str, Any]:
+    """RawReport snapshot of the report fields the lib drops ({} without one:
+    test doubles, or a device built outside the collector)."""
+    raw = getattr(result, "forge_raw", None)
+    if raw is None:
+        return {}
+    try:
+        return raw.snapshot()
+    except Exception:
+        logger.debug("raw report snapshot failed", exc_info=True)
+        return {}
 
 
 def normalize_bambu(printer_id: str, label: str, result: Any, device_type: Optional[str] = None) -> PrinterStatus:
@@ -241,6 +317,7 @@ def normalize_bambu(printer_id: str, label: str, result: Any, device_type: Optio
     if pj is None:
         reason = "fetch returned None" if result is None else "device object has no print_job (MQTT telemetry not received)"
         return PrinterStatus(id=printer_id, label=label, kind=PrinterKind.BAMBU, online=False, state=PrinterState.OFFLINE, last_update_ts=now_ts(), device_type=device_type, last_error=reason, grace_period_active=False, last_successful_fetch=0.0)
+    raw = _raw_snapshot(result)
 
     # Bambu Studio names the gcode inside every .3mf "Metadata/plate_N.gcode" and
     # the printer reports that path in gcode_file, so it can't serve as a job name.
@@ -268,6 +345,10 @@ def normalize_bambu(printer_id: str, label: str, result: Any, device_type: Optio
         target_chamber_temp = None
     if not _in_chamber_range(target_chamber_temp):
         target_chamber_temp = None
+    if not _has_chamber_sensor(result, device_type):
+        # P1P / P1S / A1 report a value although they have no chamber sensor
+        # (the P1S a constant 5°): no reading, so the card shows no chamber chip.
+        chamber_temp = target_chamber_temp = None
     target_nozzle_temp = as_float(_read(temp_obj, "active_nozzle_target_temperature")) if temp_obj else None
     target_bed_temp = as_float(getattr(temp_obj, "target_bed_temp", None)) if temp_obj else None
 
@@ -354,16 +435,27 @@ def normalize_bambu(printer_id: str, label: str, result: Any, device_type: Optio
     # Build a human-readable error line so the dashboard can show *what* is wrong
     # instead of a bare red badge. The lib already resolves HMS codes to text in
     # hms.errors ("{i}-Code" -> "HMS_xxxx...", "{i}-Error" -> text, "{i}-Severity"
-    # -> level); print_error is a raw code the printer shows in hex.
-    last_error = _bambu_error_text(hms_obj, as_int(getattr(pj, "print_error", None)))
+    # -> level); print_error is a raw code, looked up in the same tables here
+    # (per model: the lib auto-detects it from get_version, the registry's until then).
+    error_model = getattr(info_obj, "device_type", None) or device_type
+    last_error = _bambu_error_text(hms_obj, as_int(getattr(pj, "print_error", None)), error_model)
 
     lights_obj = getattr(result, "lights", None)
-    # chamber_light: "on"/"off"/"unknown" — карточке нужен трёхзначный флаг
-    _chamber_light = getattr(lights_obj, "chamber_light", None) if lights_obj else None
-    light_on = {"on": True, "off": False}.get(_chamber_light)
+    # "on"/"off"/"unknown" per lamp; the card needs a three-valued flag. H2/X2
+    # have a second chamber lamp (one-lamp models keep chamber_light2 "unknown"):
+    # either lamp lit = lit, as the lib's is_chamber_light_on.
+    l1 = getattr(lights_obj, "chamber_light", None) if lights_obj else None
+    l2 = getattr(lights_obj, "chamber_light2", None) if lights_obj else None
+    if "on" in (l1, l2):
+        light_on = True
+    elif l1 == "off" and l2 in (None, "", "off", "unknown"):
+        light_on = False
+    else:
+        light_on = None
     if lights_obj:
         debug["lights"] = {
-            "chamber_light": getattr(lights_obj, "chamber_light", None),
+            "chamber_light": l1,
+            "chamber_light2": l2,
             "work_light": getattr(lights_obj, "work_light", None),
         }
 
@@ -427,6 +519,11 @@ def normalize_bambu(printer_id: str, label: str, result: Any, device_type: Optio
             logger.debug("[%s] print_time_seconds calc failed: %s", label, e)
             print_time_seconds = None
 
+    ams_obj = getattr(result, "ams", None)
+    ams = _build_ams(ams_obj, raw, state in (PrinterState.PRINTING, PrinterState.PAUSED))
+    # The loaded spool also matters without an AMS (254 = external spool, 255 = none).
+    tray_now = ams["tray_now"] if ams else (_tray_now(ams_obj, []) if ams_obj is not None else None)
+
     return PrinterStatus(
         id=printer_id,
         label=label,
@@ -456,10 +553,19 @@ def normalize_bambu(printer_id: str, label: str, result: Any, device_type: Optio
         last_successful_fetch=now_ts(),
         last_error=last_error,
         debug=debug if kind_debug_enabled(state) else {},
-        ams=_build_ams(getattr(result, "ams", None)),
+        ams=ams,
         fans=fans,
         fw_update=fw_update,
         light_on=light_on,
+        filament_change=bambu_extras.filament_change(raw),
+        filament_swap_ok=bambu_extras.feature(result, Features.AMS_SWITCH_COMMAND),
+        filament_loaded=bambu_extras.filament_loaded(raw, tray_now),
+        dual_nozzle=bambu_extras.dual_nozzle(result, raw),
+        ams_dry_ok=ams_drying.remote_dry_supported(raw.get("fun2")),
+        door_open=bambu_extras.door_open(result),
+        sdcard=bambu_extras.sdcard(result, raw),
+        nozzle=_nozzle(info_obj),
+        signature_required=bambu_extras.signature_required(raw),
     )
 
 
@@ -484,6 +590,15 @@ def normalize_ws_dict(printer_id: str, label: str, kind: PrinterKind, data: Dict
     chamber_temp = as_float(data.get("chamber_temp"))
     if chamber_temp is not None and chamber_temp <= 0:
         chamber_temp = None
+    light_on = data.get("light_on") if isinstance(data.get("light_on"), bool) else None
+    # Klipper control fields, set in every state: the status carries `debug`
+    # only while printing, and an idle or paused printer must stay controllable.
+    ctl_ready = light_ctl = None
+    if kind == PrinterKind.KLIPPER:
+        host_state = debug.get("webhooks_state") if isinstance(debug, dict) else None
+        ctl_ready = None if host_state is None else str(host_state).lower() == "ready"
+        pin = data.get("light_pin")             # None = not looked up yet, "" = none found
+        light_ctl = None if pin is None else bool(pin)
     target_nozzle_temp = as_float(data.get("target_nozzle_temp"))
     target_bed_temp = as_float(data.get("target_bed_temp"))
     fan_speed_pct = as_int(data.get("fan_speed_pct"))
@@ -603,6 +718,9 @@ def normalize_ws_dict(printer_id: str, label: str, kind: PrinterKind, data: Dict
         grace_period_active=False,
         last_successful_fetch=now_ts(),
         debug=data.get("debug", {}) if kind_debug_enabled(state) else {},
+        light_on=light_on,
+        ctl_ready=ctl_ready,
+        light_ctl=light_ctl,
     )
 
 
