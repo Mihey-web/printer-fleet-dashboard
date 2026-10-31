@@ -288,13 +288,14 @@ def test_send_creality_resume_and_stop(cmd_env, monkeypatch):
 
 
 def test_send_creality_rejects_bambu_only_action(cmd_env, monkeypatch):
-    # Канал Creality ("set" на WS :9999) умеет только управление печатью и
-    # свет — скорость/AMS/остывание туда не пробросить, отклоняем до отправки.
+    # Канал Creality ("set" на WS :9999): камера (нагревателя нет), стол вниз и
+    # CFS не подключены — отклоняем до отправки. (Скорость и остывание у
+    # Creality с 27.10 есть: см. тесты Creality set ниже.)
     _creality_registry(monkeypatch)
     store = _CrealityStore()
     printer_commands.set_store(store)
-    for action in ("speed", "ams_load", "cooldown"):
-        r = printer_commands.send("p1", action, {"level": 2, "slot": 0})
+    for action in ("chamber", "eject", "ams_load", "ams_unload", "dry_start", "dry_stop"):
+        r = printer_commands.send("p1", action, {"temp": 40, "ams": 0, "slot": 0})
         assert not r["success"] and "Creality" in r["detail"]
     assert store.calls == []
 
@@ -1008,6 +1009,19 @@ def test_probe_cycle_skips_printers_with_a_drying_unit(live, monkeypatch, units,
     assert calls == (["p1"] if probed else [])
 
 
+@pytest.mark.parametrize("maint,probed", [(True, False), (False, True)])
+def test_probe_cycle_skips_a_printer_in_maintenance(live, monkeypatch, maint, probed):
+    # spec_maintenance B22: no background command to a printer under repair (its AMS may be off)
+    from app.services import printer_registry
+
+    store = live(_report(units=_dry_units(), home_flag=0))
+    calls = []
+    monkeypatch.setattr(printer_commands, "probe", lambda pid: calls.append(pid))
+    monkeypatch.setattr(printer_registry, "in_maintenance", lambda pid, *a, **k: maint and pid == "p1")
+    printer_commands._probe_cycle(store)
+    assert calls == (["p1"] if probed else [])
+
+
 def test_probe_waits_for_a_full_report_after_connecting(live, monkeypatch):
     # 13.10.2026: after each Pi brownout restart the probe's stop hit AMS 0 before the
     # printer's first full report — the live view had no drying and no fun yet — and
@@ -1503,7 +1517,14 @@ def test_cooldown_turns_off_the_h2_chamber_heater():
     ("eject", "printing", STATE_MSG["eject"]), ("eject", "paused", STATE_MSG["eject"]), ("eject", "idle", None),
     ("eject", "finished", None), ("eject", "error", None), ("eject", "unknown", STATE_MSG["unknown"]),
     ("eject", "offline", STATE_MSG["unknown"]),
-    ("light_on", "printing", None), ("speed", "idle", None), ("ams_load", "printing", None),
+    ("light_on", "printing", None), ("ams_load", "printing", None),
+    # the speed mode changes a running print only (Creality's speed; app.js ctlStateBlock)
+    ("speed", "printing", None), ("speed", "paused", None), ("speed", "idle", STATE_MSG["speed"]),
+    ("speed", "finished", STATE_MSG["speed"]), ("speed", "unknown", STATE_MSG["speed"]),
+    ("speed", None, STATE_MSG["speed"]),
+    # a cancelled job: nothing to pause, resume or stop; the printer stands, so cooldown / eject go
+    ("pause", "cancelled", STATE_MSG["pause_other"]), ("resume", "cancelled", STATE_MSG["resume"]),
+    ("stop", "cancelled", STATE_MSG["stop"]), ("cooldown", "cancelled", None), ("eject", "cancelled", None),
 ])
 def test_state_refusal_by_normalized_state(action, state, want):
     assert printer_commands.state_refusal(action, state) == want
@@ -1721,6 +1742,8 @@ def test_every_path_of_send_keeps_the_contract(live, monkeypatch):
     results["kind refusal"] = printer_commands.send("p1", "pause")
     _creality_registry(monkeypatch)
     printer_commands.set_store(_CrealityStore())
+    from app.services import settings_service
+    monkeypatch.setattr(settings_service, "get", lambda key, **k: ["c1"] if key == "printer_light_disabled" else {})
     results["cap refusal"] = printer_commands.send("c1", "light_on")
     results["creality"] = printer_commands.send("c1", "pause")
     _klipper_env(monkeypatch, _kstatus(PrinterState.PRINTING))
@@ -1804,28 +1827,311 @@ def test_caps_bambu(cmd_env, verdict, on, note):
 def test_caps_creality_and_mks(cmd_env, monkeypatch):
     from app.services import settings_service
 
+    # Creality (27.10): light, print control, tune (temperatures / fans / speed) and
+    # cooldown in any state; eject and the CFS are not wired yet
     row = {"id": "creality-1", "kind": "creality", "online": True}
-    assert printer_commands.caps_for(row) == (dict(ALL_FALSE, pause=True, resume=True, stop=True, light=None), None)
+    want = dict(ALL_FALSE, pause=True, resume=True, stop=True, light=True, cooldown=True, tune=True)
+    assert printer_commands.caps_for(row) == (want, None)
+    assert printer_commands.caps_for(dict(row, online=False)) == (want, None)
     monkeypatch.setattr(settings_service, "get",
-                        lambda key, **k: ["creality-1"] if key == "printer_light_enabled" else {})
-    assert printer_commands.caps_for(row)[0]["light"] is True
+                        lambda key, **k: ["creality-1"] if key == "printer_light_disabled" else {})
+    assert printer_commands.caps_for(row) == (dict(want, light=False), None)   # a model without a lamp
+    assert printer_commands.caps_for(dict(row, id="creality-2"))[0]["light"] is True
     monkeypatch.setattr(settings_service, "get", lambda key, **k: "creality-1")     # broken: not a list
-    assert printer_commands.caps_for(row)[0]["light"] is None
+    assert printer_commands.caps_for(row)[0]["light"] is True
     assert printer_commands.caps_for({"id": "mks-1", "kind": "mks", "online": True}) == (
         ALL_FALSE, "управление не подключено")
 
 
-def test_creality_light_only_when_enabled(cmd_env, monkeypatch):
+def test_creality_light_unless_disabled(cmd_env, monkeypatch):
+    # 27.10: the light is on by default for Creality (lightSw); a printer listed in
+    # printer_light_disabled (a model without a lamp) is refused before sending
     from app.services import settings_service
 
     _creality_registry(monkeypatch)
     store = _CrealityStore()
     printer_commands.set_store(store)
-    assert printer_commands.send("p1", "light_on") == REFUSED("Управление светом на этом принтере ещё не проверено")
+    assert printer_commands.send("p1", "light_on") == SENT          # fire and forget: never «confirmed»
+    assert printer_commands.send("p1", "light_off") == SENT
+    assert store.calls == [("light_on", None), ("light_off", None)]
+    monkeypatch.setattr(settings_service, "get", lambda key, **k: ["p1"] if key == "printer_light_disabled" else {})
+    assert printer_commands.send("p1", "light_on") == REFUSED(printer_commands.MSG_NO_LIGHT)
+    assert store.calls == [("light_on", None), ("light_off", None)]
+
+
+# --- Creality: temperatures, speed, fans, cooldown over WS :9999 "set" --------------------
+
+# The client's get_data() snapshot of an idle K1C (creality_client keys).
+K1C_IDLE = {"state": "idle", "progress": 0, "remaining_time": 0, "print_time": 0, "nozzle_temp": 31,
+            "bed_temp": 29, "target_nozzle_temp": 0, "target_bed_temp": 0, "fan_speed_pct": 0,
+            "case_fan_pct": 0, "aux_fan_pct": 0, "feedrate_pct": 100, "light_on": False, "material_status": 0,
+            "max_nozzle_temp": 300, "max_bed_temp": 100}
+K1C_PRINTING = dict(K1C_IDLE, state="printing", progress=40, remaining_time=600, print_time=400)
+K1C_PAUSED = dict(K1C_PRINTING, state="paused")
+
+
+class _CrealityLive:
+    """A store with a Creality collector: the client's live snapshot (get_data)
+    and the commands handed to the collector (send_command) in calls."""
+
+    def __init__(self, snapshot, reply=None):
+        self.snapshot, self.calls, self.status = dict(snapshot), [], None
+        outer = self
+
+        class _Collector:
+            client = SimpleNamespace(get_data=lambda: dict(outer.snapshot))
+
+            def send_command(self, command, param=None):
+                outer.calls.append((command, param))
+                return dict(reply) if reply is not None else {"success": True, "detail": "Command sent"}
+
+        self._c = _Collector()
+
+    def get_collector(self, pid):
+        return self._c
+
+    def get_one(self, pid):
+        return self.status
+
+
+@pytest.fixture
+def creality(cmd_env, monkeypatch):
+    """-> make(snapshot, reply=None, model="k1c"): a Creality "c1" with that live snapshot."""
+    def make(snapshot, reply=None, model="k1c"):
+        monkeypatch.setattr("app.services.printer_registry.get_printer",
+                            lambda pid: {"id": pid, "kind": "creality", "label": "K1", "model": model})
+        store = _CrealityLive(snapshot, reply)
+        printer_commands.set_store(store)
+        return store
+    return make
+
+
+@pytest.mark.parametrize("action,params,frames", [
+    ("preheat", {"nozzle": 220}, [{"nozzleTempControl": 220}]),
+    ("preheat", {"bed": 60}, [{"bedTempControl": {"num": 0, "val": 60}}]),
+    ("preheat", {"nozzle": 300, "bed": 100}, [{"nozzleTempControl": 300}, {"bedTempControl": {"num": 0, "val": 100}}]),
+    ("preheat", {"nozzle": 0}, [{"nozzleTempControl": 0}]),
+    ("cooldown", {}, [{"nozzleTempControl": 0}, {"bedTempControl": {"num": 0, "val": 0}}]),
+    ("fans", {"part": 100}, [{"gcodeCmd": "M106 P0 S255"}]),
+    ("fans", {"part": 0, "aux": 50, "chamber": 30},
+     [{"gcodeCmd": "M106 P0 S0"}, {"gcodeCmd": "M106 P2 S128"}, {"gcodeCmd": "M106 P1 S76"}]),
+    ("fans", {"chamber": 100}, [{"gcodeCmd": "M106 P1 S255"}]),
+])
+def test_creality_set_payloads_while_idle(creality, action, params, frames):
+    store = creality(K1C_IDLE)
+    assert printer_commands.send("c1", action, params) == SENT
+    assert store.calls == [("set", frames)]
+
+
+@pytest.mark.parametrize("level,pct", [(1, 50), (2, 100), (3, 124), (4, 166)])
+@pytest.mark.parametrize("snapshot", [K1C_PRINTING, K1C_PAUSED])
+def test_creality_speed_modes_are_feedrate_percent(creality, level, pct, snapshot):
+    # the card's four modes Тихий / Стандарт / Спорт / Безумный = Bambu's levels 1-4
+    store = creality(snapshot)
+    assert printer_commands.send("c1", "speed", {"level": level}) == SENT
+    assert store.calls == [("set", [{"setFeedratePct": pct}])]
+
+
+def test_creality_tune_while_printing_but_no_cooldown(creality):
+    store = creality(K1C_PRINTING)
+    assert printer_commands.send("c1", "preheat", {"nozzle": 230}) == SENT
+    assert printer_commands.send("c1", "fans", {"part": 80}) == SENT
+    assert printer_commands.send("c1", "cooldown") == REFUSED(printer_commands.STATE_MSG["cooldown"])
+    assert store.calls == [("set", [{"nozzleTempControl": 230}]), ("set", [{"gcodeCmd": "M106 P0 S204"}])]
+
+
+@pytest.mark.parametrize("snapshot,action,params,want", [
+    (K1C_IDLE, "speed", {"level": 2}, "speed"),             # the speed mode changes a running print only
+    (dict(K1C_IDLE, state="finish"), "speed", {"level": 4}, "speed"),
+    (dict(K1C_IDLE, state="unknown"), "speed", {"level": 2}, "speed"),
+    (dict(K1C_IDLE, state="unknown"), "cooldown", {}, "unknown"),     # fail closed on an unknown state
+    (K1C_PRINTING, "cooldown", {}, "cooldown"),
+])
+def test_creality_state_refusals(creality, snapshot, action, params, want):
+    store = creality(snapshot)
+    assert printer_commands.send("c1", action, params) == REFUSED(printer_commands.STATE_MSG[want])
     assert store.calls == []
-    monkeypatch.setattr(settings_service, "get", lambda key, **k: ["p1"] if key == "printer_light_enabled" else {})
-    assert printer_commands.send("p1", "light_on") == SENT
-    assert store.calls == [("light_on", None)]
+
+
+def test_creality_cooldown_on_pause_and_finished(creality):
+    for snapshot in (K1C_PAUSED, dict(K1C_IDLE, state="finish", progress=100)):
+        store = creality(snapshot)
+        assert printer_commands.send("c1", "cooldown") == SENT
+        assert store.calls == [("set", [{"nozzleTempControl": 0}, {"bedTempControl": {"num": 0, "val": 0}}])]
+
+
+# A real K1C (fw 1.3.5.22) cancelling a print, the frames that change what we read
+# as it streamed them (ha_creality_ws tools/tests/fixtures/k1c_cancel_during_self_test
+# .jsonl): idle, start (9 -> 1), heating, finishing the cancel (7), targets to 0,
+# then {"state": 4}, held until the capture ends three minutes later.
+K1C_CANCEL_FRAMES = [
+    {"state": 0, "nozzleTemp": "21.530000", "bedTemp0": "22.030000", "targetNozzleTemp": 0, "targetBedTemp0": 0,
+     "modelFanPct": 0, "caseFanPct": 0, "auxiliaryFanPct": 0, "curFeedratePct": 100, "lightSw": 1,
+     "materialStatus": 0, "printProgress": 0, "printLeftTime": 0, "printJobTime": 0, "layer": 0, "TotalLayer": 0,
+     "deviceState": 0, "maxNozzleTemp": 300, "maxBedTemp": 100, "err": {"errcode": 0, "key": 0, "value": ""}},
+    {"state": 9}, {"deviceState": 1}, {"state": 1}, {"targetBedTemp0": 60}, {"targetNozzleTemp": 150},
+    {"targetNozzleTemp": 130}, {"state": 7}, {"targetBedTemp0": 0}, {"targetNozzleTemp": 0, "modelFanPct": 100},
+    {"nozzleTemp": "122.920000", "bedTemp0": "48.840000", "deviceState": 0, "state": 4},
+]
+
+
+def _k1c_after(frames):
+    """A live CrealityCollector (no socket: ws is a list) fed `frames` through on_message."""
+    from app.collectors.creality_collector import CrealityCollector
+
+    col = CrealityCollector("K1", "host")
+    col.client.connected = True
+    sent = []
+    col.client.ws = SimpleNamespace(send=sent.append)
+    for f in frames:
+        col.client.on_message(None, json.dumps(f))
+    return col, sent
+
+
+def test_creality_cooldown_after_a_cancel(cmd_env, monkeypatch):
+    # The K1C holds state 4 for minutes after a cancel: CANCELLED (not UNKNOWN), so
+    # «Остудить» goes; nothing to pause, resume, stop or speed up
+    monkeypatch.setattr("app.services.printer_registry.get_printer",
+                        lambda pid: {"id": pid, "kind": "creality", "label": "K1", "model": "k1c"})
+    col, sent = _k1c_after(K1C_CANCEL_FRAMES[:-3])
+    printer_commands.set_store(SimpleNamespace(get_collector=lambda pid: col, get_one=lambda pid: None))
+    assert printer_commands.live_status("c1").state == PrinterState.UNKNOWN          # 7 = busy finishing the cancel
+    assert printer_commands.send("c1", "cooldown") == REFUSED(printer_commands.STATE_MSG["unknown"])
+    for f in K1C_CANCEL_FRAMES[-3:]:
+        col.client.on_message(None, json.dumps(f))
+    assert col.client.get_data()["state"] == "cancelled"
+    assert printer_commands.live_status("c1").state == PrinterState.CANCELLED
+    assert printer_commands.send("c1", "cooldown") == SENT
+    assert [json.loads(s) for s in sent] == [{"method": "set", "params": {"nozzleTempControl": 0}},
+                                             {"method": "set", "params": {"bedTempControl": {"num": 0, "val": 0}}}]
+    msg = printer_commands.STATE_MSG
+    for action, params, want in (("pause", {}, msg["pause_other"]), ("resume", {}, msg["resume"]),
+                                 ("stop", {}, msg["stop"]), ("speed", {"level": 2}, msg["speed"])):
+        assert printer_commands.send("c1", action, params) == REFUSED(want), action
+    assert len(sent) == 2
+
+
+@pytest.mark.parametrize("snapshot,sent", [
+    (dict(K1C_PRINTING, material_status=2), False),       # the firmware prints; 2 is not the documented runout
+    (dict(K1C_PRINTING, material_status=-1), False),
+    # an unmapped busy code promoted to printing by its progress, then demoted the same way
+    (dict(K1C_PRINTING, state="unknown", material_status=2), False),
+    (dict(K1C_PRINTING, material_status=1), True),        # the runout pause (materialStatus 1)
+    (dict(K1C_PAUSED, material_status=2), True),          # the firmware itself reports the pause
+])
+def test_creality_cooldown_on_a_runout_pause_only_for_material_status_1(creality, snapshot, sent):
+    store = creality(snapshot)
+    st = printer_commands.live_status("c1")
+    assert (st.state, st.stage) == (PrinterState.PAUSED, "paused_filament_runout")   # what the card shows
+    r = printer_commands.send("c1", "cooldown")
+    assert r == (SENT if sent else REFUSED(printer_commands.STATE_MSG["cooldown"]))
+    assert store.calls == ([("set", [{"nozzleTempControl": 0}, {"bedTempControl": {"num": 0, "val": 0}}])]
+                           if sent else [])
+    # the rest of the tune set and print control are unchanged by it
+    assert printer_commands.send("c1", "preheat", {"nozzle": 200})["status"] == "sent"
+    assert printer_commands.send("c1", "speed", {"level": 2})["status"] == "sent"
+
+
+def test_creality_partial_send_is_sent_not_rejected(cmd_env, monkeypatch):
+    # the socket drops between two frames of a command: the first one reached the
+    # printer, so the verdict is «sent» with how much went out, never «rejected»
+    monkeypatch.setattr("app.services.printer_registry.get_printer",
+                        lambda pid: {"id": pid, "kind": "creality", "label": "K1", "model": "k1c"})
+    col, sent = _k1c_after(K1C_CANCEL_FRAMES)
+
+    def flaky(raw):
+        if sent:
+            raise OSError("socket is already closed.")
+        sent.append(raw)
+    col.client.ws = SimpleNamespace(send=flaky)
+    printer_commands.set_store(SimpleNamespace(get_collector=lambda pid: col, get_one=lambda pid: None))
+    assert printer_commands.send("c1", "cooldown") == {
+        "success": True, "status": "sent", "replied": False,
+        "detail": "отправлено частично: 1 из 2 (socket is already closed.)"}
+    assert [json.loads(s)["params"] for s in sent] == [{"nozzleTempControl": 0}]
+    sent.append("x")                                                  # now the first frame fails too
+    assert printer_commands.send("c1", "preheat", {"nozzle": 200, "bed": 60}) == REJECTED(
+        "socket is already closed.", replied=False)
+
+
+@pytest.mark.parametrize("model,snapshot,nozzle,bed", [
+    ("k1c", K1C_IDLE, 300, 100),
+    ("k1max", {"state": "idle", "nozzle_temp": 30}, 300, 100),
+    ("ender5max", {"state": "idle", "nozzle_temp": 30}, 300, 100),
+    ("K1C", K1C_IDLE, 300, 100),                                      # registry case does not matter
+    (None, {"state": "idle", "nozzle_temp": 30}, 260, 100),           # unknown model: the lower fallback
+    ("k1c", dict(K1C_IDLE, max_nozzle_temp=280, max_bed_temp=90), 280, 90),    # the printer's lower ceiling wins
+    ("k1c", dict(K1C_IDLE, max_nozzle_temp=350, max_bed_temp=0), 300, 100),    # never above the model's
+])
+def test_creality_temperature_ceilings_per_model(creality, model, snapshot, nozzle, bed):
+    assert printer_commands.creality_temp_limits(model, snapshot) == (nozzle, bed)
+    store = creality(snapshot, model=model)
+    assert printer_commands.send("c1", "preheat", {"nozzle": nozzle + 1}) == REFUSED("Сопло: целое 0-%d" % nozzle)
+    assert printer_commands.send("c1", "preheat", {"bed": bed + 1}) == REFUSED("Стол: целое 0-%d" % bed)
+    assert printer_commands.send("c1", "preheat", {"nozzle": 220, "bed": bed + 1}) == REFUSED(
+        "Стол: целое 0-%d" % bed)                                     # nothing goes when one is out of range
+    assert store.calls == []
+    assert printer_commands.send("c1", "preheat", {"nozzle": nozzle, "bed": bed}) == SENT
+    assert store.calls == [("set", [{"nozzleTempControl": nozzle}, {"bedTempControl": {"num": 0, "val": bed}}])]
+
+
+@pytest.mark.parametrize("action,params,detail", [
+    ("speed", {}, "Режим скорости: 1-4"), ("speed", {"level": 0}, "Режим скорости: 1-4"),
+    ("speed", {"level": 5}, "Режим скорости: 1-4"), ("speed", {"level": "2"}, "Режим скорости: 1-4"),
+    ("speed", {"level": True}, "Режим скорости: 1-4"),
+    ("fans", {}, "Не задан ни один вентилятор"), ("fans", {"part": 101}, "Обдув детали: целое 0-100"),
+    ("fans", {"aux": -1}, "Вспомогательный обдув: целое 0-100"), ("fans", {"chamber": 50.5}, "Обдув камеры: целое 0-100"),
+    ("preheat", {}, "Не задана температура нагрева"), ("preheat", {"nozzle": -5}, "Сопло: целое 0-300"),
+    ("preheat", {"nozzle": True}, "Сопло: целое 0-300"), ("preheat", {"bed": "60"}, "Стол: целое 0-100"),
+])
+def test_creality_parameter_errors(creality, action, params, detail):
+    store = creality(K1C_PRINTING)
+    assert printer_commands.send("c1", action, params) == REFUSED(detail)
+    assert store.calls == []
+
+
+def test_creality_fans_only_the_reported_ones(creality):
+    # Creality's M106 macro sends an index it has no fan for to the part fan: a fan
+    # the printer does not report is refused, and nothing of the command goes out
+    store = creality({"state": "idle", "nozzle_temp": 30, "fan_speed_pct": 0})
+    assert printer_commands.send("c1", "fans", {"part": 0, "aux": 50}) == REFUSED(
+        "Вспомогательный обдув: принтер не сообщает об этом вентиляторе")
+    assert printer_commands.send("c1", "fans", {"chamber": 50}) == REFUSED(
+        "Обдув камеры: принтер не сообщает об этом вентиляторе")
+    assert store.calls == []
+    assert printer_commands.send("c1", "fans", {"part": 50}) == SENT
+    assert store.calls == [("set", [{"gcodeCmd": "M106 P0 S128"}])]
+    creality({"state": "idle", "nozzle_temp": 30})                       # not even the part fan
+    assert printer_commands.send("c1", "fans", {"part": 50}) == REFUSED(
+        "Обдув детали: принтер не сообщает об этом вентиляторе")
+
+
+@pytest.mark.parametrize("action,params", [("preheat", {"nozzle": 200}), ("cooldown", {}), ("speed", {"level": 2}),
+                                           ("fans", {"part": 10})])
+def test_creality_set_commands_need_live_telemetry(creality, action, params):
+    store = creality({})                                                 # WS down: get_data() is empty
+    assert printer_commands.send("c1", action, params) == REFUSED(printer_commands.MSG_NO_TELEMETRY)
+    store.snapshot = dict(K1C_PRINTING)
+    store._c.client = None                                              # no client at all
+    assert printer_commands.send("c1", action, params) == REFUSED(printer_commands.MSG_NO_TELEMETRY)
+    assert store.calls == []
+
+
+def test_creality_verdict_is_sent_never_confirmed(creality, monkeypatch):
+    # :9999 answers nothing: whatever the collector says, a success is «sent»
+    refresh = []
+    monkeypatch.setattr(printer_commands, "_start_fast_refresh", lambda *a, **k: refresh.append(a[0]))
+    creality(K1C_PRINTING, reply={"success": True, "detail": "Command sent", "replied": True})
+    for action, params in (("preheat", {"bed": 70}), ("speed", {"level": 3}), ("fans", {"aux": 20}),
+                           ("light_on", {}), ("pause", {})):
+        r = printer_commands.send("c1", action, params)
+        assert r == SENT and r["status"] == "sent" and r["replied"] is False, action
+    assert refresh == ["c1"] * 5                                         # the card follows the telemetry
+    creality(K1C_IDLE, reply={"success": False, "detail": "Not connected"})
+    assert printer_commands.send("c1", "cooldown") == REJECTED("Not connected", replied=False)
+    creality(K1C_IDLE, reply={"success": False})
+    assert printer_commands.send("c1", "preheat", {"nozzle": 200}) == REJECTED("принтер не принял команду",
+                                                                                replied=False)
 
 
 # --- Klipper: pause / resume / cancel and light through run_action ---------------------
@@ -1972,3 +2278,43 @@ def test_confirmed_light_refresh_stops_at_keep_until(live, monkeypatch):
     printer_commands._fast_refresh_until["p1"] = (clock() + 30, clock() + 10, printer_commands.EXPECT["light_on"])
     printer_commands._fast_refresh_loop("p1", {"label": "B1", "model": "P2S", "kind": "bambu"})
     assert len(sleeps) == 5 and store.upserted[-1].light_on is True
+
+
+# --- live refresh of every printer (owner, 29.10: a print start took 0-33 s to show) ---
+
+def test_live_refresh_once_upserts_every_running_printer_with_live_telemetry(monkeypatch):
+    from app.services import printer_registry
+    rows = [{"id": "b1", "kind": "bambu"}, {"id": "c1", "kind": "creality"}, {"id": "off", "kind": "bambu"}, {}]
+    monkeypatch.setattr(printer_registry, "get_running", lambda: rows)
+    calls = []
+
+    def once(pid, prn, expect=None):
+        calls.append(pid)
+        if pid == "c1":
+            raise RuntimeError("ws hiccup")                  # one printer failing never stops the pass
+        return None if pid == "off" else False               # None: no live telemetry, nothing upserted
+    monkeypatch.setattr(printer_commands, "_fast_refresh_once", once)
+    assert printer_commands.live_refresh_once() == 1
+    assert calls == ["b1", "c1", "off"]                      # a row without an id is skipped
+    monkeypatch.setattr(printer_registry, "get_running", lambda: None)
+    assert printer_commands.live_refresh_once() == 0
+
+
+def test_live_refresh_starts_only_when_enabled(monkeypatch):
+    started = []
+    monkeypatch.setattr(printer_commands.threading, "Thread",
+                        lambda **kw: type("T", (), {"start": lambda self: started.append(kw["name"])})())
+    monkeypatch.setattr(printer_commands, "_store", type("S", (), {"upsert": lambda self, s: None})())
+    monkeypatch.setattr(printer_commands, "LIVE_REFRESH_S", 2.0)
+    assert printer_commands.start_live_refresh() is True and started == ["live-refresh"]
+    monkeypatch.setattr(printer_commands, "LIVE_REFRESH_S", 0.0)              # FORGE_LIVE_REFRESH_S=0: off
+    assert printer_commands.start_live_refresh() is False
+    monkeypatch.setattr(printer_commands, "LIVE_REFRESH_S", 2.0)
+    monkeypatch.setattr(printer_commands, "_store", None)
+    assert printer_commands.start_live_refresh() is False and started == ["live-refresh"]
+
+
+def test_main_starts_the_live_refresh():
+    import inspect
+    import main
+    assert "printer_commands.start_live_refresh()" in inspect.getsource(main.main)

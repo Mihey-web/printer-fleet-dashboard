@@ -1,8 +1,9 @@
 from fastapi import APIRouter, Body, Request, HTTPException, Cookie, Query
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel
-from typing import Any, List, Optional
+from typing import Any, Dict, List, Optional
 import logging
+import re
 import sqlite3
 import time
 
@@ -261,6 +262,61 @@ def restore_printer_cfg(printer_id: str, request: Request,
     return _printer_with_pending(row)
 
 
+class MaintenanceRequest(BaseModel):
+    on: bool
+    note: Optional[str] = None     # ignored with on=false
+
+
+MAINT_NOTE_MAX = 200
+# Line breaks, tabs and other control characters become one space: the note is one line.
+_NOTE_SPACE = re.compile(r"[\s\x00-\x1f\x7f]+")
+
+
+def _maintenance_snapshot(printer_id: str) -> None:
+    """An extra history row right at the switch, so the timeline's maintenance
+    segment starts / ends exactly there. An extra row is harmless (the poll
+    loop's throttle does not know it); a failure is only logged."""
+    try:
+        from app.services import printer_commands
+        store = printer_commands.get_store()
+        status = store.get_one(printer_id) if store is not None else None
+        if status is not None:
+            store.record_snapshot(status)
+    except Exception:
+        logger.debug("maintenance snapshot failed for %s", printer_id, exc_info=True)
+
+
+@router.put("/printers/{printer_id}/maintenance")
+def set_printer_maintenance(printer_id: str, body: MaintenanceRequest, request: Request,
+                            access_token_cookie: Optional[str] = Cookie(None, alias="access_token")):
+    """Maintenance mode on / off or its note (spec_maintenance §4.2). Applies at
+    once: no restart, no pending change. Answers {"printer_id", "change":
+    "on"|"off"|"note"|"none", "maintenance": {since, note, by} | null}; a repeat
+    is idempotent ("none", no audit, no snapshot). Audited as
+    printer_maintenance:<id>:on|off|note, never with the note: free text may
+    carry job names (sensitive); who and since when stay in the registry."""
+    existing = printer_registry.get_printer(printer_id)
+    if existing is None:
+        raise HTTPException(status_code=404, detail="Принтер не найден")
+    if existing.get("deleted"):
+        raise HTTPException(status_code=400, detail="Принтер помечен на удаление")
+    note = None
+    if body.on:
+        note = _NOTE_SPACE.sub(" ", body.note or "").strip()
+        if len(note) > MAINT_NOTE_MAX:
+            raise HTTPException(status_code=400, detail="Заметка — не длиннее %d символов" % MAINT_NOTE_MAX)
+    result = printer_registry.set_maintenance(printer_id, body.on, note=note or None,
+                                              by=request.state.username)
+    if result is None:   # deleted (hard) right after the check
+        raise HTTPException(status_code=404, detail="Принтер не найден")
+    change, info = result
+    if change != "none":
+        _audit(request, "printer_maintenance:%s:%s" % (printer_id, change))
+    if change in ("on", "off"):      # a note edit moves no segment bound
+        _maintenance_snapshot(printer_id)
+    return {"printer_id": printer_id, "change": change, "maintenance": info}
+
+
 @router.post("/printers/discard")
 def discard_printer_changes(request: Request,
                             access_token_cookie: Optional[str] = Cookie(None, alias="access_token")):
@@ -282,17 +338,101 @@ def apply_printer_changes(request: Request,
     return {"status": "restarting"}
 
 
+# «История → Действия» (IA §7): a group of actions is a few action prefixes (comma-separated
+# or repeated), «служебные» are left out by exclude, a printer is its stable id.
+_AUDIT_PREFIX = re.compile(r"[a-z_]{1,40}")
+_AUDIT_PRINTER = re.compile(r"[A-Za-z0-9_.-]{1,64}")
+MAX_AUDIT_PREFIXES = 16
+AUDIT_CSV_LIMIT = 20000
+
+
+def _audit_prefixes(values: Optional[List[str]], name: str) -> List[str]:
+    out: List[str] = []
+    for v in values or []:
+        for p in str(v).split(","):
+            p = p.strip()
+            if not p:
+                continue
+            if not _AUDIT_PREFIX.fullmatch(p):
+                raise HTTPException(status_code=400, detail="%s: начало действия — строчные латинские буквы и _" % name)
+            out.append(p)
+    out = list(dict.fromkeys(out))
+    if len(out) > MAX_AUDIT_PREFIXES:
+        raise HTTPException(status_code=400, detail="%s: не больше %d" % (name, MAX_AUDIT_PREFIXES))
+    return out
+
+
+def _audit_printer(printer: Optional[str]) -> Optional[str]:
+    if printer is None or printer == "":
+        return None
+    if not _AUDIT_PRINTER.fullmatch(printer):
+        raise HTTPException(status_code=400, detail="printer: некорректный id принтера")
+    return printer
+
+
+def _audit_filters(user, action, prefix, exclude, printer, fr, to) -> Dict[str, Any]:
+    return {"user_id": user or None, "action": action or None,
+            "prefixes": _audit_prefixes(prefix, "prefix"), "exclude": _audit_prefixes(exclude, "exclude"),
+            "printer": _audit_printer(printer), "fr": fr, "to": to}
+
+
 @router.get("/audit")
 def get_audit_log(request: Request,
                   access_token_cookie: Optional[str] = Cookie(None, alias="access_token"),
                   limit: int = Query(100, ge=1, le=500), offset: int = Query(0, ge=0),
-                  user: Optional[str] = None, action: Optional[str] = None):
+                  user: Optional[str] = None, action: Optional[str] = None,
+                  prefix: Optional[List[str]] = Query(None), exclude: Optional[List[str]] = Query(None),
+                  printer: Optional[str] = None, fr: Optional[float] = None, to: Optional[float] = None):
+    """The audit journal, newest first: user / action exact, prefix (any of them) and
+    exclude (none of them) as action starts, printer (its id is a part of the action),
+    fr <= time < to."""
     audit = get_audit_service()
-    entries = audit.get_logs(limit=limit + 1, offset=offset, user_id=user, action=action)
+    entries = audit.get_logs(limit=limit + 1, offset=offset,
+                             **_audit_filters(user, action, prefix, exclude, printer, fr, to))
     has_more = len(entries) > limit
     if has_more:
         entries = entries[:limit]
     return {"rows": [e.to_dict() for e in entries], "has_more": has_more}
+
+
+@router.get("/audit/counts")
+def get_audit_counts(request: Request,
+                     access_token_cookie: Optional[str] = Cookie(None, alias="access_token"),
+                     printer: Optional[str] = None, fr: Optional[float] = None, to: Optional[float] = None):
+    """Rows per (user, action key) of a window and a printer: the chips' counts and the
+    «Кто» choice of «История → Действия» ({"rows": [{"user", "key", "n"}], "truncated"})."""
+    rows = get_audit_service().count_by_key(printer=_audit_printer(printer), fr=fr, to=to, limit=501)
+    return {"rows": rows[:500], "truncated": len(rows) > 500}
+
+
+@router.get("/audit.csv")
+def get_audit_csv(request: Request,
+                  access_token_cookie: Optional[str] = Cookie(None, alias="access_token"),
+                  user: Optional[str] = None, action: Optional[str] = None,
+                  prefix: Optional[List[str]] = Query(None), exclude: Optional[List[str]] = Query(None),
+                  printer: Optional[str] = None, fr: Optional[float] = None, to: Optional[float] = None):
+    """«⇩ Выгрузить» of «История → Действия»: the same filters, newest first, as CSV for
+    Russian Excel (BOM, «;», farm-local times), at most AUDIT_CSV_LIMIT rows."""
+    import csv
+    import io
+    from app.services import job_queries
+    entries = get_audit_service().get_logs(limit=AUDIT_CSV_LIMIT, offset=0,
+                                           **_audit_filters(user, action, prefix, exclude, printer, fr, to))
+    buf = io.StringIO()
+    buf.write("\ufeff")
+    w = csv.writer(buf, delimiter=";", lineterminator="\r\n")
+    w.writerow(("Время", "Пользователь", "Действие", "IP", "Браузер"))
+    for e in entries:
+        when = job_queries._local(e.created_at)
+        w.writerow([job_queries.csv_cell(v) for v in (when.strftime("%d.%m.%Y %H:%M:%S") if when else "",
+                                                      e.user_id, e.action, e.ip_address, e.user_agent)])
+
+    def ymd(ts):
+        when = job_queries._local(ts) if ts is not None else None
+        return when.strftime("%Y%m%d") if when is not None else "all"
+    name = "forge-audit-%s-%s.csv" % (ymd(fr), ymd(to))
+    return Response(content=buf.getvalue().encode("utf-8"), media_type="text/csv; charset=utf-8",
+                    headers={"Content-Disposition": 'attachment; filename="%s"' % name, "Cache-Control": "no-store"})
 
 
 # --- Server settings (Telegram bot, proxies) -------------------------------
@@ -371,12 +511,57 @@ def _validate_settings(values: dict):
                                     detail="Некорректный прокси-URL (нужно http(s)://[логин:пароль@]хост:порт): "
                                            + mask_proxy(p))
 
-    if "printer_light_enabled" in values:
-        v = values["printer_light_enabled"]
+    if "printer_light_disabled" in values:
+        v = values["printer_light_disabled"]
         if (not isinstance(v, list) or len(v) > 200
                 or any(not isinstance(x, str) or not x or len(x) > 64 for x in v)):
             raise HTTPException(status_code=400,
-                                detail="printer_light_enabled: ожидается список id принтеров")
+                                detail="printer_light_disabled: ожидается список id принтеров")
+
+
+# «Автоматика → Автопропуск ошибок» (IA §8): the codes are edited through PUT /settings
+# (auto_ignore_print_errors, validated above); this only names them in Bambu's words.
+_PE_CODE = re.compile(r"[0-9A-F]{4}_[0-9A-F]{4}")
+MAX_PE_CODES = 32
+
+
+@router.get("/print-error-texts")
+def get_print_error_texts(request: Request,
+                          access_token_cookie: Optional[str] = Cookie(None, alias="access_token"),
+                          codes: str = ""):
+    """{"texts": {code: text | null}} for codes="0500_8062,0C00_8009": Bambu's Russian text of
+    each print_error code, from the tables of the fleet's own Bambu models (their texts differ
+    per model; the first that has one), else the vendored lib's. Nothing is sent to a printer."""
+    from app.services import hms_catalog, notifications
+    wanted = [c.strip().upper() for c in str(codes or "").split(",") if c.strip()]
+    if len(wanted) > MAX_PE_CODES or not all(_PE_CODE.fullmatch(c) for c in wanted):
+        raise HTTPException(status_code=400, detail="codes: до %d кодов вида 0500_8062" % MAX_PE_CODES)
+    models = []
+    try:
+        for r in printer_registry.list_printers(include_deleted=False):
+            if r.get("kind") != "bambu":
+                continue
+            key = (hms_catalog.serial_prefix(r.get("serial")) or hms_catalog.model_prefix(r.get("model")), r.get("model") or "")
+            if key not in models:
+                models.append(key)
+    except Exception:
+        logger.debug("print-error texts: registry read failed", exc_info=True)
+    if not models:
+        models = [(None, "")]
+    texts = {}
+    for code in dict.fromkeys(wanted):
+        value = int(code.replace("_", ""), 16)
+        texts[code] = None
+        for prefix, model in models:
+            try:
+                text = notifications._pe_text(value, prefix, model)
+            except Exception:
+                logger.debug("print-error text failed for %s", code, exc_info=True)
+                text = None
+            if text:
+                texts[code] = text
+                break
+    return {"texts": texts}
 
 
 # Auto-drying owns these keys (validated config, engine state, journal): the
@@ -409,6 +594,11 @@ def update_settings(body: dict, request: Request,
     engine = [k for k in body if k in ENGINE_KEYS]
     if engine:
         raise HTTPException(status_code=400, detail="Автосушка настраивается на вкладке AMS: " + ", ".join(engine))
+    # «Скрыть» / «Вернуть» own notification_mutes: one key at a time, under its lock and
+    # audited per key (PUT /printers/{id}/notification-mute), never a whole-value write here.
+    from app.services import notification_mutes
+    if notification_mutes.SETTING in body:
+        raise HTTPException(status_code=400, detail=notification_mutes.MSG_SETTINGS_PUT)
     current = settings_service.get_all()
     changed = {k: v for k, v in body.items() if current.get(k) != v}
     _validate_settings(changed)
@@ -430,6 +620,14 @@ def proxy_check_now(request: Request,
     from app.services import telegram_manager
     telegram_manager.check_proxies_now()  # blocking, ≤~10s (parallel checks)
     return {"telegram": telegram_manager.status()}
+
+
+@router.get("/hms-catalog")
+def hms_catalog_status(request: Request,
+                       access_token_cookie: Optional[str] = Cookie(None, alias="access_token")):
+    """Bambu's HMS tables per model prefix: versions, last check, sizes (read-only)."""
+    from app.services import hms_catalog
+    return hms_catalog.status()
 
 
 class PrinterCommandRequest(BaseModel):
@@ -484,10 +682,67 @@ def printer_command(printer_id: str, body: PrinterCommandRequest, request: Reque
             "replied": r.get("replied", False)}
 
 
+class NotificationActionRequest(BaseModel):
+    key: str            # a record's key: pe:0700_8011, hms:…, klipper:shutdown, creality:2/5
+    action: str         # notification_actions.ACTIONS key
+    confirm: bool = False
+
+
+_NOTIF_KEY = re.compile(r"(pe|hms|klipper|creality):[0-9A-Za-z_/-]{1,64}")   # fullmatch: no trailing \n
+_NOTIF_ACTION = re.compile(r"[a-z_]{1,32}")
+MSG_BAD_NOTIF = "Неверный ключ уведомления или действие"
+
+
+@router.post("/printers/{printer_id}/notification-action")
+def notification_action(printer_id: str, body: NotificationActionRequest, request: Request,
+                        access_token_cookie: Optional[str] = Cookie(None, alias="access_token")):
+    """One button of a printer notification (notification_actions.run): the
+    contract of /command — 200 {"success", "status", "detail", "replied"},
+    400 {"detail", "status"} when refused or rejected. Audited as
+    printer_command:notif_<action>:<id>:code=<code>,st=<status>."""
+    from app.services import notification_actions
+    if not _NOTIF_KEY.fullmatch(body.key) or not _NOTIF_ACTION.fullmatch(body.action):
+        raise HTTPException(status_code=400, detail=MSG_BAD_NOTIF)
+    r = notification_actions.run(printer_id, body.key, body.action, body.confirm is True)
+    _audit(request, "printer_command:notif_%s:%s:code=%s,st=%s"
+           % (body.action, printer_id, body.key.split(":", 1)[1], r.get("status", "rejected")))
+    if not r["success"]:
+        return JSONResponse(status_code=400, content={"detail": r["detail"], "status": r.get("status", "rejected")})
+    return {"success": True, "status": r.get("status", "sent"), "detail": r["detail"],
+            "replied": r.get("replied", False)}
+
+
+class NotificationMuteRequest(BaseModel):
+    key: str            # a record's key, as /api/printers lists it
+    muted: bool
+
+
+@router.put("/printers/{printer_id}/notification-mute")
+def notification_mute(printer_id: str, body: NotificationMuteRequest, request: Request,
+                      access_token_cookie: Optional[str] = Cookie(None, alias="access_token")):
+    """«Скрыть» / «Вернуть» one notification record of a printer (notification_mutes):
+    the dashboard's attention only, nothing is sent to the printer, so its state
+    does not matter. 200 {"printer_id", "key", "muted", "mutes": the printer's
+    muted keys}; 404 unknown printer, 400 a bad key or a full list. A repeat is
+    idempotent (no audit). Audited as notif_mute:<id>:<key>:on|off."""
+    from app.services import notification_mutes
+    if printer_registry.get_printer(printer_id) is None:
+        raise HTTPException(status_code=404, detail="Принтер не найден")
+    try:
+        changed, keys = notification_mutes.set_muted(printer_id, body.key, body.muted)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    if changed:
+        _audit(request, "notif_mute:%s:%s:%s" % (printer_id, body.key, "on" if body.muted else "off"))
+    return {"printer_id": printer_id, "key": body.key, "muted": body.muted, "mutes": keys}
+
+
 class BulkCommandRequest(BaseModel):
     action: str
     printer_ids: List[str]
     dry_run: bool = False
+    # reset_errors: printer id -> the record key the admin confirmed (fleet_commands.run_bulk)
+    keys: Optional[Dict[str, str]] = None
 
 
 def _registry_labels() -> dict:
@@ -502,12 +757,14 @@ def _registry_labels() -> dict:
 @router.post("/printers/bulk-command")
 def printers_bulk_command(body: BulkCommandRequest, request: Request,
                           access_token_cookie: Optional[str] = Cookie(None, alias="access_token")):
-    """One action (light_on / light_off / pause / resume) for many printers at
-    once; blocks up to fleet_commands.BULK_DEADLINE (sync: runs in the threadpool)."""
+    """One action (light_on / light_off / pause / resume / reset_errors) for many
+    printers at once; blocks up to fleet_commands.BULK_DEADLINE (sync: runs in
+    the threadpool)."""
     from app.services import fleet_commands, printer_commands
     try:
         out = fleet_commands.run_bulk(body.action, body.printer_ids, store=printer_commands.get_store(),
-                                      labels=_registry_labels(), dry_run=body.dry_run)
+                                      labels=_registry_labels(), dry_run=body.dry_run, keys=body.keys,
+                                      maintenance=printer_registry.maintenance_map())
     except fleet_commands.BulkError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except fleet_commands.BulkBusy as e:
@@ -601,3 +858,31 @@ def autodry_release(request: Request, body: Any = Body(None),
     for key in ams_autodry_engine.release(keys):
         _audit(request, _unit_audit("autodry_release", key))
     return ams_autodry_engine.snapshot()
+
+
+# --- Print journal: «Годно / Брак» (spec_job_journal §7.4, §9) ----------------------------
+# The mark of a print that has ended; the audit line carries the print number
+# only, never the job's or the printer's name (job names are sensitive).
+
+@router.put("/history/jobs/{job_id}/verdict")
+def put_job_verdict(job_id: int, request: Request, body: Any = Body(None),
+                    access_token_cookie: Optional[str] = Cookie(None, alias="access_token")):
+    """Body {"verdict": "good" | "defect" | null}; answers the updated row in the
+    /api/history/jobs format (404: no such print, 409: it still runs)."""
+    # Imported here: app.api.main imports this router, not the other way round.
+    from app.api import main as api_main
+    from app.services import job_journal, job_queries
+    verdict = body.get("verdict", "") if isinstance(body, dict) else ""
+    if verdict is not None and verdict not in job_journal.VERDICTS:
+        raise HTTPException(status_code=400, detail='verdict must be "good", "defect" or null')
+    db = api_main._history_db_path()
+    status = job_journal.set_verdict(db, job_id, verdict, request.state.username)
+    if status == "missing":
+        raise HTTPException(status_code=404, detail="Печать не найдена")
+    if status == "open":
+        raise HTTPException(status_code=409, detail="Печать ещё идёт — оценка ставится после её конца")
+    _audit(request, "job_verdict:%d:%s" % (job_id, verdict or "clear"))
+    row = job_queries.get_job(db, job_id, labels=api_main._current_labels())
+    if row is None:   # deleted (retention) right after the mark
+        raise HTTPException(status_code=404, detail="Печать не найдена")
+    return api_main._json_response(row)

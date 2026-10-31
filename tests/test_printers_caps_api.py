@@ -73,9 +73,9 @@ def rows(monkeypatch):
     monkeypatch.setattr(api_auth, "token_subject_active", lambda *a, **k: True)
     monkeypatch.setattr("app.services.printer_registry.list_printers", lambda *a, **k: [dict(r) for r in REGISTRY])
 
-    def get(light_enabled=()):
+    def get(light_disabled=()):
         monkeypatch.setattr(settings_service, "get",
-                            lambda key, **k: list(light_enabled) if key == "printer_light_enabled" else {})
+                            lambda key, **k: list(light_disabled) if key == "printer_light_disabled" else {})
         client = TestClient(api_main.create_app(_Store(STATUSES)))
         client.cookies.set("access_token", "stub")
         r = client.get("/api/printers")
@@ -104,10 +104,11 @@ def test_bambu_caps_follow_the_print_class_verdict(rows):
 
 
 def test_creality_caps_and_the_light_setting(rows):
+    # 27.10: light, temperatures / fans / speed (tune) and cooldown; eject / CFS not yet
     r = rows()["c-1"]
-    assert r["caps"] == dict(ALL_FALSE, pause=True, resume=True, stop=True, light=None)
+    assert r["caps"] == dict(ALL_FALSE, pause=True, resume=True, stop=True, light=True, tune=True, cooldown=True)
     assert (r["caps_note"], r["print_cmds"]) == (None, True)
-    assert rows(light_enabled=["c-1"])["c-1"]["caps"]["light"] is True
+    assert rows(light_disabled=["c-1"])["c-1"]["caps"]["light"] is False
 
 
 def test_klipper_caps_while_idle(rows):
@@ -138,3 +139,53 @@ def test_chamber_ctl_falls_back_to_the_registry_model(rows):
 def test_no_registry_secrets_or_debug_in_the_rows(rows):
     for row in rows().values():
         assert not {"access_code", "serial", "debug", "host"} & set(row)
+
+
+
+def _pe(code, severity="pause"):
+    return {"key": "pe:" + code, "src": "print_error", "code": code, "severity": severity, "text": None,
+            "actions": [], "blocking": False}
+
+
+def test_auto_ignore_state_only_for_the_listed_codes(rows, monkeypatch):
+    from app.services import auto_ignore
+    statuses = [PrinterStatus(id="b-ok", label="x", kind=PrinterKind.BAMBU, online=True, state=PrinterState.PAUSED,
+                              notifications=[_pe("0500_8062"), _pe("0700_8011"),
+                                             {"key": "hms:0500_8062_0000_0001", "src": "hms",
+                                              "code": "0500_8062", "severity": "serious"}]),
+                PrinterStatus(id="b-h2", label="x", kind=PrinterKind.BAMBU, online=True, state=PrinterState.PAUSED,
+                              notifications=[_pe("0500_8062")])]
+    monkeypatch.setattr(settings_service, "get", lambda key, **k: ["0500_8062"] if key == "auto_ignore_print_errors"
+                        else ([] if key == "printer_light_disabled" else {}))
+    monkeypatch.setattr(auto_ignore, "_tries", {("b-ok", "0", 0x05008062): (1, 1000.0)})
+    monkeypatch.setattr(auto_ignore, "_skips", {})
+    monkeypatch.setattr(auto_ignore.time, "time", lambda: 1030.0)
+    client = TestClient(api_main.create_app(_Store(statuses)))
+    client.cookies.set("access_token", "stub")
+    got = {row["id"]: row for row in client.get("/api/printers").json()}
+    listed, other, hms = got["b-ok"]["notifications"]
+    assert listed["auto"] == {"enabled": True, "tries": 1, "max": 3, "next_in_s": 90, "skip": None}
+    assert "auto" not in other and "auto" not in hms                  # not in the setting / not a print error
+    assert got["b-h2"]["notifications"][0]["auto"]["tries"] == 0       # per printer
+    # the owner emptied the list: no auto anywhere
+    monkeypatch.setattr(settings_service, "get", lambda key, **k: [] if key in ("auto_ignore_print_errors",
+                                                                               "printer_light_disabled") else {})
+    got = client.get("/api/printers").json()
+    assert not any("auto" in n for row in got for n in row["notifications"])
+
+
+def test_no_serial_or_model_prefix_in_the_notifications(rows, monkeypatch):
+    import json
+    from app.services import hms_catalog, notifications
+    # Bambu's table is keyed by the serial's prefix: it picks the buttons, it never goes out
+    monkeypatch.setattr(hms_catalog, "_index", {"Q7X": {"act": {"05008062": {"dev": [27]}}, "err": {}, "hms": {},
+                                                        "ver": ("1", "2")}})
+    built = notifications.build_bambu(None, {"hms": [{"attr": 0x05000600, "code": 0x00020070}]}, 0x05008062,
+                                      "P2S", "Q7X", "PAUSE")
+    assert [a["key"] for a in built[0]["actions"]] == ["ignore"]
+    statuses = [PrinterStatus(id="b-ok", label="x", kind=PrinterKind.BAMBU, online=True, state=PrinterState.PAUSED,
+                              notifications=built)]
+    client = TestClient(api_main.create_app(_Store(statuses)))
+    client.cookies.set("access_token", "stub")
+    body = json.dumps(client.get("/api/printers").json(), ensure_ascii=False)
+    assert "Q7X" not in body and "SN-1" not in body and "serial" not in body

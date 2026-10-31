@@ -25,5 +25,6 @@ class CrealityCollector:
         except Exception as e:
             raise ConnectionError(f"WebSocket fetch failed: {e}")
 
-    def send_command(self, command: str, param: str = None) -> dict:
+    def send_command(self, command: str, param=None) -> dict:
+        # param: the G-code of "gcode_line", the list of params dicts of "set"
         return self.client.send_command(command, param)

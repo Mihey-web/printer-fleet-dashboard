@@ -12,7 +12,10 @@ logger = logging.getLogger(__name__)
 # Неизвестный код НЕЛЬЗЯ схлопывать в 'idle': normalizer промоутит idle обратно
 # в 'printing' по любому признаку активности, и реальная пауза становится
 # невидимой на карточке. 'unknown' проходит ту же промоцию, но паузу не прячет.
-STATE_CODES = {0: 'idle', 1: 'printing', 2: 'paused', 3: 'finish', 5: 'paused'}
+# 4 = stopped: a K1C (fw 1.3.5.22) holds it for minutes after a cancelled print
+# (ha_creality_ws k1c_cancel_during_self_test fixture, derive_print_state); 7 / 9
+# (finishing a cancel, starting a print) stay 'unknown' = busy.
+STATE_CODES = {0: 'idle', 1: 'printing', 2: 'paused', 3: 'finish', 4: 'cancelled', 5: 'paused'}
 
 
 class CrealityK1Client:
@@ -218,12 +221,30 @@ class CrealityK1Client:
                         pass
                 if 'err' in data:
                     debug['err'] = data['err']
+                    err = data['err']
+                    # {"errcode": N, "key": K}: errcode 0 = no error (the notification's source)
+                    if isinstance(err, dict) and 'errcode' in err:
+                        try:
+                            self.data['err_code'] = int(err['errcode'])
+                            self.data['err_key'] = err.get('key')
+                        except (TypeError, ValueError):
+                            pass
                 if 'model' in data:
                     debug['model'] = str(data['model'])
                 if 'caseFanPct' in data:
                     debug['case_fan_pct'] = int(data['caseFanPct'])
+                    self.data['case_fan_pct'] = debug['case_fan_pct']
                 if 'auxiliaryFanPct' in data:
                     debug['aux_fan_pct'] = int(data['auxiliaryFanPct'])
+                    self.data['aux_fan_pct'] = debug['aux_fan_pct']
+                # The firmware's own heater ceilings (K1C: 300 / 100): they cap
+                # the temperature commands (printer_commands.creality_temp_limits).
+                for key, out in (('maxNozzleTemp', 'max_nozzle_temp'), ('maxBedTemp', 'max_bed_temp')):
+                    if key in data:
+                        try:
+                            self.data[out] = int(float(data[key]))
+                        except (TypeError, ValueError):
+                            pass
 
                 total_time = self.data['print_time'] + self.data['remaining_time']
                 if total_time > 0:
@@ -280,14 +301,32 @@ class CrealityK1Client:
             logger.warning("[%s] _send_get failed: %s", self.label, e)
 
     def send_command(self, command, param=None):
-        """Send a print-control command via the Creality port-9999 'set' method.
+        """Send a command via the Creality port-9999 'set' method (fire and
+        forget: the firmware sends no acknowledgement).
 
-        Supported: pause, resume, stop, light_on, light_off, gcode_line.
-        light_* (lightSw) is not live-verified yet; printer_commands sends it
-        only to printers listed in the printer_light_enabled setting.
+        Supported: pause, resume, stop, light_on, light_off, gcode_line, and
+        "set" with param = a list of params dicts (printer_commands builds
+        them), each sent as its own {"method": "set"} frame, in order.
         """
         if not self.connected or not self.ws:
             return {"success": False, "detail": "Not connected"}
+
+        if command == "set":
+            frames = param if isinstance(param, list) else None
+            if not frames or any(not isinstance(f, dict) or not f for f in frames):
+                return {"success": False, "detail": "No set params provided"}
+            sent = 0
+            try:
+                for frame in frames:
+                    self.ws.send(json.dumps({"method": "set", "params": frame}))
+                    sent += 1
+                return {"success": True, "detail": "Command sent"}
+            except Exception as e:
+                if not sent:
+                    return {"success": False, "detail": str(e)}
+                # the frames before the error reached the printer: never «nothing sent»
+                return {"success": True, "partial": True,
+                        "detail": "отправлено частично: %d из %d (%s)" % (sent, len(frames), e)}
 
         param_map = {
             "pause": {"pause": 1},

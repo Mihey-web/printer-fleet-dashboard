@@ -484,6 +484,53 @@ def test_note_user_command_start_is_not_foreign(env):
     assert status_of()["kind"] == "dry" and status_of()["origin"] == "manual"
 
 
+def test_a_notifications_dry_stop_is_the_admins_stop(env, monkeypatch):
+    # «Остановить сушку» of a notification (auto_stop_ams_dry, printer-wide) skips /command:
+    # the engine still books it as the admin's stop — a hold, never an interrupted run to restart
+    from app.services import notification_actions as na
+    env.configure()
+    env.tick()                                     # our auto run
+    env.tick(60)
+    monkeypatch.setattr(eng, "_time", lambda: env.clock.now)
+    status = env.store.get_one("bambu-1")
+    key = "hms:0700_2500_0002_0001"
+    status.notifications = [{"key": key, "src": "hms", "code": "0700_2500_0002_0001", "severity": "serious",
+                             "actions": [{"key": "dry_stop"}], "blocking": False}]
+    sent, busy = [], []
+
+    def send_local(pid, payload):
+        busy.append(eng.is_busy(pid, 0))
+        sent.append(payload)
+        env.units[0].stop()
+        return {"success": True, "replied": True, "detail": "подтверждено принтером"}
+
+    monkeypatch.setattr(na, "_live", lambda _pc, pid, prn: (status, {}))
+    monkeypatch.setattr(printer_commands, "_send_local", send_local)
+    monkeypatch.setattr(printer_commands, "_note_reply", lambda *a: None)
+    monkeypatch.setattr(printer_commands, "_start_fast_refresh", lambda *a, **k: None)
+    na._marks.clear()
+    # a unit the engine is sending to right now: refused, nothing sent
+    eng._inflight.add("bambu-1__0")
+    try:
+        assert na.run("bambu-1", key, "dry_stop") == {"success": False, "status": "refused",
+                                                      "detail": na.MSG_AUTODRY_BUSY, "replied": False}
+    finally:
+        eng._inflight.discard("bambu-1__0")
+    assert sent == [] and na._marks == {}
+    assert na.run("bambu-1", key, "dry_stop")["status"] == "confirmed"
+    na._marks.clear()
+    assert sent == [{"print": {"sequence_id": "0", "command": "auto_stop_ams_dry"}}] and busy == [True]
+    assert not eng._inflight                       # unclaimed after the send
+    st = eng._states["bambu-1__0"]
+    assert st["stop_sent_at"] == env.clock.now and st["hold_reason"] == "manual_stop"
+    env.tick(60)
+    st = eng._states["bambu-1__0"]
+    assert st["phase"] == "settle" and st["end_kind"] == "stop" and not st["restart_at"]
+    assert journal_kinds() == ["start", "manual_stop"]
+    env.tick(10 * 60)
+    assert [a for _, a, _ in env.sent] == ["dry_start"]     # not started again
+
+
 def test_a_drying_going_before_the_first_check_is_dated_from_history(env, monkeypatch):
     # first deploy: the unit has been drying for 8 h (P2 on 12.10 showed «с 15:34» for a drying since 07:48)
     t0 = T0 - 8 * H
@@ -561,31 +608,24 @@ def _interrupted_run(env):
     env.tick(60)
 
 
-def test_auto_disable_is_state_only(env):
-    env.configure(manual_hold_h=0)
+
+def test_interrupted_runs_restart_and_never_switch_the_unit_off(env):
+    # the units dry continuously: a run the printer switched off is restarted
+    env.configure()
     env.tick()
     env.tick(60)
-    env.units[0].stop()
-    env.tick(60)
-    assert eng._states["bambu-1__0"]["interrupts"] == 1
-    env.tick(H + 60)                                # measure: RH 30 -> repeat at once
-    env.tick(60)
-    env.units[0].stop()
-    env.tick(60)
-    st = eng._states["bambu-1__0"]
-    assert st["disabled_reason"] == "interrupts" and st["interrupts"] == 2
-    assert ("auto-dry", "autodry_disable:bambu-1:0") in env.audit
-    assert eng.load_config()["units"] == {}                         # the config is untouched
-    assert journal_kinds()[-2:] == ["interrupted", "disabled"]
-    env.tick(2 * H)
-    assert status_of() == {"kind": "off", "scope": "unit", "reason": "interrupts"}
-    starts = [a for _, a, _ in env.sent].count("dry_start")
-    env.tick(3 * H)
-    assert [a for _, a, _ in env.sent].count("dry_start") == starts
-    eng.release(["bambu-1__0"], now=env.clock.now + 1)
-    assert journal_kinds()[-1] == "reenabled" and eng._states["bambu-1__0"]["disabled_reason"] is None
-    assert status_of() == {"kind": "pending"}         # until the woken engine decides again
-    assert eng._wake.is_set()
+    for n in (1, 2, 3):
+        env.units[0].stop()
+        env.tick(60)
+        st = eng._states["bambu-1__0"]
+        assert st["interrupts"] == n and st["disabled_reason"] is None and st["hold_until"] is None
+        assert st["restart_at"] == env.clock.now + ad.INTERRUPT_RETRY_S
+        starts = [a for _, a, _ in env.sent].count("dry_start")
+        env.tick(ad.INTERRUPT_RETRY_S)              # restart time: a new run, even past max_runs (2 here)
+        assert [a for _, a, _ in env.sent].count("dry_start") == starts + 1
+        env.tick(60)                                # confirmed
+    assert "disabled" not in journal_kinds() and eng.load_config()["units"] == {}
+    assert not any(a == "autodry_disable:bambu-1:0" for _, a in env.audit)
 
 
 def test_outside_stop_and_restart_is_journaled_as_a_takeover(env):
@@ -596,8 +636,7 @@ def test_outside_stop_and_restart_is_journaled_as_a_takeover(env):
     env.tick(60)                                    # confirmed
     env.units[0].stop()
     env.tick(60)
-    assert journal_kinds() == ["start", "interrupted", "disabled"]
-    assert ("auto-dry", "autodry_disable:bambu-1:0") in env.audit
+    assert journal_kinds() == ["start", "interrupted"]
     env.units[0].dry_now(rem=719, temp=55)
     env.tick(120)
     rows = eng.snapshot(env.clock.now)["journal"]
@@ -607,7 +646,6 @@ def test_outside_stop_and_restart_is_journaled_as_a_takeover(env):
     st = eng._states["bambu-1__0"]
     assert st["phase"] == "foreign" and st["interrupts"] == 1 and st["disabled_reason"] is None
     assert st["hold_until"] is None and st["foreign_entry"] == rows[0]["id"] and len(st["runs"]) == 2
-    assert env.audit[-1] == ("auto-dry", "autodry_release:bambu-1:0")
     assert status_of()["kind"] == "foreign"
     assert [r["kind"] for r in stored("ams_autodry_journal")] == ["start", "foreign_start"]
 
@@ -829,7 +867,7 @@ def _restart(env):
 
 def test_a_stop_during_a_short_restart_is_an_interruption(env):
     # stopped (Handy) a minute after the service went down; back 3 min later, first check 2 min after
-    # that: an interruption — held, never answered by a new start — not a run lost out of sight
+    # that: an interruption, not a run lost out of sight — restarted 5 min later (owner, 17.10)
     env.configure()
     env.tick()                                      # start
     for _ in range(14):
@@ -840,11 +878,11 @@ def test_a_stop_during_a_short_restart_is_an_interruption(env):
     _restart(env)
     env.tick(2 * 60)
     st = eng._states["bambu-1__0"]
-    assert (st["end_kind"], st["hold_reason"], st["interrupts"]) == ("interrupted", "interrupted", 1)
+    assert (st["end_kind"], st["hold_reason"], st["interrupts"]) == ("interrupted", None, 1)
     assert journal_kinds() == ["start", "interrupted"]
     for _ in range(4 * 60):
         env.tick(60)
-    assert [a for _, a, _ in env.sent] == ["dry_start"]
+    assert [a for _, a, _ in env.sent] == ["dry_start", "dry_start"]
 
 
 def test_a_foreign_stop_during_a_short_restart_holds_the_unit(env):
@@ -1033,6 +1071,68 @@ def test_snapshot_keeps_absent_units(env):
     assert u["label"] == "P1" and u["name"] == "AMS 1"
     env.tick(60)
     assert status_of()["kind"] == "offline"
+
+
+# --- maintenance mode (spec_maintenance B24-B28) -----------------------------------------
+
+def _maint(monkeypatch, *pids):
+    on = set(pids)
+    monkeypatch.setattr(printer_registry, "maintenance_map",
+                        lambda *a, **k: {pid: {"since": T0, "note": None, "by": "admin"} for pid in on})
+    return on
+
+
+def test_a_unit_of_a_printer_in_maintenance_is_left_alone(env, monkeypatch):
+    env.configure()
+    env.units.append(Unit("bambu-2"))
+    on = _maint(monkeypatch, "bambu-1")
+    env.tick()
+    assert [pid for pid, _, _ in env.sent] == ["bambu-2"]             # bambu-1 is due as well: nothing sent
+    assert status_of("bambu-1__0") == {"kind": "maintenance"} and env.history.calls == 1   # no history read for it
+    assert journal_kinds().count("maintenance_on") == 1
+    u = next(x for x in eng.snapshot(T0)["units"] if x["key"] == "bambu-1__0")
+    assert u["maintenance"] is True
+    assert next(x for x in eng.snapshot(T0)["units"] if x["key"] == "bambu-2__0")["maintenance"] is False
+    rows = [r for r in eng.snapshot(T0)["journal"] if r["kind"] == "maintenance_on"]
+    assert rows[0]["text"] == "Принтер на обслуживании — автосушка блок не трогает" and rows[0]["label"] == "P1"
+    for _ in range(3):
+        env.tick(60)
+    assert journal_kinds().count("maintenance_on") == 1 and [p for p, _, _ in env.sent] == ["bambu-2"]
+    st = stored("ams_autodry_state")["units"]["bambu-1__0"]
+    assert st["maint_since"] == T0 and st["phase"] == "idle"          # persisted: survives a restart
+    on.clear()                                                         # out of it
+    assert status_of("bambu-1__0") == {"kind": "pending"}             # at once, until the next check
+    env.tick(60)
+    assert journal_kinds()[-2:] == ["maintenance_off", "start"]
+    assert [p for p, _, _ in env.sent] == ["bambu-2", "bambu-1"]       # the usual rules: humid for 2 h -> start
+
+
+def test_the_mode_shows_at_once_and_an_absent_unit_is_in_maintenance_not_offline(env, monkeypatch):
+    env.tick()
+    _maint(monkeypatch, "bambu-1")
+    assert status_of() == {"kind": "maintenance"}                     # before the engine's next check
+    env.units.clear()                                                  # offline, no AMS in its status
+    env.tick(60)
+    u = eng.snapshot(T0 + 60)["units"][0]
+    assert (u["key"], u["status"], u["maintenance"], u["online"]) == ("bambu-1__0", {"kind": "maintenance"}, True, False)
+
+
+def test_run_now_and_stop_all_skip_a_printer_in_maintenance(env, monkeypatch):
+    env.configure()
+    env.units.append(Unit("bambu-2"))
+    env.units[0].dry_now(rem=300)                                      # bambu-1 dries (foreign) ...
+    env.units[1].dry_now(rem=300)
+    env.tick()
+    _maint(monkeypatch, "bambu-1")                                     # ... then goes into maintenance
+    env.units[0].stop()
+    res = eng.run_now(["bambu-1__0"], now=T0 + 10)
+    assert [(r["ok"], r["status"], r["detail"]) for r in res] == [(False, "skipped", "Принтер на обслуживании")]
+    env.units[0].dry_now(rem=200)
+    res = eng.stop_all(None, now=T0 + 20)                              # every drying unit: not the one in maintenance
+    assert [(r["key"], r["ok"]) for r in res] == [("bambu-2__0", True)]
+    res = eng.stop_all(["bambu-1__0"], now=T0 + 30)                    # asked for by name: said why
+    assert [(r["ok"], r["status"], r["detail"]) for r in res] == [(False, "skipped", "Принтер на обслуживании")]
+    assert [(p, a) for p, a, _ in env.sent] == [("bambu-2", "dry_stop")]
 
 
 # --- a multi-day simulation over real AMS history --------------------------------------

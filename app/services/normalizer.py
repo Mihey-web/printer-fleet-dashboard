@@ -2,8 +2,9 @@ import copy
 import logging
 from typing import Any, Dict, Optional
 
+from app.collectors.bambu_raw import CANCEL_CODES
 from app.domain.models import PrinterKind, PrinterStatus, PrinterState, now_ts
-from app.services import ams_drying, bambu_extras
+from app.services import ams_drying, bambu_extras, hms_catalog, notification_tracker, notifications
 from app.services.utils import map_state, as_float, as_int, safe_job_name
 # Hard import: a broken vendored tree must fail loudly, not silently drop the fans.
 from app.vendor.pybambu.const import FansEnum, Features
@@ -299,6 +300,53 @@ def _nozzle(info_obj: Any) -> Optional[Dict[str, Any]]:
     return {"diameter": diameter, "type": _read(info_obj, "active_nozzle_type") or None}
 
 
+def _cancel_flag(printer_id: str) -> bool:
+    """The cancelled state kept across a restart: the notification tracker sets
+    its flag while the printer shows CANCELLED and drops it when it leaves."""
+    return notification_tracker.flag(printer_id, notification_tracker.CANCELLED_FLAG)
+
+
+def _bambu_cancelled(printer_id: str, raw_state: Any, print_error: Optional[int], raw: Dict[str, Any]) -> bool:
+    """FAILED after a user cancel, not a failure. The printer echoes a cancel
+    code in print_error for a few seconds only; RawReport latches it for the
+    FAILED episode that follows, the tracker's flag across a restart (unless
+    the printer reports another print error: a failure is never hidden)."""
+    if str(raw_state or "").strip().upper() != "FAILED":
+        return False
+    if print_error in CANCEL_CODES:
+        return True
+    if print_error and print_error > 0 and (print_error & 0xFFFF) >= notifications.PE_MIN_LOW:
+        return False                     # a real error after the cancel wins over the latch too
+    return bool(raw.get("cancel_latched")) or (not print_error and _cancel_flag(printer_id))
+
+
+_notif_failed: set = set()   # printers whose notification build failed (logged once each)
+
+
+def _bambu_notifications(printer_id: str, label: str, hms_obj: Any, raw: Dict[str, Any], print_error: Optional[int],
+                         model: Optional[str], raw_state: Any) -> list:
+    """notifications.build_bambu; a failure costs the list, never the status."""
+    try:
+        return notifications.build_bambu(hms_obj, raw, print_error, model,
+                                         hms_catalog.prefix_for(printer_id, model), raw_state)
+    except Exception:
+        if printer_id not in _notif_failed:
+            _notif_failed.add(printer_id)
+            logger.error("[%s] notifications not built", label, exc_info=True)
+        return []
+
+
+def _ws_notifications(printer_id: str, label: str, build: Any, *args: Any) -> list:
+    """notifications.build_klipper / build_creality; a failure costs the list."""
+    try:
+        return build(*args)
+    except Exception:
+        if printer_id not in _notif_failed:
+            _notif_failed.add(printer_id)
+            logger.error("[%s] notifications not built", label, exc_info=True)
+        return []
+
+
 def _raw_snapshot(result: Any) -> Dict[str, Any]:
     """RawReport snapshot of the report fields the lib drops ({} without one:
     test doubles, or a device built outside the collector)."""
@@ -329,6 +377,8 @@ def normalize_bambu(printer_id: str, label: str, result: Any, device_type: Optio
     }
     raw_state = getattr(pj, "gcode_state", None)
     state = map_state(raw_state)
+    if _bambu_cancelled(printer_id, raw_state, as_int(getattr(pj, "print_error", None)), raw):
+        state = PrinterState.CANCELLED
 
     temp_obj = getattr(result, "temperature", None)
     # The nozzle lives per extruder (H2D has two): read the active one.
@@ -439,6 +489,13 @@ def normalize_bambu(printer_id: str, label: str, result: Any, device_type: Optio
     # (per model: the lib auto-detects it from get_version, the registry's until then).
     error_model = getattr(info_obj, "device_type", None) or device_type
     last_error = _bambu_error_text(hms_obj, as_int(getattr(pj, "print_error", None)), error_model)
+    # The same inputs as records (level, text, hint, wiki, buttons); last_error stays as it is.
+    notifs = _bambu_notifications(printer_id, label, hms_obj, raw, as_int(getattr(pj, "print_error", None)),
+                                  error_model, raw_state)
+    if raw:
+        # RawReport's view, for comparing with the lib's (admin debug, while printing).
+        debug["hms_raw"] = raw.get("hms")
+        debug["print_error_raw"] = raw.get("print_error")
 
     lights_obj = getattr(result, "lights", None)
     # "on"/"off"/"unknown" per lamp; the card needs a three-valued flag. H2/X2
@@ -563,9 +620,12 @@ def normalize_bambu(printer_id: str, label: str, result: Any, device_type: Optio
         dual_nozzle=bambu_extras.dual_nozzle(result, raw),
         ams_dry_ok=ams_drying.remote_dry_supported(raw.get("fun2")),
         door_open=bambu_extras.door_open(result),
+        job_seq=as_int(raw.get("job_seq")),
+        job_started_at=as_float(raw.get("job_started_at")),
         sdcard=bambu_extras.sdcard(result, raw),
         nozzle=_nozzle(info_obj),
         signature_required=bambu_extras.signature_required(raw),
+        notifications=notifs,
     )
 
 
@@ -594,15 +654,23 @@ def normalize_ws_dict(printer_id: str, label: str, kind: PrinterKind, data: Dict
     # Klipper control fields, set in every state: the status carries `debug`
     # only while printing, and an idle or paused printer must stay controllable.
     ctl_ready = light_ctl = None
+    host_state = None
     if kind == PrinterKind.KLIPPER:
-        host_state = debug.get("webhooks_state") if isinstance(debug, dict) else None
-        ctl_ready = None if host_state is None else str(host_state).lower() == "ready"
+        host_state = notifications.klipper_host_state(data)
+        ctl_ready = None if host_state is None else host_state == "ready"
         pin = data.get("light_pin")             # None = not looked up yet, "" = none found
         light_ctl = None if pin is None else bool(pin)
     target_nozzle_temp = as_float(data.get("target_nozzle_temp"))
     target_bed_temp = as_float(data.get("target_bed_temp"))
     fan_speed_pct = as_int(data.get("fan_speed_pct"))
     feedrate_pct = as_int(data.get("feedrate_pct"))
+    # Creality: caseFanPct / auxiliaryFanPct, in Bambu's fans keys (the case fan
+    # is the chamber's); a fan the printer does not report stays None.
+    fans = None
+    if kind == PrinterKind.CREALITY:
+        fans = {"aux": as_int(data.get("aux_fan_pct")), "chamber": as_int(data.get("case_fan_pct"))}
+        if all(v is None for v in fans.values()):
+            fans = None
     stage = data.get("stage")
     firmware_version = data.get("firmware_version")
 
@@ -691,6 +759,25 @@ def normalize_ws_dict(printer_id: str, label: str, kind: PrinterKind, data: Dict
             stage = "paused_filament_runout"
             debug["creality_filament_runout"] = material_status
 
+    # Klipper with klippy down stays online (the client keeps serving while the
+    # host answers) and shows ERROR with the reason, not OFFLINE. A Creality
+    # error on a printer that is not printing makes it ERROR too, a stopped one
+    # (state 4, CANCELLED) included: a failure is never shown as a cancel.
+    notifs: list = []
+    if kind == PrinterKind.KLIPPER:
+        notifs = _ws_notifications(printer_id, label, notifications.build_klipper, data)
+        if host_state in notifications.KLIPPER_DOWN:
+            state = PrinterState.ERROR
+        elif host_state == "startup":
+            # klippy sends no status while it starts: print_stats is the one from
+            # before (a dead job's "printing" after a firmware restart), not a state
+            state = PrinterState.UNKNOWN
+    elif kind == PrinterKind.CREALITY:
+        notifs = _ws_notifications(printer_id, label, notifications.build_creality, data, state)
+        if notifs and state in (PrinterState.IDLE, PrinterState.UNKNOWN, PrinterState.FINISHED,
+                                PrinterState.CANCELLED):
+            state = PrinterState.ERROR
+
     return PrinterStatus(
         id=printer_id,
         label=label,
@@ -717,10 +804,13 @@ def normalize_ws_dict(printer_id: str, label: str, kind: PrinterKind, data: Dict
         device_type=device_type or data.get("device_type"),
         grace_period_active=False,
         last_successful_fetch=now_ts(),
+        last_error=notifications.error_line(notifs),
         debug=data.get("debug", {}) if kind_debug_enabled(state) else {},
+        fans=fans,
         light_on=light_on,
         ctl_ready=ctl_ready,
         light_ctl=light_ctl,
+        notifications=notifs,
     )
 
 

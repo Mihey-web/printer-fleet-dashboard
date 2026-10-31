@@ -22,6 +22,10 @@ def map_state(value: Optional[str]) -> PrinterState:
         return PrinterState.IDLE
     if s in {"error", "failed"}:
         return PrinterState.ERROR
+    # Klipper print_stats.state after a cancel. Unmapped, it was UNKNOWN and the
+    # activity check in normalize_ws_dict promoted a cancelled job to PRINTING.
+    if s in {"cancelled", "canceled"}:
+        return PrinterState.CANCELLED
 
     return PrinterState.UNKNOWN
 

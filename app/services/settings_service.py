@@ -45,9 +45,10 @@ DEFAULTS: Dict[str, Any] = {
     # Персистится, чтобы после рестарта не считать capability «неизвестной»
     # (=по умолчанию можно) и не предлагать управление там, где оно отклонится.
     "printer_capability": {},
-    # printer ids whose not-yet-verified light control is enabled (Creality
-    # lightSw) after a live check; set via PUT /api/admin/settings, no UI.
-    "printer_light_enabled": [],
+    # Creality printer ids without a controllable lamp (lightSw): their light
+    # button is hidden; every other Creality has one. Set via PUT
+    # /api/admin/settings, no UI.
+    "printer_light_disabled": [],
     # AMS auto-drying (app/services/ams_autodry*): the rules (edited on the AMS
     # tab), the engine's per-unit state and its journal. Nested defaults are
     # shared objects: readers deep-copy. Not editable via the generic PUT.
@@ -60,6 +61,9 @@ DEFAULTS: Dict[str, Any] = {
     # Both have Studio's «Ignore this and Resume» button. The owner's plates have worn
     # markers and move between printers, so on every Bambu (15.10).
     "auto_ignore_print_errors": ["0500_8062", "0C00_8009"],
+    # Printer notifications an admin hid («Скрыть», app/services/notification_mutes.py):
+    # printer_id -> [record key, …]. Kept by key, never pruned. Shared object: never mutated.
+    "notification_mutes": {},
 }
 
 # config.py attribute -> settings key, for the one-time migration seed.
@@ -181,6 +185,16 @@ def get(key: str, db_path: Optional[str] = None) -> Any:
     if key not in DEFAULTS:
         raise KeyError(key)
     return get_all(db_path)[key]
+
+
+def peek(key: str) -> Any:
+    """The cached value, or the default before load(): never opens the DB
+    (for hot paths such as the normalizer, and the tests that run them)."""
+    if key not in DEFAULTS:
+        raise KeyError(key)
+    with _lock:
+        cache = _cache
+    return (cache if cache is not None else DEFAULTS).get(key, DEFAULTS[key])
 
 
 def set_many(values: Dict[str, Any], db_path: Optional[str] = None) -> None:

@@ -279,6 +279,24 @@ def test_plan_run_cases(case, mode, ucfg, slots, dtype, feeding, expected):
     assert plan["empty"] is False
 
 
+@pytest.mark.parametrize("mode,slots,temp,why", [
+    ("petg", [], 55, "пресет Bambu для печати"),                       # P3, 17.10: unfed slots, petg mode
+    ("auto", [slot("PETG")], 55, "пресет Bambu для PETG · во время печати"),
+    ("auto", [slot("PLA")], 45, "пресет Bambu для PLA"),              # PLA: the same 45° anyway
+])
+def test_plan_run_while_printing_uses_the_print_preset(mode, slots, temp, why):
+    # P1/P3 (P2S) switched a 65° drying off 5–60 min in while printing; 55° runs lasted 12 h
+    c = cfg(mode=mode)
+    plan = ad.plan_run(c, {"mode": "inherit"}, _dry_for(slots), slots, printing=True)
+    assert (plan["temp"], plan["why"], plan["limit"]) == (temp, why, None)
+    assert ad.plan_run(c, {"mode": "inherit"}, _dry_for(slots), slots)["temp"] == (65 if temp == 55 else 45)
+
+
+def test_decide_plans_with_the_print_preset_while_printing():
+    d = ad.decide(state(), obs(printing=True), cfg(), NOW)
+    assert d.actions and d.actions[0]["plan"]["temp"] == 55
+
+
 def test_plan_run_unit_with_unfed_slots():
     # owner, 14.10: spools sit in the AMS without filament fed in - the slots read empty,
     # the spools still need drying: the PLA-safe minimum, for the engine and run-now alike
@@ -443,9 +461,16 @@ def test_decide_unit_off():
     assert d.status["kind"] == "off" and d.status["scope"] == "unit" and d.actions == []
 
 
-def test_decide_disabled_unit():
-    d = ad.decide(state(disabled_reason="interrupts"), obs(), cfg(), NOW)
-    assert d.status == {"kind": "off", "scope": "unit", "reason": "interrupts"} and d.actions == []
+def test_a_legacy_interruption_disable_or_hold_is_lifted():
+    # older versions held a unit 24 h after its run went dark, then switched it off (owner, 17.10: dry on)
+    for st in (state(disabled_reason="interrupts", disabled_entry=7),
+               state(hold_until=NOW + 20 * H, hold_reason="interrupted")):
+        d = ad.decide(st, obs(), cfg(), NOW)
+        assert d.state["disabled_reason"] is None and d.state["disabled_entry"] is None
+        assert d.state["hold_until"] is None and d.state["hold_reason"] is None
+        assert d.status["kind"] != "off" and d.status["kind"] != "pause"
+    d = ad.decide(state(hold_until=NOW + H, hold_reason="manual_stop"), obs(), cfg(), NOW)
+    assert d.status["kind"] == "pause"                          # a dashboard stop still holds
 
 
 def test_decide_starts_when_rest_rh_held():
@@ -730,15 +755,15 @@ def test_outside_stop_and_restart_over_our_run_is_a_takeover():
     assert kinds(d) == ["foreign_end"] and d.events[0]["early"] is False
 
 
-def test_outside_restart_undoes_the_disable_it_caused():
+def test_outside_restart_after_a_second_interruption_is_a_takeover():
     d = ad.decide(running(interrupts=1), obs(), cfg(), NOW)
-    assert kinds(d) == ["interrupted", "disabled"] and d.events[1]["bind"] == "disabled_entry"
-    st = dict(d.state, measure_entry=41, disabled_entry=42)
-    d = ad.decide(st, active_obs(remaining=719), cfg(), NOW + 300)
+    assert kinds(d) == ["interrupted"] and d.state["disabled_reason"] is None    # never switched off
+    st = dict(d.state, measure_entry=41)
+    d = ad.decide(st, active_obs(remaining=719), cfg(), NOW + 120)
     assert kinds(d) == ["foreign_start"]
     ev = d.events[0]
-    assert ev["replace"] == 41 and ev["drop"] == 42 and ev["reenabled"] is True
-    assert d.state["interrupts"] == 1 and d.state["disabled_reason"] is None and d.state["disabled_entry"] is None
+    assert ev["replace"] == 41 and "drop" not in ev and "reenabled" not in ev
+    assert d.state["interrupts"] == 1 and d.state["disabled_reason"] is None
     assert d.status["kind"] == "foreign"
 
 
@@ -768,7 +793,7 @@ def test_a_late_restart_is_a_new_drying():
     d = ad.decide(running(), obs(), cfg(), NOW)
     d = ad.decide(dict(d.state, measure_entry=41), active_obs(remaining=719), cfg(), NOW + 16 * 60)
     assert kinds(d) == ["measure", "foreign_start"] and not d.events[1].get("takeover")
-    assert d.state["interrupts"] == 1 and d.state["hold_reason"] == "interrupted" and d.state["series"] == 2
+    assert d.state["interrupts"] == 1 and d.state["hold_reason"] is None and d.state["series"] == 2
 
 
 def test_a_quick_start_after_a_normal_end_is_a_new_run():
@@ -856,31 +881,49 @@ def test_running_end_by_expected_time_is_normal():
     assert kinds(d) == ["finish"]
 
 
-def test_interruptions_hold_and_then_disable_the_unit():
+def test_an_interrupted_run_restarts_in_five_minutes():
+    # owner, 17.10: P1/P3 (65° while printing) and H2 (a failed print) went dark and sat
+    # 24 h idle — «пусть непрерывно автосушку включает»
     c = cfg()
     d = ad.decide(running(), obs(), c, NOW)
     assert kinds(d) == ["interrupted"]
     ev = d.events[0]
-    assert ev["ran"] == 2 * H and ev["planned"] == 12 * H and ev["n"] == 1 and ev["hold_h"] == 24
-    assert d.state["hold_until"] == NOW + 24 * H and d.state["hold_reason"] == "interrupted"
+    assert ev["ran"] == 2 * H and ev["planned"] == 12 * H and ev["n"] == 1 and ev["retry_s"] == 300
+    assert "hold_h" not in ev
+    assert ad.journal_text(ev) == "Погасла через 2 ч из 12 ч — не по команде автосушки · перезапуск через 5 мин"
+    assert d.state["hold_until"] is None and d.state["restart_at"] == NOW + ad.INTERRUPT_RETRY_S
     assert d.state["interrupts"] == 1 and d.state["disabled_reason"] is None
-    d = ad.decide(running(interrupts=1), obs(), c, NOW)
-    assert kinds(d) == ["interrupted", "disabled"]
-    assert d.events[1]["n"] == 2 and d.state["disabled_reason"] == "interrupts"
+    # a warm AMS above the target: measured at once, the repeat waits for the restart time
+    d = ad.decide(d.state, obs(rows=rows(rh=30, now=NOW + 60)), c, NOW + 60)
+    assert kinds(d) == ["measure"] and d.events[0]["outcome"] == "repeat" and not d.actions
+    assert d.status == {"kind": "restart", "until": NOW + 300, "repeat": {"rh": 30, "target": 20}}
+    d = ad.decide(d.state, obs(rows=rows(rh=30, now=NOW + 300)), c, NOW + 300)
+    assert [a["trigger"] for a in d.actions] == ["repeat"] and d.actions[0]["series"] == 2
+    # again and again: never switched off
+    d = ad.decide(running(interrupts=5), obs(), c, NOW)
+    assert kinds(d) == ["interrupted"] and d.state["interrupts"] == 6 and d.state["disabled_reason"] is None
     assert c == cfg()                              # the config is never written
 
 
-def test_interrupted_dashboard_run_holds_without_counting():
+def test_a_started_run_clears_the_restart_wait():
+    st, _, _ = ad.apply_start_result(state(restart_at=NOW + 100), _action("auto"),
+                                     {"success": True, "status": "confirmed"}, "auto", NOW)
+    assert st["restart_at"] is None
+    st, _ = ad.release(state(restart_at=NOW + 100))
+    assert st["restart_at"] is None
+
+
+def test_interrupted_dashboard_run_restarts_without_counting():
     d = ad.decide(running(origin="manual", interrupts=1), obs(), cfg(), NOW)
     assert kinds(d) == ["interrupted"]
-    assert d.state["interrupts"] == 1 and d.state["hold_until"] == NOW + 24 * H
+    assert d.state["interrupts"] == 1 and d.state["hold_until"] is None and d.state["restart_at"] == NOW + 300
 
 
-def test_interrupted_run_now_counts_toward_the_disable():
+def test_interrupted_run_now_counts_like_an_auto_run():
     # «Сушить все сейчас» is our command too: its run going dark counts like an auto run
     d = ad.decide(running(origin="now", interrupts=1), obs(), cfg(), NOW)
-    assert kinds(d) == ["interrupted", "disabled"]
-    assert d.state["interrupts"] == 2 and d.state["disabled_reason"] == "interrupts"
+    assert kinds(d) == ["interrupted"]
+    assert d.state["interrupts"] == 2 and d.state["disabled_reason"] is None
 
 
 def test_interruption_without_manual_hold():
@@ -1398,6 +1441,132 @@ def test_release():
     assert ad.release(state())[1] == []
 
 
+# --- maintenance mode (spec_maintenance §5) -------------------------------------------
+
+MAINT_ON = "Принтер на обслуживании — автосушка блок не трогает"
+MAINT_OFF = "Принтер снят с обслуживания — автосушка снова следит за блоком"
+
+
+def test_maintenance_resets_a_tracked_run_and_never_sends():
+    c = cfg()
+    st = running(display={"label": "P1"}, rest_temp=26, hold_until=NOW + H, hold_reason="manual_stop",
+                 backoff_until=NOW + 9 * H, repeat_pending=True, repeat_since=NOW - 60, interrupts=1)
+    d = ad.decide(st, active_obs(maintenance=True), c, NOW)
+    assert (d.status, d.actions, kinds(d)) == ({"kind": "maintenance"}, [], ["maintenance_on"])
+    assert ad.journal_text(d.events[0]) == MAINT_ON
+    fresh = dict(ad.new_state(), runs=[NOW - 2 * H], display={"label": "P1"}, rest_temp=26, maint_since=NOW)
+    assert d.state == fresh                                   # idle, no series, holds or backoff; limit and display kept
+    # the next checks: one row for the entry, nothing sent — the drying runs out on its own timer
+    for t, o in ((60, active_obs(maintenance=True)), (120, obs(maintenance=True)), (H, obs(maintenance=True, rh=40))):
+        d = ad.decide(d.state, o, c, NOW + t)
+        assert (d.status, d.actions, d.events) == ({"kind": "maintenance"}, [], [])
+    assert d.state == fresh
+
+
+START_PARAMS = {"temp": 55, "hours": 8, "filament": "PETG", "rh": 30, "temp_now": 26}
+
+
+def test_a_card_stop_in_maintenance_keeps_its_hold_after_the_mode():
+    c = cfg()
+    d = ad.decide(ad.new_state(), obs(maintenance=True), c, NOW)
+    st, ev = ad.apply_stop(d.state, NOW + 60, c["manual_hold_h"] * H, "manual_stop")
+    assert st["hold_until"] == NOW + 60 + 24 * H and ev[0]["hold_h"] == 24
+    d = ad.decide(st, obs(maintenance=True), c, NOW + 120)              # a later check: not reset
+    assert (d.status, d.events) == ({"kind": "maintenance"}, [])
+    assert (d.state["hold_until"], d.state["hold_reason"]) == (NOW + 60 + 24 * H, "manual_stop")
+    # out of the mode with a humid rest window: still held, as the journal row promised
+    t0 = NOW + 3 * H
+    d = ad.decide(d.state, obs(rh=40, rows=rows(rh=40, now=t0)), c, t0)
+    assert kinds(d) == ["maintenance_off"] and not d.actions
+    assert (d.status["kind"], d.status["reason"], d.status["until"]) == ("pause", "manual_stop", NOW + 60 + 24 * H)
+    t1 = NOW + 60 + 24 * H
+    d = ad.decide(d.state, obs(rh=40, rows=rows(rh=40, now=t1)), c, t1)  # the hold ran out: the usual rules
+    assert [a["trigger"] for a in d.actions] == ["start"]
+    # the entry itself still clears an older hold (spec §5)
+    d = ad.decide(state(hold_until=NOW + H, hold_reason="manual_stop"), obs(maintenance=True), c, NOW)
+    assert d.state["hold_until"] is None and d.state["hold_reason"] is None
+
+
+def test_a_card_start_in_maintenance_stays_the_dashboards_run():
+    c = cfg()
+    d = ad.decide(state(runs=[NOW - 2 * H]), obs(maintenance=True), c, NOW)
+    st, ev = ad.apply_user_start(d.state, START_PARAMS, NOW + 60)
+    assert [e["kind"] for e in ev] == ["manual"] and st["phase"] == "running"
+    d = ad.decide(st, obs(maintenance=True), c, NOW + 120)             # not confirmed yet: kept
+    assert (d.status, d.events, d.state["phase"], d.state["origin"]) == ({"kind": "maintenance"}, [], "running",
+                                                                         "manual")
+    d = ad.decide(d.state, active_obs(remaining=470, maintenance=True), c, NOW + 600)
+    assert (d.status, d.events, d.state["phase"]) == ({"kind": "maintenance"}, [], "running")
+    assert (d.state["seen_active"], d.state["last_remaining_min"], d.state["last_seen_at"]) == (True, 470, NOW + 600)
+    # out of the mode, still drying: no second «чужая сушка» row, not counted toward the limit
+    d = ad.decide(d.state, active_obs(remaining=400), c, NOW + 70 * 60)
+    assert kinds(d) == ["maintenance_off"] and d.status["kind"] == "dry" and not d.actions
+    assert d.state["origin"] == "manual" and d.state["runs"] == [NOW - 2 * H]
+
+
+def test_a_card_start_that_ends_in_maintenance_is_forgotten():
+    c = cfg()
+    d = ad.decide(state(), obs(maintenance=True), c, NOW)
+    st, _ = ad.apply_user_start(d.state, START_PARAMS, NOW + 60)
+    d = ad.decide(st, active_obs(maintenance=True), c, NOW + 600)
+    d = ad.decide(d.state, obs(maintenance=True, rh=22), c, NOW + 9 * H)  # ran out in the mode
+    assert (d.status, d.events, d.state["phase"], d.state["maint_since"]) == ({"kind": "maintenance"}, [], "idle", NOW)
+    # a second start over it (the timer jumped up): someone else's drying, forgotten as well
+    st, _ = ad.apply_user_start(d.state, START_PARAMS, NOW + 10 * H)
+    d = ad.decide(st, active_obs(remaining=400, maintenance=True), c, NOW + 10 * H + 600)
+    d = ad.decide(d.state, active_obs(remaining=700, maintenance=True), c, NOW + 10 * H + 1200)
+    assert (d.events, d.state["phase"]) == ([], "idle")
+    # never confirmed within the window: forgotten, no «не началась» row in the mode
+    st, _ = ad.apply_user_start(d.state, START_PARAMS, NOW + 11 * H)
+    d = ad.decide(st, obs(maintenance=True), c, NOW + 11 * H + ad.CONFIRM_S + 1)
+    assert (d.events, d.state["phase"], d.actions) == ([], "idle", [])
+
+
+def test_maintenance_cancels_a_pending_measure_and_skips_the_history():
+    d = ad.decide(settle(), obs(maintenance=True), cfg(), NOW)
+    assert kinds(d) == ["maintenance_on", "measure"]
+    assert d.events[1] == {"kind": "measure", "outcome": "cancelled", "entry": 5}
+    assert d.state["measure_entry"] is None and d.state["phase"] == "idle"
+    assert ad.needs_rows(d.state, cfg(), KEY, NOW, obs(maintenance=True)) is None
+    assert ad.needs_rows(ad.new_state(), cfg(), KEY, NOW, obs(maintenance=True)) is None
+    assert ad.needs_rows(ad.new_state(), cfg(), KEY, NOW, obs()) is not None
+    # an absent unit (offline printer, no AMS in its status) is in maintenance too, not offline
+    d = ad.decide(ad.new_state(), obs(present=False, online=False, dry=None, maintenance=True), cfg(), NOW)
+    assert (d.status, kinds(d)) == ({"kind": "maintenance"}, ["maintenance_on"])
+
+
+def test_out_of_maintenance_the_run_that_went_dark_is_not_restarted():
+    # frozen in "running", the end would read as an interruption: a restart in 5 min on the
+    # printer just repaired (test_an_interrupted_run_restarts_in_five_minutes)
+    c = cfg()
+    d = ad.decide(running(), active_obs(maintenance=True), c, NOW)
+    d = ad.decide(d.state, obs(maintenance=True, rh=22), c, NOW + H)              # the drying ended meanwhile
+    t0 = NOW + 2 * H
+    d = ad.decide(d.state, obs(rh=22, rows=rows(rh=22, now=t0)), c, t0)
+    assert kinds(d) == ["maintenance_off"] and ad.journal_text(d.events[0]) == MAINT_OFF
+    assert d.state["maint_since"] is None and not d.actions and d.status["kind"] == "wait"
+    for t in (300, 600, H):                                   # 22 % > the target 20 %, < the start 25 %
+        d = ad.decide(d.state, obs(rh=22, rows=rows(rh=22, now=t0 + t)), c, t0 + t)
+        assert (d.actions, d.events, d.status["kind"]) == ([], [], "wait")
+    # the usual rules again: a humid rest window starts a run
+    d = ad.decide(d.state, obs(rh=30, rows=rows(rh=30, now=t0 + 4 * H)), c, t0 + 4 * H)
+    assert [a["trigger"] for a in d.actions] == ["start"]
+
+
+def test_out_of_maintenance_a_drying_still_going_is_foreign():
+    d = ad.decide(running(), active_obs(maintenance=True), cfg(), NOW)
+    d = ad.decide(d.state, active_obs(remaining=300), cfg(), NOW + H)
+    assert kinds(d) == ["maintenance_off", "foreign_start"] and d.status["kind"] == "foreign" and not d.actions
+
+
+def test_maint_since_survives_a_restart():
+    st = ad.load_state(dict(ad.new_state(), maint_since=NOW))
+    assert st["maint_since"] == NOW
+    assert ad.load_state({"maint_since": "yesterday"})["maint_since"] is None
+    d = ad.decide(st, obs(maintenance=True), cfg(), NOW + H)         # still in it after a restart: no second row
+    assert (d.status, d.events) == ({"kind": "maintenance"}, [])
+
+
 # --- texts --------------------------------------------------------------------------
 
 @pytest.mark.parametrize("ev,text", [
@@ -1425,6 +1594,8 @@ def test_release():
      "Погасла через 15 мин из 12 ч — не по команде автосушки · не трогаем 24 ч · 2-й раз подряд"),
     ({"kind": "interrupted", "ran": 15 * 60, "planned": 12 * H, "hold_h": 0, "n": 1},
      "Погасла через 15 мин из 12 ч — не по команде автосушки"),
+    ({"kind": "interrupted", "ran": 15 * 60, "planned": 12 * H, "retry_s": 300, "n": 3},
+     "Погасла через 15 мин из 12 ч — не по команде автосушки · перезапуск через 5 мин · 3-й раз подряд"),
     ({"kind": "disabled", "n": 2},
      "Автосушка блока отключена: 2 срыва подряд — проверьте AMS и нажмите «включить снова»"),
     ({"kind": "lost"}, "Прогон прервался, пока принтер или сервер был без связи"),
@@ -1451,6 +1622,8 @@ def test_release():
      "Пробный режим: запустили бы прогон 1 · 65° · 12 ч (PETG)"),
     ({"kind": "unreachable", "series": 2, "target": 20, "rh": 30},
      "Цель не достигается — проверьте осушитель/цель · новая серия не раньше чем через 48 ч"),
+    ({"kind": "maintenance_on"}, "Принтер на обслуживании — автосушка блок не трогает"),
+    ({"kind": "maintenance_off"}, "Принтер снят с обслуживания — автосушка снова следит за блоком"),
 ])
 def test_journal_text(ev, text):
     assert ad.journal_text(ev) == text

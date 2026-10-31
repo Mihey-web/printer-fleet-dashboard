@@ -3,9 +3,10 @@ import logging
 import sqlite3
 import time
 from threading import Lock
-from typing import Dict, List, Optional, Any, TYPE_CHECKING
+from typing import Callable, Dict, List, Optional, Any, TYPE_CHECKING
 
 from app.domain.models import PrinterStatus
+from app.services import job_journal, notification_tracker, notifications
 
 logger = logging.getLogger(__name__)
 
@@ -20,9 +21,26 @@ DB_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__)
 RETENTION_SECONDS = int(os.environ.get("HISTORY_RETENTION_DAYS", "90")) * 86400
 _PRUNE_INTERVAL = 3600  # prune at most hourly
 
+# printer_history columns added for the temperature chart (temp_history).
+HISTORY_TEMP_COLUMNS = ("chamber_temp", "target_nozzle_temp", "target_bed_temp", "target_chamber_temp")
+
+
+def snapshot_reason(status: PrinterStatus) -> Optional[str]:
+    """The history row's reason (notifications.top_reason); a failure there
+    costs the reason, never the row."""
+    try:
+        return notifications.top_reason(status)
+    except Exception:
+        logger.error("top_reason failed for %s", getattr(status, "id", "?"), exc_info=True)
+        return None
+
 
 class StateStore:
-    def __init__(self):
+    def __init__(self, history_state: Optional[Callable[[str], Optional[str]]] = None):
+        # pid -> the state its history rows get instead of the live one (the
+        # maintenance mode, wired by main()), or None for the live state. The
+        # store itself knows nothing of the registry.
+        self._history_state = history_state
         self._lock = Lock()
         # Separate lock for the SQLite write connection so a slow fsync during a
         # snapshot can't block the in-memory reads (get_all/get_one) that serve
@@ -88,11 +106,45 @@ class StateStore:
             conn.execute("ALTER TABLE printer_history ADD COLUMN grace_period_active INTEGER DEFAULT 0")
         if "last_successful_fetch" not in existing:
             conn.execute("ALTER TABLE printer_history ADD COLUMN last_successful_fetch REAL DEFAULT 0")
+        # Temperature chart columns. Nullable REAL without a DEFAULT: SQLite
+        # only edits the schema, the ~400 MB table on the Pi's SD card is not
+        # rewritten. Names come from the fixed tuple, never from input.
+        for col in HISTORY_TEMP_COLUMNS:
+            if col not in existing:
+                conn.execute("ALTER TABLE printer_history ADD COLUMN %s REAL" % col)
+        # Why a printer stands (notifications.top_reason): a nullable column
+        # without a default, so SQLite only edits the schema, no table rewrite.
+        if "reason" not in existing:
+            conn.execute("ALTER TABLE printer_history ADD COLUMN reason TEXT")
         conn.commit()
+        # Print-job journal tables (print_jobs, job_journal_meta). A failure here
+        # must not take the history down with it: the journal just stays empty.
+        try:
+            job_journal.init_db(conn)
+        except Exception:
+            logger.error("print_jobs init failed", exc_info=True)
 
     def upsert(self, status: PrinterStatus):
+        # Outside self._lock: the tracker has its own lock and, on a new or
+        # cleared notification, a SQLite write that must not block the readers.
+        notification_tracker.annotate(status)
         with self._lock:
             self._statuses[status.id] = status
+
+    def _row_state(self, status: PrinterStatus):
+        """(state, reason) of the history row: the history_state hook's state
+        with no reason (a maintenance row is no pause or error), else the live
+        state and its reason. A failing hook costs the substitution, never the row."""
+        hook = getattr(self, "_history_state", None)
+        if hook is not None:
+            try:
+                state = hook(status.id)
+            except Exception:
+                logger.debug("history_state hook failed for %s", status.id, exc_info=True)
+                state = None
+            if isinstance(state, str) and state:
+                return state, None
+        return status.state.value, snapshot_reason(status)
 
     def record_snapshot(self, status: PrinterStatus):
         # A storage failure (disk full, locked DB) must NOT bubble up into the
@@ -100,25 +152,50 @@ class StateStore:
         # send every printer into the offline/grace path. Log and move on.
         try:
             now = time.time()
+            # Outside _db_lock: the hook may read the registry.
+            state, reason = self._row_state(status)
             with self._db_lock:
                 self._db.execute("""
                     INSERT INTO printer_history
                     (printer_id, label, kind, online, state, progress, job_name,
                      eta_sec, print_time, nozzle_temp, bed_temp, layer, total_layer,
-                     last_error, device_type, recorded_at, grace_period_active, last_successful_fetch)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                     last_error, device_type, recorded_at, grace_period_active, last_successful_fetch,
+                     reason, chamber_temp, target_nozzle_temp, target_bed_temp, target_chamber_temp)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """, (
                     status.id, status.label, status.kind.value, int(status.online),
-                    status.state.value, status.progress_pct, status.job_name,
+                    state, status.progress_pct, status.job_name,
                     status.eta_seconds, status.print_time_seconds, status.nozzle_temp,
                     status.bed_temp, status.current_layer, status.total_layers,
                     status.last_error, status.device_type, now,
-                    int(status.grace_period_active), status.last_successful_fetch
+                    int(status.grace_period_active), status.last_successful_fetch,
+                    reason, status.chamber_temp, status.target_nozzle_temp,
+                    status.target_bed_temp, status.target_chamber_temp
                 ))
                 self._db.commit()
                 self._prune_locked(now)
         except Exception:
             logger.error("record_snapshot failed for %s", status.id, exc_info=True)
+
+    def db_write(self, fn: Callable[[sqlite3.Connection], Any]) -> bool:
+        """Run fn(conn) on the write connection under _db_lock, then commit.
+
+        For the other writers of printer_history.db (the print-job journal).
+        Never raises, like record_snapshot: on any error the transaction is
+        rolled back, the error logged and False returned.
+        """
+        try:
+            with self._db_lock:
+                try:
+                    fn(self._db)
+                    self._db.commit()
+                except BaseException:
+                    self._db.rollback()
+                    raise
+            return True
+        except Exception:
+            logger.error("db_write failed", exc_info=True)
+            return False
 
     def _prune_locked(self, now: float):
         """Delete rows older than the retention window. Caller holds _db_lock."""
@@ -128,6 +205,7 @@ class StateStore:
         try:
             self._db.execute("DELETE FROM printer_history WHERE recorded_at < ?",
                              (now - RETENTION_SECONDS,))
+            job_journal.prune(self._db, now)   # same transaction; never raises
             self._db.commit()
         except Exception:
             logger.error("printer_history retention prune failed", exc_info=True)

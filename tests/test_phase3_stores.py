@@ -57,3 +57,23 @@ def test_ams_store_keys_history_by_physical_unit_index(tmp_path, monkeypatch):
     store.record_ams(status)
     row = store._db.execute("SELECT unit_index FROM ams_history").fetchone()
     assert row[0] == 2  # physical index from the unit dict, not enumerate 0
+
+
+def test_state_store_prunes_old_closed_print_jobs_keeps_open_ones(tmp_path, monkeypatch):
+    import app.services.state_store as ss
+    from app.services import job_journal as jj
+    monkeypatch.setattr(ss, "DB_PATH", str(tmp_path / "ph.db"))
+    monkeypatch.setattr(ss, "_PRUNE_INTERVAL", 0)
+    monkeypatch.setattr(jj, "JOBS_RETENTION_S", 1000)
+    store = ss.StateStore()
+    now = time.time()
+    old = {"printer_id": "p1", "kind": "bambu", "started_at": now - 5000, "last_seen": now - 4000,
+           "source": "live"}
+    jj.insert_job(store._db, dict(old, result="finished"), now)                          # pruned
+    jj.insert_job(store._db, dict(old), now)                                             # open: kept
+    jj.insert_job(store._db, dict(old, printer_id="p2", started_at=now - 10, result="failed"), now)
+    store._db.commit()
+    store.record_snapshot(_status())  # triggers the hourly prune
+    rows = store._db.execute("SELECT printer_id, result FROM print_jobs ORDER BY id").fetchall()
+    assert rows == [("p1", None), ("p2", "failed")]
+    assert store._db.execute("SELECT COUNT(*) FROM printer_history").fetchone()[0] == 1

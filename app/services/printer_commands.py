@@ -2,7 +2,8 @@
 
 Channels (SUPPORTED_ACTIONS):
   · Bambu — local MQTT, the full command set, the firmware checks the signature;
-  · Creality — WS :9999 "set": pause/resume/stop and the light (no reply);
+  · Creality — WS :9999 "set": pause/resume/stop, the light, nozzle / bed
+    targets, print speed, fans, cooldown (no reply: "sent", never "confirmed");
   · Klipper — Moonraker JSON-RPC with a reply: pause/resume/cancel and the light pin.
 Every send() returns {"success", "status", "detail", "replied"} (_outcome /
 _refused); what a printer can do at all is caps_for() (/api/printers "caps").
@@ -31,6 +32,7 @@ print_cmds (True/False/None) — фронт прячет паузу/стоп/AMS
 import copy
 import json
 import logging
+import os
 import threading
 import time
 from typing import Any, Callable, Dict, Optional, Tuple
@@ -39,6 +41,7 @@ from app.domain.models import PrinterKind, PrinterState, PrinterStatus
 from app.services import ams_drying, bambu_extras
 from app.services.normalizer import (TRAY_EXTERNAL, TRAY_NONE, _nozzle_range, _tray_now, normalize_bambu,
                                      normalize_ws_dict)
+from app.services.utils import as_int, map_state
 from app.vendor.pybambu.commands import AMS_FILAMENT_DRYING_TEMPLATE, SWITCH_AMS_TEMPLATE
 
 logger = logging.getLogger(__name__)
@@ -83,9 +86,11 @@ ACTION_CAP = {
     "ams_load": "ams", "ams_unload": "ams", "dry_start": "ams", "dry_stop": "ams",
 }
 # Actions per printer kind. None = the full Bambu set (see _build_payload).
-# Creality: WS :9999 "set" — print control and the light (lightSw), no
-# speed / fans / AMS. Klipper: Moonraker — print control and the light pin.
-CREALITY_ACTIONS = ("pause", "resume", "stop", "light_on", "light_off")
+# Creality: WS :9999 "set" — print control, the light (lightSw) and the
+# CREALITY_SET_ACTIONS (_build_creality); no chamber heat / eject / AMS (CFS).
+# Klipper: Moonraker — print control and the light pin.
+CREALITY_SET_ACTIONS = ("speed", "fans", "preheat", "cooldown")
+CREALITY_ACTIONS = ("pause", "resume", "stop", "light_on", "light_off") + CREALITY_SET_ACTIONS
 KLIPPER_ACTIONS = ("pause", "resume", "stop", "light_on", "light_off")
 SUPPORTED_ACTIONS: Dict[str, Optional[tuple]] = {
     "bambu": None,
@@ -95,7 +100,6 @@ SUPPORTED_ACTIONS: Dict[str, Optional[tuple]] = {
 KIND_TITLES = {"bambu": "Bambu", "creality": "Creality", "klipper": "Klipper"}
 
 MSG_KIND = "Команды поддерживаются только для Bambu, Creality и Klipper"
-MSG_LIGHT_UNVERIFIED = "Управление светом на этом принтере ещё не проверено"
 MSG_NO_LIGHT = "У принтера нет управляемой подсветки"
 MSG_NOT_SUPPORTED = "Принтер не поддерживает эту команду"
 MSG_NO_COLLECTOR = "коллектор принтера не найден"
@@ -120,6 +124,7 @@ STATE_MSG = {
     "stop": "Печать не идёт — останавливать нечего",
     "cooldown": "Во время печати остудить нельзя — сначала пауза или стоп",
     "eject": "Стол опускается, только когда принтер стоит — не во время печати и не на паузе",
+    "speed": "Скорость меняется только во время печати",
     "unknown": "Состояние принтера неизвестно — повторите через несколько секунд",
 }
 
@@ -342,6 +347,97 @@ def _build_payload(action: str, params: Dict[str, Any], model: Optional[str] = N
     raise ValueError(f"Неизвестная команда: {action}")
 
 
+# --- Creality: WS :9999 "set" frames ---------------------------------------------------
+#
+# Each builder returns one "set" params dict; a command is a list of them, sent
+# as separate frames in order (creality_client.send_command("set", frames)).
+# Formats: Creality Print's own LAN client and ha_creality_ws (see
+# mockups/ia/creality_control.md).
+
+# The card's four speed modes as setFeedratePct percentages — Bambu's levels
+# 1 тихий · 2 стандарт · 3 спорт · 4 безумный report the same 50/100/124/166 %.
+CREALITY_SPEED_PCT = {1: 50, 2: 100, 3: 124, 4: 166}
+# M106 P index of Creality's stock M106 macro: P0 model (part), P1 case, P2
+# auxiliary (side). The macro maps an index the printer has no fan for to P0,
+# so a fan the printer does not report is never sent (_build_creality).
+CREALITY_FAN_P = {"part": 0, "chamber": 1, "aux": 2}
+# The fan's telemetry key in the client's data (modelFanPct / caseFanPct / auxiliaryFanPct).
+CREALITY_FAN_FIELD = {"part": "fan_speed_pct", "aux": "aux_fan_pct", "chamber": "case_fan_pct"}
+FAN_NAMES = {"part": "Обдув детали", "aux": "Вспомогательный обдув", "chamber": "Обдув камеры"}
+# (nozzle, bed) ceilings °C per registry model (Creality specs; the K1C reports
+# maxNozzleTemp 300 / maxBedTemp 100 itself); an unknown model gets the lower
+# fallback. A lower ceiling the printer reports wins (creality_temp_limits).
+CREALITY_TEMP_MAX = {"k1max": (300, 100), "k1c": (300, 100), "ender5max": (300, 100)}
+CREALITY_TEMP_FALLBACK = (260, 100)
+
+
+def build_creality_nozzle(temp: int) -> Dict[str, Any]:
+    return {"nozzleTempControl": temp}
+
+
+def build_creality_bed(temp: int) -> Dict[str, Any]:
+    # num: the bed's index (multi-bed models); ours have one
+    return {"bedTempControl": {"num": 0, "val": temp}}
+
+
+def build_creality_speed(level: int) -> Dict[str, Any]:
+    return {"setFeedratePct": CREALITY_SPEED_PCT[level]}
+
+
+def build_creality_fan(key: str, pct: int) -> Dict[str, Any]:
+    """One fan, percent 0-100 -> M106 S 0-255 (as build_fans)."""
+    return {"gcodeCmd": "M106 P%d S%d" % (CREALITY_FAN_P[key], round(pct * 255 / 100))}
+
+
+def build_creality_cooldown() -> list:
+    """Nozzle and bed targets to 0 (no chamber heater on K1 / Ender-5 Max)."""
+    return [build_creality_nozzle(0), build_creality_bed(0)]
+
+
+def creality_temp_limits(model: Optional[str], data: Optional[Dict[str, Any]] = None) -> Tuple[int, int]:
+    """(nozzle, bed) ceilings °C: the model's, lowered to the printer's own
+    maxNozzleTemp / maxBedTemp when it reports a lower one."""
+    nozzle, bed = CREALITY_TEMP_MAX.get(str(model or "").lower(), CREALITY_TEMP_FALLBACK)
+    data = data or {}
+    reported = [data.get("max_nozzle_temp"), data.get("max_bed_temp")]
+    nozzle, bed = [min(lim, r) if _is_int(r) and r > 0 else lim for lim, r in zip((nozzle, bed), reported)]
+    return nozzle, bed
+
+
+def _build_creality(action: str, params: Dict[str, Any], model: Optional[str], data: Dict[str, Any]) -> list:
+    """The "set" frames of a CREALITY_SET_ACTIONS command; `data` is the
+    client's live snapshot (the fans it reports, its heater ceilings).
+    ValueError (ru) on a parameter error."""
+    if action == "speed":
+        level = params.get("level")
+        if not _is_int(level) or level not in CREALITY_SPEED_PCT:
+            raise ValueError("Режим скорости: 1-4")
+        return [build_creality_speed(level)]
+    if action == "fans":
+        frames = []
+        for key in ("part", "aux", "chamber"):
+            pct = _opt_int(params, key, 0, 100, FAN_NAMES[key])
+            if pct is None:
+                continue
+            if data.get(CREALITY_FAN_FIELD[key]) is None:
+                raise ValueError("%s: принтер не сообщает об этом вентиляторе" % FAN_NAMES[key])
+            frames.append(build_creality_fan(key, pct))
+        if not frames:
+            raise ValueError("Не задан ни один вентилятор")
+        return frames
+    if action == "preheat":
+        max_nozzle, max_bed = creality_temp_limits(model, data)
+        nozzle = _opt_int(params, "nozzle", 0, max_nozzle, "Сопло")
+        bed = _opt_int(params, "bed", 0, max_bed, "Стол")
+        if nozzle is None and bed is None:
+            raise ValueError("Не задана температура нагрева")
+        return ([build_creality_nozzle(nozzle)] if nozzle is not None else []) + \
+               ([build_creality_bed(bed)] if bed is not None else [])
+    if action == "cooldown":
+        return build_creality_cooldown()
+    raise ValueError(f"Неизвестная команда: {action}")
+
+
 def state_refusal(action: str, state: Optional[str], gcode_state: Optional[str] = None) -> Optional[str]:
     """Why `action` must not be sent in this state (ru), or None. `state` is the
     normalized PrinterState value; `gcode_state` (Bambu raw, upper case, may be
@@ -357,6 +453,8 @@ def state_refusal(action: str, state: Optional[str], gcode_state: Optional[str] 
         return None if state == "paused" else STATE_MSG["resume"]
     if action == "stop":
         return None if state in ("printing", "paused") else STATE_MSG["stop"]
+    if action == "speed":
+        return None if state in ("printing", "paused") else STATE_MSG["speed"]
     if action in ("cooldown", "eject"):
         allowed = COOLDOWN_GCODE_STATES if action == "cooldown" else EJECT_GCODE_STATES
         if gcode_state is not None:
@@ -558,6 +656,20 @@ def _send_klipper(printer_id: str, action: str) -> Dict[str, Any]:
         return {"success": False, "detail": str(e), "replied": False}
 
 
+# The Moonraker restarts that answer a Klipper notification (notification_actions);
+# never through send(): they are not in KLIPPER_ACTIONS.
+KLIPPER_RPC_ACTIONS = ("fw_restart", "klippy_restart")
+
+
+def send_klipper_rpc(printer_id: str, action: str) -> Dict[str, Any]:
+    """fw_restart / klippy_restart through the collector's live Moonraker
+    session, Moonraker's reply as the verdict: the raw {"success", "detail",
+    "replied"} (as _send_local; _outcome makes the API result)."""
+    if action not in KLIPPER_RPC_ACTIONS:
+        return {"success": False, "detail": MSG_NOT_SUPPORTED, "replied": False}
+    return _send_klipper(printer_id, action)
+
+
 def _outcome(r: Dict[str, Any]) -> Dict[str, Any]:
     """The send() result: {"success", "status", "detail", "replied"}. status:
     confirmed (the printer acknowledged), sent (no acknowledgement in time),
@@ -575,55 +687,95 @@ def _refused(detail: str) -> Dict[str, Any]:
 
 MSG_NOT_PAUSED_ON = "Принтер не стоит на паузе с этой ошибкой"
 MSG_NO_JOB_ID = "В отчёте принтера нет номера задания"
+MSG_NOT_PAUSED = "Принтер уже не на паузе"
+MSG_LASER_JOB = "Это задание лазера или резака — продолжить можно только на экране принтера"
+
+# The live checks of a print-error command (print_error_check), in this order:
+# "pe" = the printer still reports exactly this print_error, "pause" = gcode_state
+# PAUSE, "job_attr" = not a laser / cutter job, "job_id" = the report has a job id.
+PE_GUARDS = ("pe", "pause", "job_attr", "job_id")
+# ignore_print_error's refusals (the auto-ignore audit and its tests rely on them).
+PE_CHECK_MSG = {"pe": MSG_NOT_PAUSED_ON, "pause": MSG_NOT_PAUSED_ON, "job_attr": MSG_LASER_JOB,
+                "job_id": MSG_NO_JOB_ID}
 
 
-def live_print_error(printer_id: str) -> Optional[Dict[str, Any]]:
-    """{gcode_state, err, stage, job_id} from live telemetry, or None."""
-    from app.services import printer_registry
+def laser_job(job_attr: Any) -> bool:
+    """Bambu Studio's check_resume_condition: job_attr bits 4-7 above 1 = a
+    laser or cutter job (a plain print reports 1: job_attr 18). Unknown = not."""
+    return _is_int(job_attr) and ((job_attr >> 4) & 0xF) > 1
 
-    view = _live_view(printer_id, printer_registry.get_printer(printer_id) or {})
-    if view is None:
-        return None
+
+def print_error_check(ctx: Dict[str, Any], err: int, guards=PE_GUARDS) -> Optional[str]:
+    """The first of `guards` the live context (live_print_error) fails for
+    print_error `err`, or None. Shared by ignore_print_error (auto-ignore) and
+    notification_actions.run. job_id "0" is a valid one (network prints)."""
+    if "pe" in guards and (int(ctx.get("err") or 0) & 0xFFFFFFFF) != (int(err) & 0xFFFFFFFF):
+        return "pe"
+    if "pause" in guards and ctx.get("gcode_state") != "PAUSE":
+        return "pause"
+    if "job_attr" in guards and laser_job(ctx.get("job_attr")):
+        return "job_attr"
+    if "job_id" in guards and (ctx.get("job_id") is None or str(ctx.get("job_id")) == ""):
+        return "job_id"
+    return None
+
+
+def _pe_context(view: "_LiveView") -> Dict[str, Any]:
+    """The print-error fields of a live view: {gcode_state, err, stage, job_id,
+    subtask_id, job_attr}."""
     try:
         err = int(getattr(getattr(view.device, "print_job", None), "print_error", 0) or 0)
     except (TypeError, ValueError):
         err = 0
-    return {"gcode_state": view.gcode_state, "err": err, "stage": view.status.stage,
-            "job_id": (view.raw or {}).get("job_id")}
+    raw = view.raw or {}
+    return {"gcode_state": view.gcode_state, "err": err, "stage": view.status.stage, "job_id": raw.get("job_id"),
+            "subtask_id": raw.get("subtask_id"), "job_attr": raw.get("job_attr")}
+
+
+def live_print_error(printer_id: str) -> Optional[Dict[str, Any]]:
+    """{gcode_state, err, stage, job_id, subtask_id, job_attr} from live telemetry, or None."""
+    from app.services import printer_registry
+
+    view = _live_view(printer_id, printer_registry.get_printer(printer_id) or {})
+    return _pe_context(view) if view is not None else None
 
 
 def ignore_print_error(printer_id: str, err: int) -> Dict[str, Any]:
     """Press «Ignore and resume» for print_error `err` — only while the printer is
-    paused on exactly that error right now (live telemetry)."""
+    paused on exactly that error right now (live telemetry), and not on a laser
+    or cutter job (the checks of the notification's «ignore» button)."""
     ctx = live_print_error(printer_id)
     if ctx is None:
         return _refused(MSG_NO_TELEMETRY)
-    if ctx["gcode_state"] != "PAUSE" or ctx["err"] != err:
-        return _refused(MSG_NOT_PAUSED_ON)
-    if not ctx["job_id"]:
-        return _refused(MSG_NO_JOB_ID)
+    failed = print_error_check(ctx, err, PE_GUARDS)
+    if failed:
+        return _refused(PE_CHECK_MSG[failed])
     return _outcome(_send_local(printer_id, build_error_ignore(err, ctx["job_id"])))
 
 
-def _send_creality(printer_id: str, action: str) -> Dict[str, Any]:
+def _send_creality(printer_id: str, action: str, frames: Optional[list] = None) -> Dict[str, Any]:
     """Creality: команда уходит в живую WS-сессию коллектора (метод "set" на :9999).
 
     Подписи, как у Bambu, здесь нет — прошивка принимает pause/resume/stop без
     проверок, поэтому зонд капабилити не нужен. Подтверждения на команду
     прошивка тоже не шлёт: факт паузы видно только по смене state в телеметрии,
-    которую и так забирает poll-цикл.
+    которую и так забирает poll-цикл. `frames` (_build_creality) go out as
+    "set" frames; without them the client's own action name (pause, light_on...).
     """
     collector = _store.get_collector(printer_id) if _store is not None else None
     if collector is None or not hasattr(collector, "send_command"):
         return {"success": False, "detail": MSG_NO_COLLECTOR}
     try:
-        r = collector.send_command(action)
+        r = collector.send_command(action) if frames is None else collector.send_command("set", frames)
     except Exception as e:
         logger.error("[commands] %s creality %s failed", printer_id, action, exc_info=True)
         return {"success": False, "detail": str(e)}
     if not isinstance(r, dict) or not r.get("success"):
         detail = (r or {}).get("detail") if isinstance(r, dict) else None
         return {"success": False, "detail": detail or "принтер не принял команду"}
+    if r.get("partial"):
+        # some "set" frames went out before the socket failed: «sent», with how many
+        return {"success": True, "detail": r.get("detail") or "отправлено частично"}
     return {"success": True, "detail": "отправлено (без подтверждения)"}
 
 
@@ -1172,6 +1324,58 @@ def _start_fast_refresh(printer_id: str, prn: Dict[str, Any], expect=None,
                      name="cmd-refresh-%s" % printer_id).start()
 
 
+# --- live refresh of every printer ---------------------------------------------------
+#
+# The poll loop moves the collectors' telemetry into the store every POLL_INTERVAL
+# (30 s: history rows, the job journal, Telegram), so a print started on a printer
+# reached the cards 0-33 s later (median ~15 s, measured 29.10). The live
+# telemetry itself is fresh (MQTT / WS
+# push): every LIVE_REFRESH_S each running printer that has it is re-normalized
+# into the store, store.upsert only — as the refresh after a command does; no
+# history row, no journal, no notification. A printer without live telemetry
+# is never upserted here: offline / grace stay the poll loop's. FORGE_LIVE_REFRESH_S=0
+# turns it off.
+
+LIVE_REFRESH_S = float(os.environ.get("FORGE_LIVE_REFRESH_S", "2"))
+LIVE_REFRESH_DELAY_S = 30.0     # the collectors connect and send a full report first
+
+
+def live_refresh_once() -> int:
+    """One pass over the running printers: how many were upserted."""
+    from app.services import printer_registry
+
+    n = 0
+    for prn in printer_registry.get_running() or []:
+        pid = prn.get("id")
+        if not pid:
+            continue
+        try:
+            if _fast_refresh_once(pid, prn) is not None:
+                n += 1
+        except Exception:
+            logger.debug("[live] %s refresh failed", pid, exc_info=True)
+    return n
+
+
+def _live_refresh_loop() -> None:
+    _sleep(LIVE_REFRESH_DELAY_S)
+    while True:
+        started = _monotonic()
+        try:
+            live_refresh_once()
+        except Exception:
+            logger.error("[live] refresh pass failed", exc_info=True)
+        _sleep(max(0.5, LIVE_REFRESH_S - (_monotonic() - started)))
+
+
+def start_live_refresh() -> bool:
+    if LIVE_REFRESH_S <= 0 or _store is None or not hasattr(_store, "upsert"):
+        return False
+    threading.Thread(target=_live_refresh_loop, daemon=True, name="live-refresh").start()
+    logger.info("[live] cards follow the live telemetry every %.0f s", LIVE_REFRESH_S)
+    return True
+
+
 def _send_ams(printer_id: str, prn: Dict[str, Any], action: str, params: Dict[str, Any]) -> Dict[str, Any]:
     view = _live_view(printer_id, prn)
     if view is None:
@@ -1209,15 +1413,15 @@ def get_store():
     return _store
 
 
-def _light_enabled() -> frozenset:
-    """Printer ids whose not-yet-verified light control (Creality lightSw) the
-    owner enabled after a live check (setting printer_light_enabled)."""
+def _light_disabled() -> frozenset:
+    """Creality printer ids without a controllable lamp (K1 SE, Ender-3 V3:
+    no lightSw), from the setting printer_light_disabled."""
     try:
         from app.services import settings_service
-        v = settings_service.get("printer_light_enabled") or []
+        v = settings_service.get("printer_light_disabled") or []
         return frozenset(x for x in v if isinstance(x, str)) if isinstance(v, list) else frozenset()
     except Exception:
-        logger.debug("printer_light_enabled read failed", exc_info=True)
+        logger.debug("printer_light_disabled read failed", exc_info=True)
         return frozenset()
 
 
@@ -1236,9 +1440,9 @@ def caps_for(d: Dict[str, Any]) -> Tuple[Dict[str, Optional[bool]], Optional[str
             caps[k] = pc
         note = None if pc is True else (NOTE_BLOCKED if pc is False else NOTE_UNKNOWN)
     elif kind == "creality":
-        caps.update(pause=True, resume=True, stop=True)
-        # the WS lightSw set is not live-verified: unknown until enabled after a live check
-        caps["light"] = True if pid in _light_enabled() else None
+        # WS :9999 "set": no signature, no capability probe; eject and the CFS are not wired yet
+        caps.update(pause=True, resume=True, stop=True, cooldown=True, tune=True)
+        caps["light"] = pid not in _light_disabled()
     elif kind == "klipper":
         ready = d.get("ctl_ready") if online else None       # True / False / None (no host state yet)
         caps.update(pause=ready, resume=ready, stop=ready)
@@ -1269,8 +1473,6 @@ def _cap_refusal(printer_id: str, kind: Optional[str], action: str) -> Optional[
     if caps.get(cap) is True:
         return None
     if cap == "light":
-        if kind == "creality" and caps.get("light") is None:
-            return MSG_LIGHT_UNVERIFIED                      # not in printer_light_enabled
         if caps.get("light") is False:
             # a Klipper that is not ready says so; otherwise there is no light pin
             return (note[:1].upper() + note[1:]) if note else MSG_NO_LIGHT
@@ -1292,25 +1494,49 @@ def live_status(printer_id: str, prn: Optional[Dict[str, Any]] = None) -> Option
     if kind == "bambu":
         view = _live_view(printer_id, prn)
         return view.status if view is not None else None
+    live = _ws_live(printer_id, prn)
+    return live[0] if live is not None else None
+
+
+def _ws_live(printer_id: str, prn: Dict[str, Any]) -> Optional[Tuple[PrinterStatus, Dict[str, Any]]]:
+    """(fresh normalized status, the client's raw snapshot) of a Creality /
+    Klipper printer, or None (offline / no client): one get_data() for both."""
+    kind = prn.get("kind")
     collector = _store.get_collector(printer_id) if _store is not None else None
     get_data = getattr(getattr(collector, "client", None), "get_data", None)
     if not callable(get_data) or kind not in ("creality", "klipper"):
         return None
     stored = _store.get_one(printer_id) if hasattr(_store, "get_one") else None
     try:
-        st = normalize_ws_dict(printer_id, prn.get("label") or printer_id, PrinterKind(kind),
-                               get_data() or {},
+        data = get_data() or {}
+        st = normalize_ws_dict(printer_id, prn.get("label") or printer_id, PrinterKind(kind), dict(data),
                                device_type=(stored.device_type if stored is not None else None) or prn.get("model"))
     except Exception:
         logger.error("[commands] %s live status failed", printer_id, exc_info=True)
         return None
-    return st if st.online else None
+    return (st, data) if st.online else None
 
 
-def _state_check(printer_id: str, prn: Dict[str, Any], action: str) -> Optional[str]:
+def _state_check(printer_id: str, prn: Dict[str, Any], action: str,
+                 live: Optional[Tuple[PrinterStatus, Dict[str, Any]]] = None) -> Optional[str]:
     """Why the printer's live state forbids `action`, or None. Cooldown / eject
-    (Bambu only) fail closed on the raw gcode_state; print control is left to
-    the printer when there is no live state."""
+    (Bambu) fail closed on the raw gcode_state; Creality's set commands on its
+    live status (`live`, _ws_live; cooldown and speed by state_refusal); print
+    control is left to the printer when there is no live state."""
+    if prn.get("kind") == "creality" and action in CREALITY_SET_ACTIONS:
+        if live is None:
+            return MSG_NO_TELEMETRY
+        if action not in ("cooldown", "speed"):
+            return None
+        state, data = live[0].state.value, live[1]
+        # A pause the firmware does not report itself is the normalizer's runout
+        # demotion (any non-zero materialStatus); only 1 is the documented runout,
+        # so with another value the print may still run: no cooldown (fail closed).
+        firmware_paused = map_state(data.get("state")) == PrinterState.PAUSED
+        if action == "cooldown" and state == "paused" and not firmware_paused \
+                and as_int(data.get("material_status")) != 1:
+            return STATE_MSG["cooldown"]
+        return state_refusal(action, state)
     if action in ("cooldown", "eject"):
         view = _live_view(printer_id, prn)
         if view is None:
@@ -1366,13 +1592,22 @@ def send(printer_id: str, action: str, params: Optional[Dict[str, Any]] = None) 
         return _refused(refusal)
     if kind == "bambu" and (action in AMS_ACTIONS or action in DRY_ACTIONS):
         return _send_ams(printer_id, prn, action, params)
-    payload = None
+    payload = frames = live = None
     if kind == "bambu" and action not in LIGHT_ACTIONS:
         try:
             payload = _build_payload(action, params, model)     # parameter errors first, no I/O
         except ValueError as e:
             return _refused(str(e))
-    refusal = _state_check(printer_id, prn, action)
+    if kind == "creality" and action in CREALITY_SET_ACTIONS:
+        # the client's live snapshot decides the fans, the heater ceilings and the state (fail closed)
+        live = _ws_live(printer_id, prn)
+        if live is None:
+            return _refused(MSG_NO_TELEMETRY)
+        try:
+            frames = _build_creality(action, params, live[0].device_type or prn.get("model"), live[1])
+        except ValueError as e:
+            return _refused(str(e))
+    refusal = _state_check(printer_id, prn, action, live)
     if refusal:
         return _refused(refusal)
     mark = None
@@ -1383,7 +1618,7 @@ def send(printer_id: str, action: str, params: Optional[Dict[str, Any]] = None) 
     r: Dict[str, Any] = {}
     try:
         if kind == "creality":
-            r = _send_creality(printer_id, action)
+            r = _send_creality(printer_id, action, frames)
         elif kind == "klipper":
             r = _send_klipper(printer_id, action)
         elif action in LIGHT_ACTIONS:
@@ -1434,12 +1669,16 @@ def _probe_cycle(store) -> None:
     print.fun (P1 series), or whose fun a real reply contradicted. A printer
     with any AMS drying is skipped, judged on its live telemetry (a drying
     started on the printer's screen a moment ago is not in the stored status
-    yet): the probe's stop must never cut a real drying short."""
+    yet): the probe's stop must never cut a real drying short. A printer in
+    maintenance mode is skipped too (its AMS may be off for repair): its
+    verdict stays the last known one until the first pass after the mode."""
     from app.services import printer_registry
 
     for st in store.get_all():
         d = st.to_dict()
         if d.get("kind") != "bambu" or not d.get("online") or _dry_quiet(d["id"]):
+            continue
+        if printer_registry.in_maintenance(d["id"]):
             continue
         view = _live_view(d["id"], printer_registry.get_printer(d["id"]) or {})
         if view is None or _drying_now(view):

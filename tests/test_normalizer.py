@@ -33,6 +33,9 @@ from app.services.utils import map_state, as_float, as_int, safe_job_name
     ("standby", PrinterState.IDLE),
     ("error", PrinterState.ERROR),
     ("failed", PrinterState.ERROR),
+    ("cancelled", PrinterState.CANCELLED),   # Klipper print_stats.state after a cancel
+    ("canceled", PrinterState.CANCELLED),
+    ("CANCELLED", PrinterState.CANCELLED),
     ("offline", PrinterState.OFFLINE),
     ("disconnected", PrinterState.OFFLINE),
     ("   Running  ", PrinterState.PRINTING),  # whitespace + case
@@ -153,7 +156,7 @@ def test_bambu_hms_errors_surface_as_last_error():
 
     # An errored printer must report WHAT is wrong, not just go red. The vendored
     # lib keeps the code in "<i>-Code" and only the (Russian) text in "<i>-Error".
-    result = _bambu_result(gcode_state="failed", print_error=50348044)
+    result = _bambu_result(gcode_state="failed", print_error=0x03004000)   # 0300_400C is a cancel now
     result.hms = SimpleNamespace(
         error_count=2,
         errors={
@@ -173,7 +176,7 @@ def test_bambu_hms_errors_surface_as_last_error():
         "HMS_0300_0100_0001_0007: Неисправность датчика температуры сопла [fatal]",
         "HMS_0C00_0100_0002_0001: Температура стола вне нормы [serious]",
         # print_error with its text from Bambu's (Russian) tables
-        "Ошибка печати 0300_400C: " + get_print_error_text("0300400C", "", "ru"),
+        "Ошибка печати 0300_4000: " + get_print_error_text("03004000", "", "ru"),
     ]
 
 
@@ -584,6 +587,21 @@ def test_ws_creality_runout_at_full_progress_still_finished():
     assert s.state == PrinterState.FINISHED
 
 
+def test_ws_creality_fans_in_the_bambu_keys():
+    # the card's fan chip / popover read p.fans: the case fan is the chamber's,
+    # the part fan stays fan_speed_pct (modelFanPct); in every state, not in debug
+    data = {"state": "idle", "fan_speed_pct": 40, "case_fan_pct": 30, "aux_fan_pct": 0}
+    s = normalize_ws_dict("creality-3", "K1C", PrinterKind.CREALITY, data)
+    assert (s.fan_speed_pct, s.fans) == (40, {"aux": 0, "chamber": 30})
+    s = normalize_ws_dict("creality-4", "E5", PrinterKind.CREALITY, {"state": "idle", "fan_speed_pct": 0,
+                                                                      "case_fan_pct": 0})
+    assert s.fans == {"aux": None, "chamber": 0}                   # a fan it does not report stays None
+    s = normalize_ws_dict("creality-4", "E5", PrinterKind.CREALITY, {"state": "idle", "fan_speed_pct": 0})
+    assert s.fans is None
+    s = normalize_ws_dict("klipper-1", "Varan", PrinterKind.KLIPPER, dict(data, state="standby"))
+    assert s.fans is None                                          # Creality's keys only
+
+
 def test_ws_klipper_ignores_material_status():
     # material_status is a Creality-only field; Klipper printers must not
     # be demoted by a stray key.
@@ -899,6 +917,19 @@ def test_filament_change_none_without_raw_report():
     # SimpleNamespace devices (no RawReport) degrade to None.
     s = normalize_bambu("bambu-1", "P1", _bambu_result(gcode_state="IDLE"))
     assert s.filament_change is None
+
+
+def test_job_seq_and_start_pass_through(make_collector):
+    # RawReport's job start counter (spec_job_journal §5.2): two numbers, Bambu only.
+    _d, s = _normalized(make_collector, {"gcode_state": "RUNNING", "mc_percent": 10})
+    assert (s.job_seq, s.job_started_at) == (0, None)   # already running when we connected
+    _d, s = _normalized(make_collector, {"gcode_state": "FINISH"}, {"gcode_state": "PREPARE"})
+    assert s.job_seq == 1 and isinstance(s.job_started_at, float)
+    assert (s.to_dict()["job_seq"], s.to_dict()["job_started_at"]) == (1, s.job_started_at)
+    plain = normalize_bambu("bambu-1", "P1", _bambu_result(gcode_state="RUNNING"))   # no RawReport
+    assert (plain.job_seq, plain.job_started_at) == (None, None)
+    ws = normalize_ws_dict("k1", "K1", PrinterKind.CREALITY, {"state": 1, "progress": 10})
+    assert (ws.job_seq, ws.job_started_at) == (None, None)
 
 
 # --- AMS load / unload inputs: slot nozzle range, firmware gate, extruder ------
@@ -1271,3 +1302,208 @@ def test_chamber_sensor_fallback_without_any_model():
     # the live device's own model wins over the registry's
     result.info = SimpleNamespace(device_type="P1S")
     assert normalize_bambu("b-1", "B", result, device_type="X1C").chamber_temp is None
+
+
+# --- CANCELLED: a user cancel is not an error ---------------------------------
+
+_CANCEL = 0x0300400C        # 50348044, the print_error echo of a cancel
+
+
+def test_bambu_failed_with_the_cancel_code_is_cancelled(make_collector):
+    _, s = _normalized(make_collector, {"gcode_state": "RUNNING"}, {"gcode_state": "FAILED", "print_error": _CANCEL})
+    assert s.state == PrinterState.CANCELLED and s.online is True
+    assert s.last_error.startswith("Ошибка печати 0300_400C")      # last_error is unchanged
+    _, s = _normalized(make_collector, {"gcode_state": "RUNNING"}, {"gcode_state": "FAILED", "print_error": 0x0500400E})
+    assert s.state == PrinterState.CANCELLED
+
+
+@pytest.mark.parametrize("print_error", [0x03004000, 0x12008001, 0])
+def test_bambu_failed_without_the_cancel_code_stays_error(make_collector, print_error):
+    _, s = _normalized(make_collector, {"gcode_state": "RUNNING"}, {"gcode_state": "FAILED", "print_error": print_error})
+    assert s.state == PrinterState.ERROR
+
+
+def test_bambu_cancel_latch_outlives_the_code(make_collector):
+    # The printer zeroes print_error a few seconds after the cancel; the card stays grey.
+    device, s = _normalized(make_collector, {"gcode_state": "RUNNING", "print_error": 0},
+                            {"print_error": _CANCEL}, {"gcode_state": "FAILED"}, {"print_error": 0})
+    assert device.print_job.print_error == 0
+    assert s.state == PrinterState.CANCELLED
+    # the next job ends it: PREPARE prints, and a later real failure is an error
+    for msg in ({"gcode_state": "PREPARE"}, {"gcode_state": "RUNNING"}):
+        device.print_update(data=msg)
+    assert normalize_bambu("t-1", "t", device, device_type="P2S").state == PrinterState.PRINTING
+    device.print_update(data={"gcode_state": "FAILED", "print_error": 0x03004000})
+    assert normalize_bambu("t-1", "t", device, device_type="P2S").state == PrinterState.ERROR
+
+
+def test_bambu_real_error_after_the_cancel_wins_over_the_latch(make_collector):
+    # the cancel latched (RUNNING report), then FAILED with a real fatal error: red, not grey
+    device, s = _normalized(make_collector, {"gcode_state": "RUNNING", "print_error": _CANCEL},
+                            {"gcode_state": "FAILED", "print_error": 0x03004000})
+    assert device.print_job.print_error == 0x03004000
+    assert s.state == PrinterState.ERROR
+    assert "pe:0300_4000" in [n["key"] for n in s.notifications]
+    # the error goes, the latch stays: grey again
+    device.print_update(data={"print_error": 0})
+    assert normalize_bambu("t-1", "t", device, device_type="P2S").state == PrinterState.CANCELLED
+
+
+def test_bambu_cancel_without_a_raw_report():
+    # SimpleNamespace devices (no RawReport): only the code itself is known.
+    assert normalize_bambu("b", "B", _bambu_result(gcode_state="FAILED", print_error=_CANCEL)).state \
+        == PrinterState.CANCELLED
+    assert normalize_bambu("b", "B", _bambu_result(gcode_state="FAILED", print_error=0)).state == PrinterState.ERROR
+    # the code outside FAILED changes nothing
+    assert normalize_bambu("b", "B", _bambu_result(gcode_state="RUNNING", print_error=_CANCEL)).state \
+        == PrinterState.PRINTING
+
+
+def test_ws_klipper_cancelled_job_is_not_promoted_to_printing():
+    # print_stats.state "cancelled" mid-job used to be UNKNOWN and the activity check made it PRINTING.
+    s = normalize_ws_dict("k", "K", PrinterKind.KLIPPER,
+                          {"state": "cancelled", "progress": 47, "remaining_time": 1200, "current_layer": 30,
+                           "total_layers": 80})
+    assert s.state == PrinterState.CANCELLED and s.online is True
+    s = normalize_ws_dict("k", "K", PrinterKind.KLIPPER, {"state": "cancelled", "progress": 100, "remaining_time": 0})
+    assert s.state == PrinterState.CANCELLED     # not FINISHED either
+
+
+# --- Klipper and Creality notifications (notifications spec step 6) ----------------
+
+def _down(host_state, **extra):
+    data = {"state": "printing", "progress": 47, "remaining_time": 1200, "current_layer": 212,
+            "total_layers": 451, "host_state": host_state, "host_message": "mcu 'mcu': Unable to connect",
+            "debug": {"webhooks_state": host_state}}
+    data.update(extra)
+    return data
+
+
+@pytest.mark.parametrize("host_state,key", [("shutdown", "klipper:shutdown"), ("error", "klipper:error"),
+                                            ("disconnected", "klipper:disconnected")])
+def test_ws_klipper_with_klippy_down_is_online_error_with_the_reason(host_state, key):
+    s = normalize_ws_dict("klipper-1", "Varan", PrinterKind.KLIPPER, _down(host_state))
+    assert (s.online, s.state, s.ctl_ready) == (True, PrinterState.ERROR, False)
+    assert [n["key"] for n in s.notifications] == [key]
+    assert s.last_error == s.notifications[0]["text"]
+    assert s.progress_pct == 47                                  # the job's last known progress stays
+    assert s.to_dict()["notifications"] == s.notifications
+
+
+def test_ws_klipper_shutdown_from_the_webhooks_field_alone():
+    # host_state missing (an older snapshot): debug.webhooks_state is the fallback, as for ctl_ready
+    s = normalize_ws_dict("klipper-1", "Ghost 6", PrinterKind.KLIPPER,
+                          {"state": "standby", "debug": {"webhooks_state": "shutdown"}})
+    assert (s.state, s.ctl_ready, s.last_error) == (PrinterState.ERROR, False, "Klipper остановлен (shutdown)")
+
+
+def test_ws_klipper_ready_and_startup_are_not_errors():
+    s = normalize_ws_dict("klipper-1", "Ghost 6", PrinterKind.KLIPPER, _down("ready", host_message=None))
+    assert (s.state, s.ctl_ready, s.notifications, s.last_error) == (PrinterState.PRINTING, True, [], None)
+    s = normalize_ws_dict("klipper-1", "Ghost 6", PrinterKind.KLIPPER,
+                          {"state": "standby", "host_state": "startup", "host_message": "Printer is not ready"})
+    # starting: print_stats is the one from before klippy went down, the state is unknown
+    assert (s.state, s.ctl_ready, s.last_error) == (PrinterState.UNKNOWN, False, None)
+    assert [(n["key"], n["severity"]) for n in s.notifications] == [("klipper:startup", "info")]
+
+
+def test_ws_klipper_startup_with_stale_statuses_is_not_printing():
+    # klippy shut down mid-print (MCU lost, the last print_stats said printing), then
+    # «Перезапуск прошивки»: it hangs in startup while the statuses are 2 min old.
+    import klipper_client
+    from klipper_client import KlipperClient
+
+    k = KlipperClient("host", 7125, "Varan")
+    k.parse_status({"print_stats": {"state": "printing"}, "display_status": {"progress": 0.47},
+                    "webhooks": {"state": "ready"}})
+    k.last_message_ts = klipper_client.time.time() - 120
+    k._set_host("startup")                                   # the watchdog's server.info answer
+    data = k.get_data()
+    assert data and data["host_state"] == "startup"           # still served: the host answers
+    s = normalize_ws_dict("klipper-1", "Varan", PrinterKind.KLIPPER, data)
+    assert (s.online, s.state, s.ctl_ready) == (True, PrinterState.UNKNOWN, False)
+    assert [n["key"] for n in s.notifications] == ["klipper:startup"]
+    # finished-looking stale numbers are not FINISHED either
+    s = normalize_ws_dict("klipper-1", "Varan", PrinterKind.KLIPPER,
+                          dict(_down("startup"), progress=100, remaining_time=0))
+    assert s.state == PrinterState.UNKNOWN
+
+
+def test_ws_klipper_print_error():
+    s = normalize_ws_dict("klipper-1", "Ghost 6", PrinterKind.KLIPPER,
+                          {"state": "error", "host_state": "ready", "print_message": "Move out of range"})
+    assert (s.online, s.state, s.ctl_ready, s.last_error) == (True, PrinterState.ERROR, True, "Move out of range")
+    assert [n["key"] for n in s.notifications] == ["klipper:print_error"]
+
+
+def test_ws_klipper_job_name_is_never_the_error_message():
+    # print_stats.message / display_status.message used to land in data["message"], a
+    # safe_job_name fallback: an error text became the job's name.
+    from klipper_client import KlipperClient
+
+    k = KlipperClient("host", 7125, "Ghost 6")
+    k.parse_status({"print_stats": {"state": "error", "filename": "", "message": "Move out of range"},
+                    "display_status": {"message": "Hello"}, "webhooks": {"state": "ready"}})
+    s = normalize_ws_dict("klipper-1", "Ghost 6", PrinterKind.KLIPPER, k.get_data())
+    assert s.job_name is None
+    assert s.last_error == "Move out of range"
+    k.parse_status({"print_stats": {"filename": "part.gcode"}})
+    assert normalize_ws_dict("klipper-1", "Ghost 6", PrinterKind.KLIPPER, k.get_data()).job_name == "part.gcode"
+
+
+@pytest.mark.parametrize("data,state,severity", [
+    ({"state": "printing", "progress": 40, "remaining_time": 600}, PrinterState.PRINTING, "serious"),
+    ({"state": "paused", "progress": 40, "remaining_time": 600}, PrinterState.PAUSED, "pause"),
+    ({"state": "idle"}, PrinterState.ERROR, "fatal"),
+    ({"state": "finish", "progress": 100, "remaining_time": 0}, PrinterState.ERROR, "fatal"),
+    ({"state": "unknown"}, PrinterState.ERROR, "fatal"),
+    ({"state": "cancelled"}, PrinterState.ERROR, "fatal"),       # K1C state 4 (stopped) with an error
+])
+def test_ws_creality_error_code(data, state, severity):
+    s = normalize_ws_dict("creality-1", "K1", PrinterKind.CREALITY, dict(data, err_code=2, err_key=5))
+    assert (s.online, s.state) == (True, state)
+    assert [(n["key"], n["severity"]) for n in s.notifications] == [("creality:2/5", severity)]
+    assert s.last_error == "Ошибка Creality 2/5"
+    clean = normalize_ws_dict("creality-1", "K1", PrinterKind.CREALITY, dict(data, err_code=0, err_key=0))
+    assert (clean.notifications, clean.last_error) == ([], None)
+    assert clean.state != PrinterState.ERROR
+
+
+def test_ws_creality_stopped_after_a_cancel_is_cancelled():
+    # creality_client maps the K1C's state 4 to "cancelled": no promotion to printing,
+    # not FINISHED, no runout demotion; the hot nozzle after the cancel changes nothing
+    s = normalize_ws_dict("creality-1", "K1", PrinterKind.CREALITY,
+                          {"state": "cancelled", "progress": 0, "remaining_time": 0, "print_time": 0,
+                           "nozzle_temp": 122, "bed_temp": 48, "target_nozzle_temp": 0, "target_bed_temp": 0,
+                           "material_status": 0, "err_code": 0, "err_key": 0})
+    assert (s.state, s.stage, s.notifications, s.last_error) == (PrinterState.CANCELLED, None, [], None)
+    # a stale progress does not resurrect the job either
+    s = normalize_ws_dict("creality-1", "K1", PrinterKind.CREALITY,
+                          {"state": "cancelled", "progress": 37, "remaining_time": 900, "current_layer": 12,
+                           "total_layers": 80, "material_status": 1})
+    assert s.state == PrinterState.CANCELLED
+
+
+def test_ws_creality_runout_pause_with_an_error_code():
+    s = normalize_ws_dict("creality-1", "K1", PrinterKind.CREALITY,
+                          {"state": "printing", "progress": 40, "remaining_time": 600, "material_status": 1,
+                           "err_code": 2, "err_key": 5})
+    assert (s.state, s.stage) == (PrinterState.PAUSED, "paused_filament_runout")
+    assert s.notifications[0]["severity"] == "pause"
+
+
+def test_ws_mks_has_no_notifications():
+    s = normalize_ws_dict("mks-1", "Reborn 2", PrinterKind.MKS,
+                          {"state": "printing", "err_code": 2, "host_state": "shutdown"})
+    assert (s.state, s.notifications, s.last_error) == (PrinterState.PRINTING, [], None)
+
+
+def test_ws_a_failing_build_costs_the_records_not_the_status(monkeypatch):
+    from app.services import normalizer, notifications
+
+    def boom(*a, **k):
+        raise RuntimeError("synthetic")
+    monkeypatch.setattr(notifications, "build_klipper", boom)
+    monkeypatch.setattr(normalizer, "_notif_failed", set())
+    s = normalize_ws_dict("klipper-1", "Varan", PrinterKind.KLIPPER, _down("shutdown"))
+    assert (s.online, s.state, s.notifications, s.last_error) == (True, PrinterState.ERROR, [], None)

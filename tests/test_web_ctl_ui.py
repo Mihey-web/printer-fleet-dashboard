@@ -1,8 +1,9 @@
 """Card controls, ⋯ menu, command results and adaptive chip rows of app/web/app.js, run in node.
 
 The block between /* ctl-ui:begin */ and /* ctl-ui:end */ holds only pure code;
-it may use safeText, icon, amsUnitName, amsFmtMin (function declarations
-elsewhere in app.js) and the ams-ui block, which are extracted alongside it.
+it may use safeText, icon, amsUnitName, amsFmtMin, isOffline (with hasTelemetry)
+(function declarations elsewhere in app.js) and the ams-ui block, which are
+extracted alongside it.
 Skipped without node.
 """
 import itertools
@@ -45,7 +46,7 @@ def _node(src: str):
 
 
 def _lib() -> str:
-    src = "\n".join(_function(n) for n in ("safeText", "icon", "amsUnitName", "amsFmtMin"))
+    src = "\n".join(_function(n) for n in ("safeText", "icon", "amsUnitName", "amsFmtMin", "hasTelemetry", "isOffline"))
     return src + "\n" + _block("ams-ui") + "\n" + _block("ctl-ui")
 
 
@@ -104,16 +105,18 @@ def test_no_row_for_viewers_or_offline_cards():
     assert row(_p(), opts={"admin": True, "offline": True, "now": 0}) == ""
 
 
-def test_bambu_printing_has_seven_buttons():
+def test_bambu_printing_has_five_buttons():
+    # IA §5 (plan step 5, deliberately changed from seven): 💡 ⏸/▶ ■ ❄ ⤓ — no 🧵 (the AMS chip opens
+    # the AMS popover) and no ⋯ (the card's one ⋯ is in its head, test_one_more_in_the_head_of_every_card)
     html = row(_p())
     b = buttons(html)
-    assert [x[0] for x in b] == ["light", "pp", "stop", "cool", "eject", "ams", "more"]
-    assert [x[1] for x in b] == ["light", "pause", "stop", "cool", "eject", "ams", "more"]
-    assert [x[4] for x in b] == [False, False, False, True, True, False, False]
+    assert [x[0] for x in b] == ["light", "pp", "stop", "cool", "eject"]
+    assert [x[1] for x in b] == ["light", "pause", "stop", "cool", "eject"]
+    assert [x[4] for x in b] == [False, False, False, True, True]
     assert b[3][3] == MSG["cooldown"] and b[4][3] == MSG["eject"]
     assert b[0][2] == ["lit"] and b[0][3] == "Свет горит — выключить"
     assert b[1][3] == "Пауза" and b[2][2] == ["danger"] and b[2][3] == "Остановить печать"
-    assert b[5][3] == "AMS: слоты, загрузка, выгрузка, сушка" and b[6][3] == "Ещё: остудить, стол, скорость"
+    assert 'data-cmd="ams"' not in html and 'data-cmd="more"' not in html
     assert html.startswith('<div class="pc-controls" role="toolbar" aria-label="Управление принтером">')
     assert not re.search(r"\sdisabled[\s>=]", html)          # aria-disabled only: tips and taps still work
 
@@ -148,13 +151,32 @@ def test_eject_guard_disables_the_button_until_it_lapses():
     assert buttons(row(_p(state="idle"), ui, dict(ADMIN, now=1600)))[4][4] is False
 
 
-def test_ams_button_without_an_ams():
-    b = buttons(row(_p(state="idle", ams=None, filament_loaded=False)))[5]
-    assert (b[4], b[3]) == (True, "AMS не подключена")
-    b = buttons(row(_p(state="idle", ams=None, filament_loaded=True)))[5]           # external spool loaded
-    assert (b[4], b[3]) == (False, "Внешняя катушка: выгрузка")
-    b = buttons(row(_p(state="printing", ams=None, filament_loaded=True)))[5]       # the real reason
-    assert (b[4], b[3]) == (True, "Только в простое — принтер печатает или на паузе")
+EXT_CHIP = ('<span class="pc-chip pc-ext pc-editable" data-edit="ext" data-tip="Внешняя катушка: выгрузка">'
+            '<svg class="pc-ic" aria-hidden="true"><use href="#i-spool"></use></svg>внешняя катушка</span>')
+
+
+def test_external_spool_chip_without_an_ams():
+    # The row's 🧵 (gone, IA §5) was also the only way to unload an external spool: on a printer without
+    # an AMS its chip takes the AMS chip's place (an admin's live card) and opens the same popover, which
+    # says why it cannot unload now (test_external_spool_popover)
+    for st in ("idle", "printing"):
+        p = _p(state=st, ams=None, filament_loaded=True)
+        assert 'data-cmd="ams"' not in row(p)
+        chip = run("extSpoolChip(%s, true)" % json.dumps(p))
+        # the tip says why it cannot unload now, as the 🧵 did
+        assert chip == EXT_CHIP if st == "idle" else chip == EXT_CHIP.replace(
+            "Внешняя катушка: выгрузка", "Внешняя катушка: Только в простое — принтер печатает или на паузе")
+    assert run("extSpoolChip(%s, false)" % json.dumps(_p(ams=None, filament_loaded=True))) == ""   # a viewer, offline, grace
+    assert run("extSpoolChip(%s, true)" % json.dumps(_p(ams=None, filament_loaded=False))) == ""   # nothing to unload
+    assert run("extSpoolChip(%s, true)" % json.dumps(_p(ams=None, filament_loaded=None))) == ""
+    assert run("extSpoolChip(%s, true)" % json.dumps(_p())) == ""                                  # an AMS: its own chip
+    card = _decl("renderPrinterCard")
+    assert "var canAms = isAdmin() && !offlineFlag && caps.ams === true && !p.grace_period_active;" in card
+    assert "var sub = amsChip(p, canAms, true) || extSpoolChip(p, canAms);" in card
+    assert "${sub ? '<div class=\"pc-subrow\">' + sub + '</div>' : \"\"}" in card      # no empty row
+    assert "printer-meta" not in card and "printer-meta" not in CSS        # «BAMBU · X1C»: the model is in the head
+    ctl = JS[JS.index("(function initPrinterControls() {"):JS.index("// --- Printer notifications")]
+    assert 'kind === "ext" ? extSpoolPopHtml(pa) : chip.dataset.edit ? amsPopHtml(pa) : amsViewPopHtml(pa)' in ctl
 
 
 def test_print_control_locked_keeps_the_light():
@@ -172,6 +194,7 @@ def test_print_control_locked_keeps_the_light():
 
 def test_creality_and_klipper_rows():
     creality = dict(NO_CAPS, pause=True, resume=True, stop=True, light=None)
+    # the card's ⋯ is in its head now, on every card (IA §5) — not at the end of the row
     assert [x[0] for x in buttons(row(_p(kind="creality", caps=creality, ams=None)))] == ["pp", "stop"]
     listed = dict(creality, light=True)
     assert [x[0] for x in buttons(row(_p(kind="creality", caps=listed, ams=None)))] == ["light", "pp", "stop"]
@@ -183,15 +206,17 @@ def test_creality_and_klipper_rows():
 
 def test_grace_disables_every_button():
     b = buttons(row(_p(grace_period_active=True)))
-    assert len(b) == 7 and all(x[4] and x[3] == GRACE for x in b)
+    assert len(b) == 5 and all(x[4] and x[3] == GRACE for x in b)
 
 
 def test_busy_result_and_open_popover_classes():
     b = buttons(row(_p(), {"busy": "pp", "res": {"slot": "light", "k": "ok"}, "pop": "menu"}))
-    assert "is-wait" in b[1][2] and "is-ok" in b[0][2] and "open" in b[6][2]
-    assert "open" not in b[5][2]
+    assert "is-wait" in b[1][2] and "is-ok" in b[0][2] and not any("open" in x[2] for x in b)
     b = buttons(row(_p(), {"res": {"slot": "stop", "k": "bad"}, "pop": "ams"}))
-    assert "is-bad" in b[2][2] and "open" in b[5][2]
+    assert "is-bad" in b[2][2] and not any("open" in x[2] for x in b)
+    # an open ⋯ menu marks the head's ⋯, the only one
+    assert buttons(run("headMoreHtml(%s, {pop: 'menu'}, {admin: true})" % json.dumps(_p())))[0][2] == ["pc-ctl-head", "open"]
+    assert buttons(run("headMoreHtml(%s, {pop: 'ams'}, {admin: true})" % json.dumps(_p())))[0][2] == ["pc-ctl-head"]
 
 
 def test_inline_confirm_replaces_the_row():
@@ -246,6 +271,15 @@ def test_cmd_line_html():
         assert '<span class="lead">%s</span>' % lead in html and 'data-cmd="dismiss"' not in html
 
 
+def test_cmd_line_html_takes_another_dismiss_attribute():
+    # the notification lists and the card's notification line close their answers themselves
+    bad = run("cmdLineHtml({k: 'bad', t: 'Отказ'}, 'data-nf-dismiss=\"b1|pe:0500_8062\"')")
+    assert bad.endswith('<button type="button" class="x" data-nf-dismiss="b1|pe:0500_8062" aria-label="Закрыть">×</button></div>')
+    assert "data-cmd" not in bad
+    assert 'data-cmd="dismiss"' in run("cmdLineHtml({k: 'bad', t: 'x'}, '')")      # empty: the default
+    assert "data-nf" not in run("cmdLineHtml({k: 'ok', t: 'x'}, 'data-nf-dismiss=\"a\"')")   # only a failure closes
+
+
 # --- the ⋯ menu and the external spool popover ---------------------------------------
 
 def menu(p, ui=None, now=1000):
@@ -255,38 +289,51 @@ def menu(p, ui=None, now=1000):
 _ITEM = re.compile(r'<button type="button" class="pm-item" data-menu="([^"]*)"( aria-disabled="true")?>')
 
 
-def test_menu_while_printing():
-    html = menu(_p())
-    assert _ITEM.findall(html) == [("cooldown", " aria-disabled=\"true\""), ("eject", " aria-disabled=\"true\""),
-                                   ("speed-toggle", "")]
-    assert "Остудить и опустить стол можно, когда печать не идёт." in html
-    assert "(сопло и стол)" in html and "(снять деталь)" in html
-    assert '<span class="val">Стандарт · 100%</span>' in html
-    assert "pm-speed" not in html and '<div class="pm-sep"></div>' in html
+def test_menu_repeats_nothing_from_the_card():
+    # owner, 19.10: cooldown, eject and the speed are the row's ❄ / ⤓ buttons and the
+    # speed chip — the ⋯ menu only repeated them. IA §5 (plan step 5): it holds an admin's
+    # maintenance section and the links; a viewer gets the links
+    for p in (_p(), _p(state="paused", chamber_ctl=True, feedrate_pct=124), _p(state="idle"),
+              _p(caps=dict(NO_CAPS, tune=True, pause=True))):
+        viewer = menu(p)
+        assert [m for m, _d in _ITEM.findall(viewer)] == ["jobs", "chrono"] and "pm-sep" not in viewer
+        html = run("ctlMenuHtml(%s, null, 1000, {admin: true})" % json.dumps(p))
+        assert [m for m, _d in _ITEM.findall(html)] == ["maint-open", "jobs", "chrono", "params"]
+        assert html.count("pm-sep") == 1
+        for gone in ("Остудить", "Опустить стол", "Скорость", "data-speed"):
+            assert gone not in html and gone not in viewer, gone
 
 
-def test_menu_reasons_and_speed():
-    html = menu(_p(state="paused", chamber_ctl=True, feedrate_pct=124), {"speedOpen": True})
-    assert _ITEM.findall(html) == [("cooldown", ""), ("eject", ' aria-disabled="true"'), ("speed-toggle", "")]
-    assert "Стол опускается только после остановки печати." in html and "(сопло, стол, камера)" in html
-    presets = re.findall(r'<button type="button" class="pc-pop-preset( on)?" data-speed="(\d)">([^<]*)</button>', html)
-    assert presets == [("", "1", "Тихий · 50%"), ("", "2", "Стандарт · 100%"), (" on", "3", "Спорт · 124%"),
-                       ("", "4", "Безумный · 166%")]
-    html = menu(_p(state="idle", feedrate_pct=90), {"speedOpen": True})
-    assert _ITEM.findall(html) == [("cooldown", ""), ("eject", ""), ("speed-toggle", ' aria-disabled="true"')]
-    assert "pop-why" not in html and "pm-speed" not in html and '<span class="val">90%</span>' in html
-    assert '<span class="val">—</span>' in menu(_p(state="idle", feedrate_pct=None))
-    html = menu(_p(state="idle"), {"ejectUntil": 5000}, now=1000)
-    assert ("eject", ' aria-disabled="true"') in _ITEM.findall(html) and EJECT_WAIT in html
-    html = menu(_p(state="idle", filament_change={"action": "unload", "step": "cut"}))
-    assert "Идёт смена филамента — дождитесь окончания" in html
-
-
-def test_menu_items_follow_the_caps():
-    html = menu(_p(caps=dict(NO_CAPS, tune=True, pause=True)))
-    assert [m for m, _d in _ITEM.findall(html)] == ["speed-toggle"]
-    html = menu(_p(caps=dict(NO_CAPS, cooldown=True, eject=True, pause=True), state="idle"))
-    assert [m for m, _d in _ITEM.findall(html)] == ["cooldown", "eject"] and "pm-sep" not in html
+def test_menu_links():
+    # IA §5: «Печати / Хронология принтера ›» (both roles), «Параметры принтера ›» (admins)
+    def ic(name):
+        return '<svg class="pc-ic" aria-hidden="true"><use href="#i-%s"></use></svg>' % name
+    html = run("ctlMenuHtml(%s, null, 1000, {admin: true})" % json.dumps(_p()))
+    assert html.endswith('<div class="pm-sep"></div>'
+                         '<button type="button" class="pm-item" data-menu="jobs">%s<span class="lbl">Печати принтера ›</span></button>'
+                         '<button type="button" class="pm-item" data-menu="chrono">%s<span class="lbl">Хронология принтера ›</span></button>'
+                         '<button type="button" class="pm-item" data-menu="params">%s<span class="lbl">Параметры принтера ›'
+                         '<span class="sub">Админ → Парк, откроется форма</span></span></button>' % (ic("file"), ic("clock"), ic("tool")))
+    sprite = set(re.findall(r'<symbol id="i-([\w-]+)"', HTML))
+    assert {"file", "clock", "tool", "dots"} <= sprite
+    # the links: the printer's stable id (IA §10) in the one head of «История», the period kept (plan
+    # step 8, deliberately changed): #/history/jobs?printer=<id> or #/history/chrono?printer=<id>
+    click = _decl("onMenuClick")
+    assert 'if (what === "jobs" || what === "chrono") historyOpenFor(what, p);' in click
+    assert 'else if (what === "params") adminOpenPrinter(p);' in click
+    hist = _decl("historyOpenFor")
+    for line in ("printer: String(p.id) });", "period: histFilter.period, from: histFilter.from, to: histFilter.to,",
+                 "histRenderHead();", 'setHistorySub(what === "jobs" ? "jobs" : "chrono");', 'setActiveView("history");'):
+        assert line in hist, line
+    assert hist.index("histFilter = histFilterFrom(") < hist.index("setHistorySub(") < hist.index('setActiveView("history");')
+    for gone in ("jobsPrinterLabel", "historyPrinterLabel", "timelinePrinter", "jobsFilter.printer"):
+        assert gone not in hist, gone
+    adm = _decl("adminOpenPrinter")
+    assert adm.index("if (!isAdmin()) return;") < adm.index("prnOpenAfterLoad = String(p.id);")
+    assert 'setAdminSub("park");' in adm and 'setActiveView("admin");' in adm
+    load = _decl("loadAdminPrinters")
+    assert load.index("renderAdminPrinters();") < load.index("prnOpenAfterLoad = null;") < load.index("prnOpenForm(row.id);")
+    assert "var prnOpenAfterLoad = null;" in JS
 
 
 def test_external_spool_popover():
@@ -297,11 +344,10 @@ def test_external_spool_popover():
     assert "data-ams-unload" not in html and "Только в простое" in html
 
 
-def test_state_block_and_speed_level():
+def test_state_block():
     cases = run("[ctlStateBlock('speed', {state: 'idle'}), ctlStateBlock('speed', {state: 'paused'}),"
-                " ctlStateBlock('resume', {state: 'printing'}), ctlStateBlock(null, {state: 'idle'}),"
-                " speedLevelOf(166), speedLevelOf(101), speedLevelOf(null)]")
-    assert cases == ["Скорость меняется только во время печати", None, MSG["resume"], None, 4, None, None]
+                " ctlStateBlock('resume', {state: 'printing'}), ctlStateBlock(null, {state: 'idle'})]")
+    assert cases == ["Скорость меняется только во время печати", None, MSG["resume"], None]
 
 
 # --- parity with the server ---------------------------------------------------------
@@ -377,8 +423,12 @@ def test_compact_chips_on_every_card_of_three_columns_or_more():
     # c = 3, 348 for c = 4 (1600 px window: 341), 332 for c = 5 (1920: 331). A chip is text (rem)
     # plus padding, icon and gap (px): at any text scale (50-150 %) the threshold is at least that
     # bound, and it grows with the text.
-    m = re.findall(r"@container pcard ((?:\(max-width: [\d.]+(?:rem|px)\)(?: or )?)+) \{", CSS)
-    assert len(m) == 1, m
+    # The chips' query is the one container query on .pc-chips (the notification badge has its own,
+    # 320 / 285 px, for the top row only).
+    queries = re.findall(r"@container pcard ((?:\(max-width: [\d.]+(?:rem|px)\)(?: or )?)+) \{(.*?)\n\s*\}\n", CSS, re.S)
+    m = [q for q, body in queries if ".pc-chips" in body]
+    assert len(m) == 1, queries
+    assert all(".pc-chips" not in body for q, body in queries if q != m[0])
     terms = re.findall(r"\(max-width: ([\d.]+)(rem|px)\)", m[0])
 
     def threshold(scale):
@@ -515,7 +565,8 @@ def test_chip_rows_never_leave_a_lone_chip():
 
 BAMBU_OK = dict(ALL_CAPS)
 BAMBU_BLOCKED = dict(NO_CAPS, light=True)
-CREALITY = dict(NO_CAPS, pause=True, resume=True, stop=True, light=None)
+# = printer_commands.caps_for of a Creality (27.10): light, print control, tune, cooldown
+CREALITY = dict(NO_CAPS, pause=True, resume=True, stop=True, light=True, tune=True, cooldown=True)
 KLIPPER = dict(NO_CAPS, pause=True, resume=True, stop=True, light=True)
 
 
@@ -534,7 +585,7 @@ def _farm():
         b("H2", "printing", grace_period_active=True),
         _p(id="mks-1", label="Reborn 2", kind="mks", state="offline", online=False, caps=dict(NO_CAPS),
            caps_note="управление не подключено"),
-        _p(id="c-1", label="K1", kind="creality", state="idle", caps=dict(CREALITY)),
+        _p(id="c-1", label="K1", kind="creality", state="idle", caps=dict(CREALITY, light=False)),  # printer_light_disabled
         _p(id="k-1", label="Ghost 6", kind="klipper", state="paused", caps=dict(KLIPPER), light_on=True,
            stage="paused_filament_runout"),
     ]
@@ -577,6 +628,32 @@ def test_resume_hold(stage, hold):
     assert run("resumeHold(%s)" % json.dumps({"state": "paused", "stage": stage})) == hold
 
 
+@pytest.mark.parametrize("stage", [None, "", "paused", "paused_user", "paused_filament_runout"])
+def test_resume_hold_of_a_pause_on_an_error(stage):
+    # a plain resume after a pause-error dialog pauses again (spec §8.7): never pre-checked, whatever the stage
+    p = {"state": "paused", "stage": stage, "notifications": [
+        {"key": "hms:0700_2500_0002_0001", "code": "0700_2500_0002_0001", "severity": "serious"},
+        {"key": "pe:0500_8062", "code": "0500_8062", "severity": "pause"}]}
+    assert run("[resumeHold(%s), resumeErrCode(%s)]" % (json.dumps(p), json.dumps(p))) == ["printer", "0500_8062"]
+    # a serious HMS alone is not a pause on an error
+    p["notifications"] = p["notifications"][:1]
+    assert run("resumeErrCode(%s)" % json.dumps(p)) is None
+    want = None if stage in (None, "", "paused", "paused_user") else "printer"
+    assert run("resumeHold(%s)" % json.dumps(p)) == want
+
+
+def test_resume_hold_text_of_a_pause_on_an_error():
+    from app.services import notification_actions
+    # the same words as the fleet reset's skip reason on the server
+    assert run("resumeHoldText('printer', 'Пауза', '0500_8062')") == notification_actions.RESET_PAUSE % "0500_8062"
+    farm = [p for p in _farm() if p["label"] == "P1"]
+    farm[0]["notifications"] = [{"key": "pe:0500_8062", "code": "0500_8062", "severity": "pause"}]
+    assert run("bulkSplit('resume', %s).go.map(function (x) { return [x.p.label, x.pre, x.hold]; })"
+               % json.dumps(farm)) == [["P1", False, "printer"]]
+    # the opener passes the code along (openBulkDialog)
+    assert "resumeHoldText(x.hold, stageLabel(p.stage), resumeErrCode(p))" in _decl("openBulkDialog")
+
+
 def test_resume_hold_text():
     assert run("resumeHoldText('printer', 'Пауза: закончился филамент')") == "пауза принтером: закончился филамент"
     assert run("resumeHoldText('printer', 'Пауза (пользователь)')") == "пауза принтером: (пользователь)"
@@ -597,30 +674,241 @@ def test_fleet_light_stats():
     assert run("fleetLightStats(%s)" % json.dumps(_farm())) == {"total": 9, "lit": 6, "offline": 1}
 
 
+def test_fleet_light_stats_and_bulk_split_leave_out_the_printers_in_maintenance():
+    # spec_maintenance F2 / F3: P3 (lit) and C1 (offline) in maintenance — out of «горит X из Y» and
+    # of every bulk action, with the server's reason, said before «офлайн»
+    farm = _farm()
+    for p in farm:
+        if p["label"] in ("P3", "C1"):
+            p["maintenance"] = {"since": 1000.0, "note": None, "by": "admin"}
+    assert run("fleetLightStats(%s)" % json.dumps(farm)) == {"total": 7, "lit": 5, "offline": 0}
+    for action in ("pause", "light_on", "resume"):
+        out = run("bulkSplit(%s, %s)" % (json.dumps(action), json.dumps(farm)))
+        assert "P3" not in [x["p"]["label"] for x in out["go"]]
+        why = {x["p"]["label"]: x["why"] for x in out["skip"]}
+        assert why["P3"] == why["C1"] == "на обслуживании"
+    assert run("[inMaint(%s), inMaint(%s), inMaint(null)]" % (json.dumps(farm[0]), json.dumps(farm[1]))) == [
+        True, False, False]
+
+
+# --- maintenance mode: the plaque, the ⋯ section and form, the «Сводка» numbers --------------
+
+NOW_JS = "new Date(2026, 9, 18, 20, 5).getTime()"     # local time: the tests run in any time zone
+
+
+def _ts(args):
+    """Unix seconds of a local-time JS Date(args) — a JS expression."""
+    return "(new Date(%s).getTime() / 1000)" % args
+
+
+def test_the_model_is_always_in_the_head():
+    # IA §5 (plan step 5): «P3 · P2S» — the model next to the name on every card (it showed only on a
+    # card without an AMS, in the row under the name); not when it only repeats the name
+    cases = [({"label": "P3", "device_type": "P2S"}, "P2S"), ({"label": "C1", "device_type": "x1c"}, "X1C"),
+             ({"label": "K1", "device_type": "k1c"}, "K1C"), ({"label": "E5", "device_type": "ender5max"}, "Ender-5 Max"),
+             ({"label": "K2", "device_type": "k1max"}, "K1 Max"), ({"label": "Ghost 6", "device_type": "ghost6"}, ""),
+             ({"label": "Varan", "device_type": "Varan"}, ""), ({"label": "Reborn 2", "device_type": "reborn2"}, ""),
+             ({"label": "X", "device_type": None}, ""), ({"label": "X", "device_type": "  "}, "")]
+    assert run("%s.map(cardModelText)" % json.dumps([c for c, _w in cases])) == [w for _c, w in cases]
+    card = _decl("renderPrinterCard")
+    assert "var model = cardModelText(p);" in card
+    assert ("<span class=\"pc-nm\">${safeText(p.label, \"Без имени\")}</span>${model ? '<span class=\"pc-model\">' + safeText(model, \"\") + '</span>' : \"\"}"
+            in card)
+    css = _rule(".printer-name .pc-model")
+    assert "color: var(--text-muted)" in css and "font-size: 0.66rem" in css and "margin-left: 6px" in css
+    # whole or not at all: the name box is one line tall and wraps, so a model short of room drops to
+    # the clipped second line instead of showing a «P…» stub; it never shrinks
+    name = _rule(".printer-name")
+    for decl in ("display: flex", "flex-wrap: wrap", "height: 1.2em", "overflow: hidden", "min-width: 0"):
+        assert decl in name, decl
+    assert "flex: none" in css and "order: 1" in css
+    assert "text-overflow: ellipsis" in _rule(".printer-name .pc-nm")
+    assert 'html[data-theme="light"] .printer-name .pc-model { color: var(--text-dim); }' in CSS
+
+
+def test_the_head_never_runs_past_the_card():
+    # The ⋯ is on every card's head now (IA §5). The head is one line at every width (01.11: a wrapped
+    # head — P1S2 at 5 columns, 15 px short in another browser's font, and every card at ≤ 285 px — put
+    # that card's progress and chips below its neighbours'); measured live at 320-1873 px: head 28 px and
+    # the progress at the same offset on every card. Short of room the name box gives way (the model
+    # first, then «…»), never the pills; narrow cards still compact the pills (Wi-Fi as its icon, hidden
+    # next to ⚠ / ⓘ, a narrower ⋯)
+    assert re.search(r"(?m)^    \.pc-toprow \{ flex-wrap: nowrap; \}$", CSS)
+    assert not re.search(r"\.pc-toprow[^{,]*\{[^}]*flex-wrap: wrap", CSS)
+    assert "flex: 0 1 auto" in _rule(".pc-toprow > .printer-name")
+    assert "margin-left: auto" in _rule(".pc-toprow > .pc-toprow-right")
+    q = re.search(r"@container pcard \(max-width: 320px\) \{(.*?)\n    \}", CSS, re.S).group(1)
+    for decl in (".pc-toprow-right .pc-wifi { font-size: 0; gap: 0; }", ".pc-toprow-right:has(.nf-badge) .pc-wifi { display: none; }",
+                 ".pc-ctl.pc-ctl-head { width: 24px; }"):
+        assert decl in q, decl
+    assert "max-width" not in q                                       # the name box shrinks, no cap
+    assert ".pc-chips" not in q                                       # the chips keep their own query
+    # 4–5 columns and phones: Wi-Fi is its icon on every card, not «-54» on some
+    q4 = re.search(r"@container pcard \(max-width: 400px\) \{(.*?)\n    \}", CSS, re.S).group(1)
+    assert ".pc-toprow-right .pc-wifi { font-size: 0; gap: 0; }" in q4
+
+
+def test_maint_since_text():
+    got = run("[%s]" % ", ".join("maintSinceText(%s, %s)" % (_ts(d), NOW_JS) for d in (
+        "2026, 9, 18, 14, 32", "2026, 9, 18, 0, 0", "2026, 9, 17, 23, 59", "2026, 0, 5, 9, 0", "2025, 9, 18, 14, 32")))
+    assert got == ["с 14:32", "с 00:00", "с 17.10", "с 05.01", "с 18.10.2025"]
+    assert run("[maintSinceText(null, 0), maintSinceText('x', 0)]") == ["", ""]
+
+
+def test_maint_plaque():
+    # IA §5 (plan step 5, deliberately changed): a dim line «обслуживание · с …» without «снять» — the
+    # card's ⋯ takes it off (one way to do it); an admin's tooltip says so
+    p = "{id: 'k-1', label: 'Varan', maintenance: {since: %s, note: '<b>меняю</b> хотенд', by: 'admin'}}" % _ts(
+        "2026, 9, 18, 14, 32")
+    html = run("maintPlaqueHtml(%s, true, %s)" % (p, NOW_JS))
+    assert html == ('<div class="pc-maint"><svg class="pc-ic" aria-hidden="true"><use href="#i-tool"></use></svg>'
+                    '<span class="t" data-tip="На обслуживании с 18.10.2026 14:32 · поставил admin · '
+                    '&lt;b&gt;меняю&lt;/b&gt; хотенд · снять — в меню ⋯">обслуживание · с 14:32 · &lt;b&gt;меняю&lt;/b&gt; хотенд'
+                    '</span></div>')
+    viewer = run("maintPlaqueHtml(%s, false, %s)" % (p, NOW_JS))
+    assert "снять" not in viewer and "button" not in viewer and "&lt;b&gt;меняю" in viewer
+    # no note, nobody known; an earlier year in full
+    bare = run("maintPlaqueHtml({id: 'x\"', maintenance: {since: %s, note: null, by: null}}, false, %s)"
+               % (_ts("2025, 2, 1, 8, 0"), NOW_JS))
+    assert 'data-tip="На обслуживании с 01.03.2025 08:00">обслуживание · с 01.03.2025</span></div>' in bare
+    assert "data-maint-off" not in JS                                          # no second way on the card
+    assert run("[maintPlaqueHtml({id: 'a', maintenance: null}, true, 0), maintPlaqueHtml(null, true, 0)]") == ["", ""]
+
+
+def test_maint_pop_form():
+    from app.api import admin
+    html = run("maintPopHtml(%s)" % json.dumps({"id": "k-1", "maintenance": None}))
+    assert html == ('<div class="pc-pop-h">На обслуживание</div><div class="pc-pop-row"><input type="text" class="pc-pop-in"'
+                    ' maxlength="%d" placeholder="что делаем (необязательно)" aria-label="Заметка обслуживания" value="">'
+                    '<button type="button" class="pc-pop-ok" data-maint-save>Поставить</button></div>' % admin.MAINT_NOTE_MAX)
+    html = run("maintPopHtml(%s)" % json.dumps({"id": "k-1", "maintenance": {"since": 1.0, "note": '"x" <b>', "by": "a"}}))
+    assert html.startswith('<div class="pc-pop-h">Заметка обслуживания</div>')
+    assert 'value="&quot;x&quot; &lt;b&gt;"' in html and ">Сохранить</button>" in html
+
+
+def menu_opts(p, opts, ui=None, now=1000):
+    return run("ctlMenuHtml(%s, %s, %d, %s)" % (json.dumps(p), json.dumps(ui), now, json.dumps(opts)))
+
+
+def test_menu_maintenance_section_for_admins_only():
+    idle = _p(state="idle")
+    html = menu_opts(idle, {"admin": True, "offline": False})
+    assert [m for m, _d in _ITEM.findall(html)] == ["maint-open", "jobs", "chrono", "params"]
+    assert html.index('data-menu="maint-open"') < html.index("pm-sep") < html.index('data-menu="jobs"')
+    assert ('<span class="lbl">На обслуживание…<span class="sub">убрать из сводки, уведомлений и групповых команд</span>'
+            '</span></button>') in html
+    viewer = menu_opts(idle, {"admin": False, "offline": False})               # a viewer: the links only (IA §5)
+    assert [m for m, _d in _ITEM.findall(viewer)] == ["jobs", "chrono"] and "maint" not in viewer and "Параметры" not in viewer
+    html = menu_opts(_p(state="idle", maintenance={"since": 1.0, "note": None, "by": "a"}), {"admin": True})
+    assert [m for m, _d in _ITEM.findall(html)][:2] == ["maint-open", "maint-off"]
+    assert "Заметка обслуживания…" in html and "Снять с обслуживания" in html and "На обслуживание…" not in html
+
+
+def test_menu_of_an_offline_card_has_no_printer_items():
+    off = _p(state="offline", online=False, filament_change={"action": "load", "step": "heat"})
+    html = menu_opts(off, {"admin": True, "offline": True})
+    assert [m for m, _d in _ITEM.findall(html)] == ["maint-open", "jobs", "chrono", "params"]
+    assert "pop-why" not in html and "Скорость" not in html and 'aria-disabled' not in html
+    assert [m for m, _d in _ITEM.findall(menu_opts(off, {"admin": False, "offline": True}))] == ["jobs", "chrono"]
+
+
+def test_one_more_in_the_head_of_every_card():
+    # IA §5 (plan step 5, deliberately changed): the card's one ⋯ is in its head, on every card and
+    # for both roles (a viewer's holds the links); the row never has one. It sends no printer command,
+    # so nothing greys it out — not the grace period either.
+    off = _p(state="offline", online=False)
+    cases = [off, _p(), _p(grace_period_active=True), _p(caps=dict(BAMBU_BLOCKED), caps_note="прошивка блокирует"),
+             _p(caps=dict(NO_CAPS, pause=True, tune=True)), _p(kind="creality", caps=dict(CREALITY), ams=None),
+             _p(kind="klipper", caps=dict(KLIPPER), ams=None), _p(kind="mks", caps=dict(NO_CAPS), ams=None)]
+    tips = {True: "Обслуживание и ссылки: печати, хронология, параметры", False: "Печати и хронология этого принтера"}
+    for p in cases:
+        for admin in (True, False):
+            opts = {"admin": admin, "offline": p["state"] == "offline"}
+            head = buttons(run("headMoreHtml(%s, null, %s)" % (json.dumps(p), json.dumps(opts))))
+            assert head == [("more", "more", ["pc-ctl-head"], tips[admin], False)], (p, admin)
+            assert 'data-cmd="more"' not in row(p, None, dict(opts, now=0)), p
+    b = buttons(run("headMoreHtml(%s, {pop: 'menu'}, {admin: false, offline: true})" % json.dumps(off)))
+    assert b == [("more", "more", ["pc-ctl-head", "open"], tips[False], False)]
+    # the DOM layer: the head's ⋯ opens the menu before the busy / greyed-out checks of the row
+    ctl = JS[JS.index("(function initPrinterControls() {"):JS.index("// --- Printer notifications")]
+    more = ctl.index('if (cmd === "more") { e.stopPropagation(); togglePop(btn, pid2, "menu"); return; }')
+    assert more < ctl.index('btn.getAttribute("aria-disabled") === "true"') and more < ctl.index("if (ui.busy) return;")
+    assert 'case "ams"' not in ctl and 'case "more"' not in ctl and "[data-cmd=ams]" not in JS
+
+
+def test_the_summary_tab_is_gone():
+    # plan step 8 (deliberately changed): «Сводка» is gone — its KPI tiles are the farm's chips (step 6),
+    # its finishes the «Финиши» row (step 7), its «Загрузка» and «Статистика принтеров» are «История →
+    # Статистика» (histUtil / histStatsRows, tests/test_web_hist_ui.py), its event log is not moved
+    # (the prints, their pauses and reasons are in «Печати», the states in «Хронология»). The live
+    # «printing now» share fleetSummary counted went with its only place.
+    for gone in ("fleetSummary", "renderSummary", "metaUtil", "loadStatsSummary", "statsList", "loadEventLog",
+                 "eventLogOffset", "initEventLogFilters", "EVENT_STATE_LABELS", "STATE_LABELS_RU", "eventReasonText",
+                 "lastEventLogLoad", "setupInfiniteScroll", "metaNextFinish", "metaFarmIdle", "metaNozzle", "metaBed"):
+        assert gone not in JS, gone
+    for gone in ('data-panel="dashboard"', 'data-view="dashboard"', 'id="eventLog"', 'id="statsList"', "Лог событий",
+                 "Статистика принтеров", "Ближайший финиш", "Освободятся", 'class="dash-meta-row"'):
+        assert gone not in HTML, gone
+    # «Наверх» stays: it was wired next to the event log's infinite scroll
+    assert "initScrollTop();" in JS and 'id="scrollTopBtn"' in HTML
+
+
 _BULK_BTN = re.compile(r'<button type="button" class="fb-btn([^"]*)" data-bulk="([^"]*)"( aria-disabled="true")?'
                        r'(?: data-tip="([^"]*)")?>')
+_LIGHT_BTN = re.compile(r'<button type="button"( class="is-wait")? data-bulk="(light_o(?:n|ff))" data-tip="([^"]*)">')
 
 
 def test_fleet_bulk_bar():
+    # IA §5 (plan step 6, deliberately changed): the farm's commands are their own row under the
+    # chips — «Свет: вкл · выкл» (how many are lit in its tooltip, no meta text), «Пауза всех…»
+    # with its dialog, «Продолжить N» only while N > 0
     html = run("fleetBulkHtml(%s, {})" % json.dumps(_farm()))
-    # one line with the sort bar (owner, 13.10): no title box, no group labels
-    assert html.startswith('<div class="fleet-bulk" role="toolbar" aria-label="Вся ферма"><span class="fb-meta')
-    assert "fb-title" not in html and "fb-lbl" not in html
-    assert [(b[1], b[2]) for b in _BULK_BTN.findall(html)] == [("light_on", ""), ("light_off", ""), ("pause", ""),
-                                                               ("resume", "")]
-    assert html.count("горит <b>6</b> из 9 · 1 офлайн") == 2               # desktop + phone meta
-    assert re.search(r'data-bulk="pause"[^>]*>.*?Пауза всех <span class="fb-n">2</span>', html)
+    assert html.startswith('<div class="fleet-bulk" role="toolbar" aria-label="Вся ферма"><span class="fb-light-lbl" '
+                           'data-tip="горит 6 из 9 · 1 офлайн">')
+    assert "fb-title" not in html and "fb-lbl" not in html and "fb-meta" not in html and "fb-group" not in html
+    assert '<span class="farm-seg fb-light">' in html
+    assert [(b[1], b[2]) for b in _LIGHT_BTN.findall(html)] == [("light_on", "Включить на всех онлайн-принтерах со светом · горит 6 из 9 · 1 офлайн"),
+                                                                ("light_off", "Выключить на всех онлайн-принтерах со светом · горит 6 из 9 · 1 офлайн")]
+    assert re.search(r'data-bulk="light_on"[^>]*>вкл</button>', html) and re.search(r'data-bulk="light_off"[^>]*>выкл</button>', html)
+    btns = {b[1]: (b[0], b[2], b[3]) for b in _BULK_BTN.findall(html)}
+    assert list(btns) == ["pause", "resume"]
+    assert btns["pause"] == (" pause", "", "Пауза 2 печатающим — сначала выбрать, каким")
+    assert re.search(r'data-bulk="pause"[^>]*>.*?Пауза всех…</button>', html)
     assert re.search(r'data-bulk="resume"[^>]*>.*?Продолжить <span class="fb-n">2</span>', html)
     nobody = [p for p in _farm() if p["state"] not in ("printing", "paused")]
     html = run("fleetBulkHtml(%s, {})" % json.dumps(nobody))
     btns = {b[1]: (b[2], b[3]) for b in _BULK_BTN.findall(html)}
-    assert btns["pause"] == (' aria-disabled="true"', "Никто не печатает")
-    assert btns["resume"] == (' aria-disabled="true"', "На паузе никого нет")
+    assert btns == {"pause": (' aria-disabled="true"', "Никто не печатает")}     # no «Продолжить 0» at all
+    one = [p for p in _farm() if p["label"] in ("P3", "P1")]
+    assert "Пауза 1 печатающему" in run("fleetBulkHtml(%s, {})" % json.dumps(one))
     # no printer with a light or print control: no bar at all
     assert run("fleetBulkHtml(%s, {})" % json.dumps([p for p in _farm() if p["kind"] == "mks"])) == ""
-    # light only (print control blocked everywhere): no print group
+    # light only (print control blocked everywhere): no print buttons
     html = run("fleetBulkHtml(%s, {})" % json.dumps([_p(caps=dict(BAMBU_BLOCKED))]))
-    assert "data-bulk=\"light_on\"" in html and "data-bulk=\"pause\"" not in html and "fb-sep" not in html
+    assert 'data-bulk="light_on"' in html and 'data-bulk="pause"' not in html and 'data-bulk="resume"' not in html
+    # print only: no light group
+    html = run("fleetBulkHtml(%s, {})" % json.dumps([_p(caps=dict(ALL_CAPS, light=False))]))
+    assert "fb-light" not in html and 'data-bulk="pause"' in html
+
+
+def test_fleet_bulk_bar_has_no_reset_group_any_more():
+    # IA §5 (plan step 4, deliberately changed): «Сбросить ошибки» moved from the bar to the foot of the
+    # bell's list (test_web_nf_ui.test_reset_errors_is_at_the_foot_of_the_bell_list); the bar keeps its
+    # light, pause and resume buttons whatever it is given
+    for bulk in ({}, {"reset": 2}, {"reset": 0}):
+        html = run("fleetBulkHtml(%s, %s)" % (json.dumps(_farm()), json.dumps(bulk)))
+        assert "reset" not in html and "Сбросить ошибки" not in html and html.endswith("</div>")
+        assert [b[1] for b in _LIGHT_BTN.findall(html)] + [b[1] for b in _BULK_BTN.findall(html)] == \
+            ["light_on", "light_off", "pause", "resume"]
+    click = _decl_fleet_click()
+    assert "reset_errors" not in click and "openResetDialog" not in click
+    assert "nfResetSplit" not in JS[JS.index("function renderFleetBulk"):JS.index("function flashBulkMsg")]
+    assert "fb-reset" not in CSS and ".fb-btn.reset" in CSS          # the button's look moved with it
+
+
+def _decl_fleet_click() -> str:
+    start = JS.index('fleetBulkEl.addEventListener("click"')
+    return JS[start:JS.index("});", start)]
 
 
 def test_fleet_bulk_bar_busy_message_and_failures():
@@ -629,8 +917,12 @@ def test_fleet_bulk_bar_busy_message_and_failures():
                 {"id": "a", "label": "P<1>", "status": "rejected", "detail": "🔒 <b>блок</b>"},
                 {"id": "b", "label": "P2", "status": "sent", "detail": "отправлено (без подтверждения)"}]}}
     html = run("fleetBulkHtml(%s, %s)" % (json.dumps(_farm()), json.dumps(bulk)))
-    assert re.search(r'class="fb-btn light is-wait" data-bulk="light_on"[^>]*><span class="spin-sm"></span>Свет вкл', html)
-    assert html.count('<span class="fb-meta bad') == 2 and "Свет включён: ✓ 3 · ✕ 1" in html
+    # the busy light button spins inside its segment; the outcome is the row's own line (one, not two any more)
+    assert re.search(r'<button type="button" class="is-wait" data-bulk="light_on"[^>]*><span class="spin-sm"></span>вкл', html)
+    assert html.count('<span class="fb-meta bad" role="status">Свет включён: ✓ 3 · ✕ 1</span>') == 1
+    assert html.count("fb-meta") == 1
+    ok = run("fleetBulkHtml(%s, %s)" % (json.dumps(_farm()), json.dumps({"msg": {"k": "ok", "t": "<x>"}})))
+    assert '<span class="fb-meta ok" role="status">&lt;x&gt;</span>' in ok
     assert '<div class="fb-result" role="status">' in html and "Свет: не подтвердили 2" in html
     assert "<b>P&lt;1&gt;</b> ✕ 🔒 &lt;b&gt;блок&lt;/b&gt;" in html and "<b>P2</b> ? без ответа" in html
     assert 'data-bulk-retry' in html and 'data-bulk-dismiss aria-label="Закрыть"' in html
@@ -838,7 +1130,7 @@ def test_bulk_skip_reasons_match_the_server_rule(monkeypatch):
     from app.services import fleet_commands, settings_service
     from app.services.normalizer import normalize_ws_dict
 
-    monkeypatch.setattr(settings_service, "get", lambda key, **k: ["c-lit"] if key == "printer_light_enabled" else {})
+    monkeypatch.setattr(settings_service, "get", lambda key, **k: ["c-1"] if key == "printer_light_disabled" else {})
     monkeypatch.setattr(printer_commands, "_capability", {
         pid: {"print_cmds": pid != "b-blocked", "via": "fun", "ts": 0}
         for pid in ("b-ok", "b-paused", "b-held", "b-fin", "b-err", "b-unknown", "b-grace", "b-off", "b-blocked")})
@@ -863,7 +1155,8 @@ def test_bulk_skip_reasons_match_the_server_rule(monkeypatch):
         PrinterStatus(id="m-1", label="m", kind=PrinterKind.MKS, online=True, state=PrinterState.PRINTING),
         PrinterStatus(id="m-2", label="m", kind=PrinterKind.MKS, online=False, state=PrinterState.OFFLINE),
     ]
-    actions = list(fleet_commands.BULK_ACTIONS)
+    # reset_errors is mirrored by nfResetSkipWhy (notification_actions.reset_skip_reason), not bulkSkipReason
+    actions = [a for a in fleet_commands.BULK_ACTIONS if a != "reset_errors"]
     rows, want = [], {}
     for st in statuses:
         d = st.to_dict()
@@ -878,7 +1171,38 @@ def test_bulk_skip_reasons_match_the_server_rule(monkeypatch):
     assert want["k-nopin"][:2] == ["нет управляемой подсветки"] * 2
 
 
-@pytest.mark.parametrize("state", ["printing", "paused", "finished", "error", "idle", "unknown", "offline", None])
+def test_bulk_skip_reasons_of_printers_in_maintenance_match_the_server_rule(monkeypatch):
+    # spec_maintenance F2: «на обслуживании» first, for every state — on the same /api/printers rows
+    from app.domain.models import PrinterKind, PrinterState, PrinterStatus
+    from app.services import fleet_commands, settings_service
+    from app.services.normalizer import normalize_ws_dict
+
+    monkeypatch.setattr(settings_service, "get", lambda key, **k: [] if key == "printer_light_disabled" else {})
+    monkeypatch.setattr(printer_commands, "_capability", {"b-ok": {"print_cmds": True, "via": "fun", "ts": 0}})
+    maint = {"since": 1000.0, "note": "<b>меняю хотенд</b>", "by": "admin"}
+    statuses = [
+        PrinterStatus(id="b-ok", label="b", kind=PrinterKind.BAMBU, online=True, state=PrinterState.PRINTING),
+        PrinterStatus(id="b-off", label="b", kind=PrinterKind.BAMBU, online=False, state=PrinterState.OFFLINE),
+        PrinterStatus(id="b-grace", label="b", kind=PrinterKind.BAMBU, online=True, state=PrinterState.PAUSED,
+                      grace_period_active=True),
+        normalize_ws_dict("k-down", "k", PrinterKind.KLIPPER, {"state": "printing", "debug": {"webhooks_state": "shutdown"}}),
+        PrinterStatus(id="m-2", label="m", kind=PrinterKind.MKS, online=False, state=PrinterState.OFFLINE),
+    ]
+    actions = [a for a in fleet_commands.BULK_ACTIONS if a != "reset_errors"]
+    rows, want = [], {}
+    for st in statuses:
+        d = dict(st.to_dict(), maintenance=maint)
+        caps, note = printer_commands.caps_for(d)
+        rows.append(dict(d, caps=caps, caps_note=note))
+        want[st.id] = [fleet_commands.skip_reason(a, d, caps, note) for a in actions]
+    got = run("%s.map(function (p) { return [p.id, %s.map(function (a) { return bulkSkipReason(a, p); })]; })"
+              % (json.dumps(rows, default=str), json.dumps(actions)))
+    assert dict(got) == want
+    assert set(sum(want.values(), [])) == {fleet_commands.MSG_MAINT}
+
+
+@pytest.mark.parametrize("state", ["printing", "paused", "finished", "error", "cancelled", "idle", "unknown", "offline",
+                                   None])
 def test_print_control_blocks_match_the_server(state):
     # unknown / no state: the unknown-state text, never «Принтер не печатает» for a printer that may print
     got = run("['pause', 'resume', 'stop'].map(function (a) { return ctlStateBlock(a, %s); })"
@@ -886,7 +1210,8 @@ def test_print_control_blocks_match_the_server(state):
     assert got == [printer_commands.state_refusal(a, state) for a in ("pause", "resume", "stop")]
 
 
-@pytest.mark.parametrize("state", ["printing", "paused", "finished", "error", "idle", "unknown", "offline", None])
+@pytest.mark.parametrize("state", ["printing", "paused", "finished", "error", "cancelled", "idle", "unknown", "offline",
+                                   None])
 def test_cooldown_and_eject_blocks_match_the_server(state):
     # The server fails closed on an unknown state: the card's ❄ / ⬇ are off with the same text
     # instead of active buttons that end in a red ✕. A filament change is checked first, as in
@@ -899,13 +1224,10 @@ def test_cooldown_and_eject_blocks_match_the_server(state):
     assert change == [printer_commands.MSG_CHANGE_RUNNING] * 2
 
 
-def test_unknown_state_greys_out_cool_and_eject_on_the_card_and_in_the_menu():
+def test_unknown_state_greys_out_cool_and_eject_on_the_card():
     b = buttons(row(_p(state="unknown")))
     assert [(x[0], x[3], x[4]) for x in b if x[0] in ("cool", "eject")] == [
         ("cool", MSG["unknown"], True), ("eject", MSG["unknown"], True)]
-    html = menu(_p(state="unknown"))
-    assert _ITEM.findall(html)[:2] == [("cooldown", ' aria-disabled="true"'), ("eject", ' aria-disabled="true"')]
-    assert MSG["unknown"] in html
 
 
 # --- chips stay alike across cards (owner, 12.10: P4 "256° →255°" wrapped to 3+2) -------
@@ -951,3 +1273,399 @@ def test_chip_layout_prefers_one_row_then_dense_then_balanced():
 def test_dense_variant_css_exists_and_is_more_specific():
     assert re.search(r"\.pc-chips\[data-dense\] > \.pc-chip \{[^}]*padding", CSS)
     assert re.search(r"\.pc-chips\[data-dense\] \{[^}]*gap: 2px", CSS)
+
+
+# --- Creality on the card (27.10): the row, chips and popovers from the server's caps ------
+
+def _chips(expr: str):
+    """`expr` against the ctl-ui block plus the card's chip and popover builders."""
+    src = _lib() + "\n" + "\n".join(_function(n) for n in ("tempChip", "fanKeys", "fanChip", "speedChip")) \
+        + "\n" + "\n".join(_decl(n) for n in ("speedPopHtml", "fanPopHtml", "tempPopHtml"))
+    return _node(src + "\nconsole.log(JSON.stringify(" + expr + "));")
+
+
+def _creality_row(monkeypatch, state="idle", disabled=(), **data):
+    """A K1C's /api/printers row: real normalizer output and caps_for, as the server sends it."""
+    from app.domain.models import PrinterKind
+    from app.services import settings_service
+    from app.services.normalizer import normalize_ws_dict
+
+    monkeypatch.setattr(settings_service, "get",
+                        lambda key, **k: list(disabled) if key == "printer_light_disabled" else {})
+    snap = {"state": state, "nozzle_temp": 31, "bed_temp": 29, "target_nozzle_temp": 0, "target_bed_temp": 0,
+            "chamber_temp": 27, "fan_speed_pct": 0, "case_fan_pct": 0, "aux_fan_pct": 0, "feedrate_pct": 100,
+            "light_on": False, "material_status": 0}
+    if state in ("printing", "paused"):
+        snap.update(progress=40, remaining_time=600, print_time=400)
+    snap.update(data)
+    d = normalize_ws_dict("c-1", "K1", PrinterKind.CREALITY, snap, device_type="k1c").to_dict()
+    d.pop("debug", None)
+    caps, note = printer_commands.caps_for(d)
+    return dict(d, caps=caps, caps_note=note)
+
+
+def test_creality_row_from_the_server_caps(monkeypatch):
+    p = _creality_row(monkeypatch)
+    assert p["caps"] == CREALITY
+    b = buttons(row(p))
+    assert [(x[0], x[1]) for x in b] == [("light", "light"), ("pp", "pause"), ("stop", "stop"), ("cool", "cool")]
+    assert b[0][3] == "Свет выключен — включить" and b[3][3] == "Остудить всё: сопло и стол" and b[3][4] is False
+    b = buttons(row(_creality_row(monkeypatch, "printing", light_on=True)))
+    assert (b[0][2], b[0][3]) == (["lit"], "Свет горит — выключить")
+    assert (b[3][3], b[3][4]) == (MSG["cooldown"], True)                  # no cooling mid-print, as Bambu
+    b = buttons(row(_creality_row(monkeypatch, "paused")))
+    assert (b[1][1], b[3][4]) == ("resume", False)                        # cool on a pause: the card asks first
+    # a model without a lamp (printer_light_disabled): no light button, the rest stays
+    b = buttons(row(_creality_row(monkeypatch, disabled=["c-1"])))
+    assert [x[0] for x in b] == ["pp", "stop", "cool"]
+    assert "eject" not in [x[0] for x in b] and "ams" not in [x[0] for x in b]
+
+
+def test_creality_chips_are_editable(monkeypatch):
+    # renderCard: canEdit = admin && online && caps.tune === true -> the temperature, fan and speed chips
+    assert "var canEdit = isAdmin() && !offlineFlag && caps.tune === true;" in JS
+    assert "fanChip(p, canEdit)," in JS and "speedChip(p, canEdit)," in JS
+    p = _creality_row(monkeypatch, "printing", target_nozzle_temp=220, nozzle_temp=150)
+    assert p["caps"]["tune"] is True
+    nozzle, bed, chamber = _chips("[tempChip('nozzle', 'Сопло', %s, %s, true), tempChip('bed', 'Стол', 29, 0, true),"
+                                  " tempChip('chamber', 'Камера', 27, null, %s, 'temp')]"
+                                  % (p["nozzle_temp"], p["target_nozzle_temp"], json.dumps(p.get("chamber_ctl") is True)))
+    assert 'pc-editable" data-edit="nozzle" data-cur="220"' in nozzle and '→220' in nozzle
+    assert 'pc-editable" data-edit="bed" data-cur="29"' in bed
+    assert "pc-editable" not in chamber and "27°" in chamber              # K1C: a chamber sensor, no heater
+
+
+def test_creality_fan_chip_sets_only_the_reported_fans(monkeypatch):
+    k1c = _creality_row(monkeypatch, fan_speed_pct=40, case_fan_pct=30)
+    e5 = _creality_row(monkeypatch, case_fan_pct=None, aux_fan_pct=None)       # only the part fan reported
+    bare = _creality_row(monkeypatch, fan_speed_pct=None, case_fan_pct=None, aux_fan_pct=None)
+    bambu = _p(fan_speed_pct=50, fans=None)
+    got = _chips("[%s].map(function (p) { return [fanKeys(p), fanChip(p, true), fanChip(p, false)]; })"
+                 % ",".join(json.dumps(x) for x in (k1c, e5, bare, bambu)))
+    (k_keys, k_chip, k_ro), (e_keys, e_chip, _), (b_keys, b_chip, _), (bb_keys, bb_chip, _) = got
+    assert k_keys == ["part", "aux", "chamber"] and k1c["fans"] == {"aux": 0, "chamber": 30}
+    assert 'data-edit="fan" data-part="40" data-aux="0" data-chamber="30" data-fans="part,aux,chamber"' in k_chip
+    assert "40%" in k_chip and "📦 30%" in k_chip and "pc-editable" not in k_ro
+    assert e_keys == ["part"] and 'data-fans="part"' in e_chip
+    assert b_keys == [] and b_chip == ""                                   # nothing to set, nothing to show
+    assert bb_keys == ["part", "aux", "chamber"] and 'data-fans="part,aux,chamber"' in bb_chip   # Bambu: M106 P1-P3
+
+
+def test_fan_popover_rows_follow_the_keys():
+    rows_of = re.compile(r'data-fan="([a-z]+)"')
+    full, e5, two = _chips("[fanPopHtml(10, 20, 30), fanPopHtml(10, 0, 0, ['part']), fanPopHtml(10, 20, 30, ['part', 'chamber'])]")
+    assert rows_of.findall(full) == ["part", "aux", "chamber"]             # Bambu, as before
+    assert rows_of.findall(e5) == ["part"] and 'value="10"' in e5
+    assert rows_of.findall(two) == ["part", "chamber"] and "Вспом." not in two
+    for html in (full, e5, two):
+        assert html.endswith('<button type="button" class="pc-pop-ok" data-ok="fans">Применить</button></div>')
+
+
+@pytest.mark.parametrize("state,editable", [("printing", True), ("paused", True), ("idle", False),
+                                            ("finished", False), ("unknown", False), ("offline", False)])
+def test_speed_chip_only_while_a_print_runs(state, editable):
+    # a Creality's speed only while a print runs (= the server's _state_check)
+    row = {"kind": "creality", "state": state, "feedrate_pct": 124}
+    html = _chips("speedChip(%s, true)" % json.dumps(row))
+    assert html.startswith('<span class="pc-chip pc-speed-fast') and "124%" in html
+    assert ('pc-editable" data-edit="speed" data-cur="124"' in html) is editable
+    assert "pc-editable" not in _chips("speedChip(%s, false)" % json.dumps(row))
+
+
+@pytest.mark.parametrize("state", ["printing", "paused", "idle", "finished", "error", "cancelled", "unknown"])
+def test_bambu_speed_chip_editable_in_any_state(state):
+    # Bambu as before Creality control: editable whenever canEdit, no state gate (nor on the server)
+    row = {"kind": "bambu", "state": state, "feedrate_pct": 50}
+    assert _chips("speedChip(%s, true)" % json.dumps(row)) == (
+        '<span class="pc-chip pc-speed-slow pc-editable" data-edit="speed" data-cur="50" data-tip="Скорость печати">'
+        + '<svg class="pc-ic" aria-hidden="true"><use href="#i-gauge"></use></svg>50% ↓</span>')
+    assert "pc-editable" not in _chips("speedChip(%s, false)" % json.dumps(row))
+
+
+@pytest.mark.parametrize("pct,mode,mark", [(50, "slow", " ↓"), (80, "slow", " ↓"), (100, "norm", ""),
+                                           (124, "fast", " ⚡"), (166, "turbo", " 🚀")])
+def test_speed_chip_shows_the_reported_percent(pct, mode, mark):
+    # Creality's curFeedratePct (any value set on the printer's screen) as is
+    html = _chips("speedChip(%s, false)" % json.dumps({"state": "printing", "feedrate_pct": pct}))
+    assert 'class="pc-chip pc-speed-%s"' % mode in html and html.endswith("%d%%%s</span>" % (pct, mark))
+    assert _chips("[speedChip({feedrate_pct: null}, true), speedChip({feedrate_pct: 0, state: 'printing'}, true)]") == ["", ""]
+
+
+def test_speed_popover_modes_are_the_creality_percentages():
+    # the popover sends the level; the server maps it to setFeedratePct (printer_commands.CREALITY_SPEED_PCT)
+    btn = re.compile(r'<button type="button" class="pc-pop-preset( on)?" data-speed="(\d)">([^<]*)</button>')
+    for cur, on in (("124", "3"), (166, "4"), ("80", None), (None, None)):
+        html = _chips("speedPopHtml(%s)" % json.dumps(cur))
+        got = btn.findall(html)
+        assert [(int(lv), text) for _on, lv, text in got] == [
+            (lv, "%s · %d%%" % (name, printer_commands.CREALITY_SPEED_PCT[lv]))
+            for lv, name in ((1, "Тихий"), (2, "Стандарт"), (3, "Спорт"), (4, "Безумный"))]
+        assert [lv for o, lv, _t in got if o] == ([on] if on else [])
+
+
+@pytest.mark.parametrize("state", ["printing", "paused", "finished", "error", "cancelled", "idle", "unknown", "offline",
+                                   None])
+def test_speed_block_matches_the_server(state):
+    assert run("ctlStateBlock('speed', %s)" % json.dumps({"state": state})) == \
+        printer_commands.state_refusal("speed", state)
+
+
+# --- the cancelled state and the event log (notifications spec, step 8) -------------------
+
+HTML = (ROOT / "app" / "web" / "index.html").read_text(encoding="utf-8")
+THEME = (ROOT / "app" / "web" / "theme.js").read_text(encoding="utf-8")
+
+
+def _decl(name: str) -> str:
+    """The whole `function name(...) {...}` by brace count (the bodies below hold no
+    unbalanced brace in a string or regex)."""
+    m = re.search(r"function %s\([^)]*\) \{" % name, JS)
+    assert m, "%s() not found in app.js" % name
+    depth = 0
+    for i in range(m.end() - 1, len(JS)):
+        depth += {"{": 1, "}": -1}.get(JS[i], 0)
+        if depth == 0:
+            return JS[m.start():i + 1]
+    raise AssertionError("unbalanced %s()" % name)
+
+
+def _const(name: str) -> str:
+    m = re.search(r"const %s = (\{.*?\n\s*\}|\[[^\]]*\]);" % name, JS, re.S)
+    assert m, name
+    return m.group(0)
+
+
+def _states_js(expr: str, *, setup: str = ""):
+    # sortPrinters ranks the notifications first (nfUrgency): the nf-ui block comes along; applyFilters
+    # takes the chips' states (fleetBucket): the ctl-ui block with its helpers (_lib)
+    src = "\n".join([_lib(), _const("STAGE_LABELS"), _decl("stageLabel"), _decl("computeUiStatus"), _decl("statusLabel"),
+                     _decl("applyFilters"), _decl("sortPrinters"), _block("nf-ui"),
+                     "var fleetFilter = [], currentSort = 'name';", setup])
+    return _node(src + "\nconsole.log(JSON.stringify(" + expr + "));")
+
+
+def test_cancelled_is_its_own_grey_status():
+    got = _states_js("[computeUiStatus({state: 'cancelled', online: true, progress_pct: 47}),"
+                     " statusLabel('cancelled'), computeUiStatus({state: 'error', online: true, progress_pct: 47}),"
+                     " computeUiStatus({state: 'cancelled', online: false})]")
+    assert got == ["cancelled", "ОТМЕНЕНО", "error", "offline"]
+    # the card's ⏸ says what it says for any other non-printing state, as the server does
+    assert run("ctlStateBlock('pause', {state: 'cancelled'})") == MSG["pause_other"]
+
+
+def test_cancelled_and_finished_have_chips_of_their_own():
+    # IA §10 (plan step 6, deliberately changed): one dictionary — «Завершено» and «Отменено» are chips
+    # of their own, «Простой» is idle only (the old «Простаивают» took all three); a cancel is no error
+    ps = [{"id": i, "label": i, "state": s, "online": True, "progress_pct": 10}
+          for i, s in (("a", "printing"), ("b", "cancelled"), ("c", "paused"), ("d", "finished"), ("e", "error"),
+                       ("f", "idle"), ("g", "unknown"))]
+
+    def ids(*chips):
+        return _states_js("applyFilters(%s).map(function (p) { return p.id; })" % json.dumps(ps),
+                          setup="fleetFilter = %s;" % json.dumps(list(chips)))
+    assert ids("idle") == ["f", "g"]                             # unknown (with telemetry) counts as «Простой»
+    assert ids("cancelled") == ["b"] and ids("finished") == ["d"] and ids("error") == ["e"]
+    assert ids("finished", "cancelled") == ["b", "d"] and ids() == list("abcdefg")
+    # no group order any more (IA §10): by name, only a decision rises
+    order = _states_js("sortPrinters(%s).map(function (p) { return p.id; })" % json.dumps(ps))
+    assert order == list("abcdefg")
+
+
+def test_a_decision_always_rises_the_rest_by_name():
+    # IA §5, §10 (plan step 6, deliberately changed): no «Проблемные сверху» switch — a printer that wants
+    # a decision (a fatal / a pause on an error that holds it) is always first, the rest by name, natural
+    # (P2 before P10); no group order (error / paused / finished before the others) any more.
+    # A lasting serious HMS (H2's «drying on printer power»), routine notes and a fatal HMS on a printer
+    # that keeps printing (C1, owner 27.10) move nothing
+    def n(sev):
+        return [{"key": "hms:x", "code": "x", "severity": sev}]
+    ps = [{"id": "err", "label": "A", "state": "error", "online": True},
+          {"id": "fatal", "label": "B", "state": "printing", "online": True, "notifications": n("fatal")},
+          {"id": "pause", "label": "P10", "state": "paused", "online": True, "notifications": n("pause")},
+          {"id": "user", "label": "D", "state": "paused", "online": True},
+          {"id": "serious", "label": "E", "state": "printing", "online": True, "notifications": n("serious")},
+          {"id": "maint", "label": "F", "state": "idle", "online": True, "notifications": n("common")},
+          {"id": "held", "label": "P2", "state": "error", "online": True, "notifications": n("fatal")}]
+    order = _states_js("sortPrinters(%s).map(function (p) { return p.id; })" % json.dumps(ps))
+    assert order == ["held", "pause", "err", "fatal", "user", "serious", "maint"]   # fatal (4) before pause (3)
+    # «Финиш»: the decisions first all the same, then the prints with an ETA by the time left, the rest by name
+    ps2 = [{"id": "p10", "label": "P10", "state": "printing", "online": True, "eta_seconds": 600},
+           {"id": "p2", "label": "P2", "state": "printing", "online": True, "eta_seconds": 3600},
+           {"id": "noeta", "label": "A1", "state": "printing", "online": True, "eta_seconds": None},
+           {"id": "paused", "label": "B1", "state": "paused", "online": True, "eta_seconds": 300},
+           {"id": "off", "label": "C1", "state": "offline", "online": False, "eta_seconds": 100},
+           {"id": "pause", "label": "Z9", "state": "paused", "online": True, "notifications": n("pause")}]
+    order = _states_js("sortPrinters(%s).map(function (p) { return p.id; })" % json.dumps(ps2),
+                       setup="currentSort = 'eta';")
+    assert order == ["pause", "p10", "p2", "noeta", "paused", "off"]
+    order = _states_js("sortPrinters(%s).map(function (p) { return p.id; })" % json.dumps(ps2))
+    assert order == ["pause", "noeta", "paused", "off", "p2", "p10"]
+    sort = _decl("sortPrinters")
+    assert "alertsTop" not in JS and "alertsTopToggle" not in JS and "Проблемные сверху" not in HTML
+
+
+def _hist_block() -> str:
+    m = re.search(r"/\* hist-ui:begin \*/(.*?)/\* hist-ui:end \*/", JS, re.S)
+    assert m, "hist-ui block not found"
+    return m.group(1)
+
+
+def test_every_state_has_a_label_a_colour_and_a_legend():
+    # plan step 8 (deliberately changed): the event log and the summary bars are gone with their own
+    # words; the bars and the legend of «Хронология» / «Статистика» take the one dictionary (IA §10)
+    from app.domain.models import PrinterState
+    states = [s.value for s in PrinterState]
+    labels = _node("\n".join([_decl("statusLabel"), _hist_block()])
+                   + "\nconsole.log(JSON.stringify([%s.map(statusLabel), HIST_SEGS]));" % json.dumps(states))
+    assert "—" not in labels[0]
+    segs = [x["id"] for x in labels[1]]
+    assert set(states) - {"unknown"} <= set(segs) and "nodata" in segs     # unknown counts as «Нет данных»
+    words = {x["id"]: x["label"] for x in labels[1]}
+    assert words == {"printing": "Печатает", "idle": "Простой", "paused": "Пауза", "error": "Ошибка",
+                     "cancelled": "Отменено", "finished": "Завершено", "offline": "Офлайн",
+                     "maintenance": "Обслуживание", "nodata": "Нет данных"}
+    assert segs.index("cancelled") == segs.index("error") + 1
+    names = re.search(r"var stateNames = (\{[^}]*\});", JS).group(1)
+    for s in states:
+        assert re.search(r"\b%s: '" % s, names), s
+        assert re.search(r"\b%s: style\.getPropertyValue" % s, THEME), s
+    assert re.search(r"cancelled: 3\.5\b", re.search(r"var stateOrder = \{[^}]*\}", JS).group(0))
+    for sel in (".seg-cancelled", ".dot-cancelled", ".event-badge-cancelled"):
+        assert re.search(r"(?m)^\s*%s \{[^}]*var\(--gray-" % re.escape(sel), CSS), sel
+    assert re.search(r"\.status-badge\.cancelled \{[^}]*color: var\(--gray-11\)", CSS)
+    assert re.search(r"\.printer-card\.cancelled \{[^}]*--bg-panel", CSS)
+    assert "cancelled: style.getPropertyValue('--gray-9')" in THEME
+    # one legend, drawn from the dictionary into «Хронология» and «Статистика»
+    assert HTML.count("data-hist-legend") == 2 and "seg-cancelled" not in HTML
+    assert 'document.querySelectorAll("[data-hist-legend]").forEach(function (el) { el.innerHTML = histLegendHtml(); });' in JS
+    assert not re.findall(r'class="event-state-btn[^"]*" data-state=', HTML)        # the event log's filter is gone
+
+
+# --- maintenance mode on the page (spec_maintenance F6–F17, F20) ----------------------------
+
+_MAINT = {"since": 1000.0, "note": None, "by": "admin"}
+
+
+def test_a_printer_in_maintenance_matches_its_own_filter_only():
+    ps = [{"id": "off", "label": "A", "state": "offline", "online": False},
+          {"id": "m-off", "label": "B", "state": "offline", "online": False, "maintenance": _MAINT},
+          {"id": "m-pr", "label": "C", "state": "printing", "online": True, "maintenance": _MAINT},
+          {"id": "pr", "label": "D", "state": "printing", "online": True}]
+
+    def ids(*filters):
+        return _states_js("applyFilters(%s).map(function (p) { return p.id; })" % json.dumps(ps),
+                          setup="fleetFilter = %s;" % json.dumps(list(filters)))
+    assert ids("offline") == ["off"]                  # = the «Офлайн» chip, which leaves them out
+    assert ids("printing") == ["pr"]                  # «Онлайн» is gone with the old filters (IA §11, plan step 6)
+    assert ids("maintenance") == ["m-off", "m-pr"]
+    assert ids("maintenance", "offline") == ["off", "m-off", "m-pr"]
+    assert ids() == ["off", "m-off", "m-pr", "pr"]
+    assert '{ id: "maintenance", label: "Обслуживание", short: "Обсл." }' in re.search(r"var FLEET_CHIPS = \[.*?\];", JS, re.S).group(0)
+
+
+def test_a_card_in_maintenance_never_rises():
+    # F12: its error / pause (and a fatal notification) do not rise; its print is not ordered by its ETA.
+    # Plan step 6 (deliberately changed): no group order any more — by name, a decision first
+    fatal = [{"key": "pe:x", "code": "x", "severity": "fatal"}]
+    ps = [{"id": "err", "label": "A", "state": "error", "online": True},
+          {"id": "m-err", "label": "B", "state": "error", "online": True, "maintenance": _MAINT, "notifications": fatal},
+          {"id": "m-pause", "label": "C", "state": "paused", "online": True, "maintenance": _MAINT},
+          {"id": "idle", "label": "D", "state": "idle", "online": True},
+          {"id": "m-off", "label": "E", "state": "offline", "online": False, "maintenance": _MAINT},
+          {"id": "pr", "label": "F", "state": "printing", "online": True},
+          {"id": "m-pr", "label": "G", "state": "printing", "online": True, "maintenance": _MAINT, "eta_seconds": 60},
+          {"id": "held", "label": "H", "state": "error", "online": True, "notifications": fatal}]
+    order = _states_js("sortPrinters(%s).map(function (p) { return p.id; })" % json.dumps(ps))
+    assert order == ["held", "err", "m-err", "m-pause", "idle", "m-off", "pr", "m-pr"]
+    order = _states_js("sortPrinters(%s).map(function (p) { return p.id; })" % json.dumps(ps), setup="currentSort = 'eta';")
+    assert order == ["held", "err", "m-err", "m-pause", "idle", "m-off", "pr", "m-pr"]
+
+
+def test_stats_and_timeline_know_maintenance():
+    # plan step 8: «Статистика» (histShares: not in «Печать» / «Загрузка», tests/test_web_hist_ui.py)
+    order = _node(_hist_block() + "\nconsole.log(JSON.stringify(HIST_SEGS.map(function (s) { return s.id; })));")
+    assert order[-2:] == ["maintenance", "nodata"]
+    shares = _hist_block()
+    assert "known: total - sec.nodata - sec.maintenance" in shares
+    assert re.search(r"\bmaintenance: 'Обслуживание'", re.search(r"var stateNames = (\{[^}]*\});", JS).group(1))
+    assert "maintenance: style.getPropertyValue('--warn').trim()" in THEME
+    draw = _decl("drawTimeline")
+    assert "var maintPattern = makeMaintPattern(ctx);" in draw and "ctx.fillStyle = maintPattern;" in draw
+    pattern = _decl("makeMaintPattern")
+    assert "'--warn-5'" in pattern and "'--warn-7'" in pattern
+
+
+def test_card_menus_and_tabs_are_wired():
+    card = _decl("renderPrinterCard")
+    assert '${inMaint(p) ? " maint" : ""}' in card
+    assert "${maintPlaqueHtml(p, isAdmin(), Date.now())}" in card
+    assert card.index("${maintPlaqueHtml(") < card.index("${showProgress ?")              # right under the header
+    assert card.index('<div class="status-badge ${uiStatus}">') < card.index("${headMore}")
+    assert "headMoreHtml(p, cardUi[p.id], { admin: isAdmin(), offline: offlineFlag })" in card
+    # the head's ⋯ opens the menu with its options; the form is wired. No «снять» on the plaque (IA §5)
+    assert "ctlMenuHtml(p, ui, Date.now(), menuOpts(p))" in _decl("togglePop")
+    assert 'swapPop(maintPopHtml(p), "maint")' in _decl("onMenuClick")
+    assert ".pc-head .pc-ctl[data-cmd=more]" in JS and ".pc-head [data-cmd=more]" in JS
+    assert "data-maint-off" not in JS
+    pop = _decl("onPopClick")
+    sends = re.search(r"var sends = ([^;]*);", pop).group(1)
+    assert "[data-maint-save]" in pop and "menu" not in sends                  # a busy card does not hold the menu
+    put = _decl("setMaintenance")
+    assert '"/api/admin/printers/" + encodeURIComponent(pid) + "/maintenance"' in put and 'method: "PUT"' in put
+    for toast in ('"Заметка сохранена"', '": на обслуживании"', '": снят с обслуживания"'):
+        assert toast in put, toast
+    # plan step 14 (deliberately changed): «Снять с обслуживания» asks in the ⋯ popover itself, not with
+    # confirm() — the question and its buttons are maintOffAskHtml (tests/test_web_confirm_ui.py)
+    assert "maintOffAsk(" not in JS and 'swapPop(maintOffAskHtml(p), "menu");' in _decl("onMenuClick")
+    # «Окно», the AMS tab, the admin table
+    assert 'p.state === "printing" && !inMaint(p)' in _decl("renderForecast")
+    # on a line of its own under the header: in the badges row it squeezed the title (375 px)
+    ams = _decl("amsCardShell")
+    assert ("(u.maintenance ? '<div class=\"ams-maint\"><span class=\"ams-badge warn\">на обслуживании</span></div>' : '')"
+            in ams)
+    assert ams.index("'<div class=\"ams-badges\">' + badges") < ams.index('<div class="ams-maint">')
+    assert "на обслуживании" not in ams[:ams.index("var slots")]
+    # plan step 13 (deliberately changed): «Парк» shows the status and «к карточке ›» (parkMaintHtml,
+    # tests/test_web_adm_ui.py); maintenance is put on and taken off through the card's ⋯ only, no prompt()
+    adm = _decl("renderAdminPrinters")
+    assert 'data-act="maint-on"' not in adm and 'data-act="maint-off"' not in adm
+    assert "(p.pending === 'deleted' ? '<span class=\"muted\">—</span>' : parkMaintHtml(p, nowMs))" in adm  # none for a deleted row
+    init = _decl("initAdminPrinters")
+    assert "prompt(" not in init and "maint-on" not in init and "if (btn.dataset.act === 'card') {" in init
+
+
+def test_maintenance_markup_and_styles():
+    # H1–H4, C1–C5: the «Обслуживание» chip over the grid (plan step 6: the KPI tiles of «Сводка» are the
+    # chips now, the chip stays at 0 — dim), both legends, the yellow hatching / dot / chip colour, the
+    # plaque in the .ams-dry shape, the header ⋯
+    assert "dash-kpi maint" not in HTML and "kpiMaint" not in HTML and "kpiMaint" not in JS
+    assert re.search(r"\.farm-chip\.st-maintenance \{ --st: var\(--warn-7\); \}", CSS)
+    # one legend from the dictionary (plan step 8): «Офлайн», «Обслуживание», «Нет данных» in this order
+    legend = _node(_hist_block() + "\nconsole.log(JSON.stringify(histLegendHtml()));")
+    assert legend.index('<i class="seg-offline"></i>Офлайн') < legend.index('<i class="seg-maintenance"></i>Обслуживание') \
+        < legend.index('<i class="seg-nodata"></i>Нет данных')
+    assert HTML.index("data-hist-legend") < HTML.index('id="timeline-scale-label"')
+    assert int(re.search(r"styles\.css\?v=(\d+)", HTML).group(1)) >= 91
+    assert int(re.search(r"theme\.js\?v=(\d+)", HTML).group(1)) >= 4
+    assert int(re.search(r"app\.js\?v=(\d+)", HTML).group(1)) >= 108
+    assert re.search(r"(?m)^\.seg-maintenance \{[^}]*var\(--warn-5\)[^}]*var\(--warn-7\)", CSS)
+    assert re.search(r"(?m)^\.dot-maintenance \{[^}]*var\(--warn\)", CSS)
+    plaque = _rule(".pc-maint")
+    # owner, 19.10: the note must not catch the eye — no fill, no border, a dim line
+    for decl in ("background:none", "border:0", "color:var(--text-dim)", "opacity:0.55"):
+        assert decl in plaque, decl
+    assert "warn" not in plaque
+    assert "animation" not in plaque and "-webkit-line-clamp:2" in _rule(".pc-maint .t")
+    head = _rule(".pc-ctl.pc-ctl-head")
+    assert "width: 30px" in head and "height: 28px" in head                   # the mockup's size: the card's only ⋯ (IA §5)
+    assert "background: transparent" in _rule(".pc-ctl.pc-ctl-head:not(.open)")
+    # a 40 px tap target without moving anything: the ⋯ plus 2×6
+    hit = _rule(".pc-ctl.pc-ctl-head::before")
+    assert 'content: ""' in hit and "position: absolute" in hit and "inset: -6px" in hit
+    assert "position: relative" in _rule(".pc-ctl")
+    assert ".pc-maint .bd-link" not in CSS                                    # no «снять» on the plaque
+    assert "margin-top:8px" in _rule(".ams-maint")
+    # every theme has the --warn steps the hatching and the plaque use
+    for theme in ("dark-classic", "light", "night", "neon", "cosmos"):
+        block = re.search(r'html\[data-theme="%s"\] \{(.*?)\n    \}' % theme, CSS, re.S).group(1)
+        assert "--warn-5:" in block and "--warn-7:" in block and "--warn-11:" in block and "--warn-soft:" in block, theme

@@ -1,3 +1,19 @@
+// The theme this browser chose in 👤 «Этот браузер» (forge-ops-theme, the same
+// rule as app.js initTheme), set on <html> as soon as this file runs: the app
+// and the login page both load it, so the login page shows that theme too.
+// Nothing else here reaches the page: the file is public (the login page has
+// no session), it only holds colour getters.
+(function forgeThemeBoot() {
+  var root = document.documentElement, t = null;
+  try { t = localStorage.getItem("forge-ops-theme"); } catch (e) {}
+  if (t === null) t = window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches ? "" : "light";
+  if (t) root.setAttribute("data-theme", t);
+  else root.removeAttribute("data-theme");
+  // the browser's chrome follows the page background, read from the CSS token
+  var meta = document.querySelector('meta[name="theme-color"]');
+  var bg = getComputedStyle(root).getPropertyValue("--bg").trim();
+  if (meta && bg) meta.setAttribute("content", bg);
+})();
 function getStateColors() {
         var style = getComputedStyle(document.documentElement);
         return {
@@ -5,8 +21,10 @@ function getStateColors() {
           finished: style.getPropertyValue('--ok').trim(),
           paused: style.getPropertyValue('--warn').trim(),
           error: style.getPropertyValue('--danger').trim(),
+          cancelled: style.getPropertyValue('--gray-9').trim(),
           idle: style.getPropertyValue('--gray-11').trim(),
           offline: style.getPropertyValue('--gray-7').trim(),
+          maintenance: style.getPropertyValue('--warn').trim(),
           unknown: style.getPropertyValue('--gray-11').trim()
         };
       }

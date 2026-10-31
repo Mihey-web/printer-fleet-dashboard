@@ -5,19 +5,50 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <meta name="robots" content="noindex, nofollow" />
   <title>Кузница</title>
+  <link rel="manifest" href="/manifest.webmanifest">
+  <meta name="theme-color" content="#0f172a">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='7' fill='%231e293b'/><polygon points='16,3 29,12 29,24 16,30 3,24 3,12' fill='none' stroke='%2360a5fa' stroke-width='2.5'/><circle cx='16' cy='16' r='3' fill='%2360a5fa'/></svg>">
   <style>
+    /* The theme this browser chose in the panel (forge-ops-theme), set on <html> by
+       /theme.js below. The page has no session, so it cannot load styles.css: these are
+       its tokens for the six themes, the same values (tests/test_web_me_ui.py checks). */
+    :root {
+      --bg: #0f172a; --gray-2: #1e293b; --gray-3: #263548; --line-strong: rgba(255, 255, 255, 0.14); --text: #e2eaf3; --text-muted: #8ba7be; --info: #60a5fa;
+      --ok-grad-mid: #2dd4bf; --ok-grad-end: #6eeed9; --ok-border: rgba(45, 212, 191, 0.22); --tab-active-text: #0a1a1a; --danger: #f87171; --shadow-xl: 0 30px 80px rgba(0, 0, 0, 0.42);
+    }
+    html[data-theme="dark-classic"] {
+      --bg: #0d1117; --gray-2: #161b22; --gray-3: #1c2128; --line-strong: rgba(255, 255, 255, 0.14); --text: #e6edf3; --text-muted: #656c76; --info: #58a6ff;
+      --ok-grad-mid: #3fb950; --ok-grad-end: #6edb7e; --ok-border: rgba(63, 185, 80, 0.22); --tab-active-text: #0d1117; --danger: #f85149; --shadow-xl: 0 30px 80px rgba(0, 0, 0, 0.55);
+    }
+    html[data-theme="light"] {
+      --bg: #f6f8fa; --gray-2: #ffffff; --gray-3: #f0f2f5; --line-strong: rgba(0, 0, 0, 0.14); --text: #1f2328; --text-muted: #848d99; --info: #0969da;
+      --ok-grad-mid: #2da44e; --ok-grad-end: #56be60; --ok-border: rgba(45, 164, 78, 0.30); --tab-active-text: #1f2328; --danger: #cf222e; --shadow-xl: 0 30px 80px rgba(0, 0, 0, 0.12);
+    }
+    html[data-theme="night"] {
+      --bg: #000000; --gray-2: #111111; --gray-3: #1a1a1a; --line-strong: rgba(255, 255, 255, 0.14); --text: #eeeeee; --text-muted: #666666; --info: #3291ff;
+      --ok-grad-mid: #50e3c2; --ok-grad-end: #80f0dc; --ok-border: rgba(80, 227, 194, 0.22); --tab-active-text: #000000; --danger: #ff3333; --shadow-xl: 0 30px 80px rgba(0, 0, 0, 0.60);
+    }
+    html[data-theme="neon"] {
+      --bg: #0a0a1a; --gray-2: #111128; --gray-3: #1a1a38; --line-strong: rgba(255, 255, 255, 0.20); --text: #ddddf0; --text-muted: #666698; --info: #ff1493;
+      --ok-grad-mid: #00ff88; --ok-grad-end: #50ffb0; --ok-border: rgba(0, 255, 136, 0.30); --tab-active-text: #0a0a1a; --danger: #ff4500; --shadow-xl: 0 30px 80px rgba(0, 0, 0, 0.65);
+    }
+    html[data-theme="cosmos"] {
+      --bg: #04070c; --gray-2: #0b1119; --gray-3: #131c27; --line-strong: rgba(122, 180, 210, 0.18); --text: #e9f4fb; --text-muted: #63788c; --info: #5fd9f5;
+      --ok-grad-mid: #3ad684; --ok-grad-end: #7dedb2; --ok-border: rgba(58, 214, 132, 0.22); --tab-active-text: #03212b; --danger: #ff4d5e; --shadow-xl: 0 30px 80px rgba(0, 0, 0, 0.60);
+    }
+    [data-theme="light"] .field input { color-scheme: light; }
     * { box-sizing: border-box; margin: 0; padding: 0; }
     html, body { height: 100%; }
     body {
       font-family: 'IBM Plex Sans', sans-serif;
-      color: #e2eaf3;
+      color: var(--text);
+      background: var(--bg);
       background:
-        radial-gradient(ellipse 90% 70% at 50% -10%, rgba(96, 165, 250, 0.10), transparent 60%),
-        #0f172a;
+        radial-gradient(ellipse 90% 70% at 50% -10%, color-mix(in srgb, var(--info) 10%, transparent), transparent 60%),
+        var(--bg);
       display: flex;
       align-items: center;
       justify-content: center;
@@ -28,7 +59,7 @@
       content: "";
       position: fixed;
       inset: 0;
-      background-image: radial-gradient(rgba(255, 255, 255, 0.05) 1px, transparent 1px);
+      background-image: radial-gradient(color-mix(in srgb, var(--text) 5%, transparent) 1px, transparent 1px);
       background-size: 26px 26px;
       -webkit-mask-image: linear-gradient(180deg, rgba(0, 0, 0, 0.7), transparent 70%);
       mask-image: linear-gradient(180deg, rgba(0, 0, 0, 0.7), transparent 70%);
@@ -37,57 +68,59 @@
     .card {
       position: relative;
       width: 340px;
-      background-color: #1e293b;
-      background-image: linear-gradient(180deg, rgba(255, 255, 255, 0.03), transparent);
-      border: 1px solid rgba(255, 255, 255, 0.14);
+      max-width: 100%;
+      background-color: var(--gray-2);
+      background-image: linear-gradient(180deg, color-mix(in srgb, var(--text) 3%, transparent), transparent);
+      border: 1px solid var(--line-strong);
       border-radius: 18px;
       padding: 34px 30px 26px;
-      box-shadow: 0 24px 60px rgba(0, 0, 0, 0.45);
+      box-shadow: var(--shadow-xl);
     }
     .emblem {
       width: 54px; height: 54px;
       margin: 0 auto 14px;
       border-radius: 14px;
-      background: linear-gradient(160deg, #263548, #0f172a);
-      border: 1px solid rgba(255, 255, 255, 0.14);
+      background: linear-gradient(160deg, var(--gray-3), var(--bg));
+      border: 1px solid var(--line-strong);
       display: flex; align-items: center; justify-content: center;
-      font-size: 24px; color: #60a5fa;
-      box-shadow: 0 0 24px rgba(96, 165, 250, 0.18);
+      font-size: 24px; color: var(--info);
+      box-shadow: 0 0 24px color-mix(in srgb, var(--info) 18%, transparent);
     }
     h1 { text-align: center; font-weight: 700; letter-spacing: 0.28em; font-size: 1.05rem; margin-bottom: 4px; }
-    .sub { text-align: center; color: #8ba7be; font-size: 0.78rem; margin-bottom: 24px; }
+    .sub { text-align: center; color: var(--text-muted); font-size: 0.78rem; margin-bottom: 24px; }
     .field { margin-bottom: 12px; }
     .field label {
       display: block;
       font-size: 0.68rem; text-transform: uppercase; letter-spacing: 0.08em;
-      color: #8ba7be; margin-bottom: 5px;
+      color: var(--text-muted); margin-bottom: 5px;
     }
     .field input {
       width: 100%;
-      background: #0f172a;
-      border: 1px solid rgba(255, 255, 255, 0.14);
+      background: var(--bg);
+      border: 1px solid var(--line-strong);
       border-radius: 10px;
       padding: 10px 12px;
-      color: #e2eaf3;
+      color: var(--text);
       font: inherit;
       outline: none;
     }
-    .field input:focus { border-color: #60a5fa; }
+    .field input:focus { border-color: var(--info); }
     button {
       width: 100%;
       margin-top: 10px;
       padding: 11px;
-      border: 1px solid rgba(45, 212, 191, 0.35);
+      border: 1px solid var(--ok-border);
       border-radius: 10px;
-      background: linear-gradient(135deg, #1a6b5e, #2dd4bf);
-      color: #04211c;
+      background: linear-gradient(135deg, var(--ok-grad-end), var(--ok-grad-mid));
+      color: var(--tab-active-text);
       font: inherit; font-weight: 700; font-size: 0.9rem;
       letter-spacing: 0.04em;
       cursor: pointer;
     }
     button:disabled { opacity: 0.6; cursor: default; }
-    .err { min-height: 18px; font-size: 0.75rem; color: #f87171; text-align: center; margin-top: 10px; }
+    .err { min-height: 18px; font-size: 0.75rem; color: var(--danger); text-align: center; margin-top: 10px; }
   </style>
+  <script src="/theme.js?v=5"></script>
 </head>
 <body>
   <div class="card">
@@ -124,7 +157,8 @@
       }).then(function (res) {
         return res.json().then(function (data) { return { ok: res.ok, data: data }; });
       }).then(function (r) {
-        if (r.ok) { window.location.replace('/'); }
+        // the screen asked for (a PWA shortcut, a bookmark: /#/ams) opens after the sign-in
+        if (r.ok) { window.location.replace('/' + location.hash); }
         else {
           err.textContent = r.data.detail || 'Ошибка входа';
           btn.disabled = false;
@@ -134,6 +168,23 @@
         btn.disabled = false;
       });
     });
+
+    // One silent refresh per load: the app opened after the 15-min access
+    // token expired goes straight to the dashboard while the refresh cookie
+    // lives. The timestamp guard stops a redirect loop when the new cookie does
+    // not stick (e.g. Secure on plain http); without sessionStorage there is
+    // no guard, so no attempt. A failure changes nothing: the form is shown.
+    (function () {
+      var key = 'forge-login-refresh-at', now = Date.now();
+      try {
+        var last = Number(sessionStorage.getItem(key)) || 0;
+        if (now - last < 15000) return;
+        sessionStorage.setItem(key, String(now));
+      } catch (e) { return; }
+      fetch('/api/auth/refresh', { method: 'POST', credentials: 'same-origin' }).then(function (res) {
+        if (res.ok) window.location.replace('/' + location.hash);
+      }).catch(function () {});
+    })();
   </script>
 </body>
 </html>

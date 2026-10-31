@@ -16,7 +16,7 @@ import sqlite3
 import time
 import uuid
 from threading import Lock
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
@@ -63,6 +63,137 @@ def _invalidate_label(printer_id: Optional[str] = None) -> None:
             _label_cache.pop(printer_id, None)
 
 
+# Maintenance mode (spec_maintenance): an admin took the printer out of the
+# fleet's numbers, notifications, automation and group commands; it is still
+# polled and its card still takes single commands. maintenance_since is the one
+# flag (NULL: not in maintenance). Not a config field: it applies at once, is
+# never a pending change (_CFG_FIELDS), the regular PUT does not touch it and
+# "discard changes" keeps it.
+MAINT_COLUMNS = (("maintenance_since", "REAL"), ("maintenance_note", "TEXT"), ("maintenance_by", "TEXT"))
+
+# Short-TTL cache of the maintenance map, per DB path: the poll loop, the
+# history hook and the automation ask per printer, per poll. Every write path
+# invalidates it; the TTL only bounds what a missed one could cost.
+_MAINT_TTL = 5.0
+_maint_cache: Dict[str, Tuple[Dict[str, Dict[str, Any]], float]] = {}   # path -> (map, ts)
+_maint_good: Dict[str, Dict[str, Dict[str, Any]]] = {}                  # path -> last good read
+_maint_gen = 0    # bumped by every invalidation: a read that raced a write is not cached
+_maint_lock = Lock()
+
+
+def maintenance_info(row: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """{"since", "note", "by"} of a registry row in maintenance mode, else None."""
+    since = row.get("maintenance_since")
+    if since is None:
+        return None
+    return {"since": float(since), "note": row.get("maintenance_note"), "by": row.get("maintenance_by")}
+
+
+def _invalidate_maintenance() -> None:
+    global _maint_gen
+    with _maint_lock:
+        _maint_gen += 1
+        _maint_cache.clear()
+
+
+def _copy_map(m: Dict[str, Dict[str, Any]]) -> Dict[str, Dict[str, Any]]:
+    return {pid: dict(info) for pid, info in m.items()}
+
+
+def maintenance_map(db_path: Optional[str] = None) -> Dict[str, Dict[str, Any]]:
+    """{pid: {"since", "note", "by"}} of every printer in maintenance mode,
+    soft-deleted rows included (they are polled until the restart).
+
+    Never raises: an unreadable registry answers the last good map, without
+    one {} (logged at debug). A printer then counts as not in maintenance for
+    a few seconds; no command can reach it anyway, printer_commands.send
+    refuses when it cannot read the same registry.
+    """
+    path = db_path or DB_PATH
+    now = time.time()
+    with _maint_lock:
+        hit = _maint_cache.get(path)
+        if hit is not None and 0 <= now - hit[1] < _MAINT_TTL:
+            return _copy_map(hit[0])
+        gen = _maint_gen
+    try:
+        conn = _connect(path)
+        try:
+            rows = conn.execute(
+                "SELECT id, maintenance_since, maintenance_note, maintenance_by FROM printers"
+                " WHERE maintenance_since IS NOT NULL").fetchall()
+        finally:
+            conn.close()
+        data = {r["id"]: maintenance_info(dict(r)) for r in rows}
+        ok = True
+    except Exception:
+        logger.debug("maintenance map read failed", exc_info=True)
+        data, ok = None, False
+    with _maint_lock:
+        if ok:
+            _maint_good[path] = data
+        else:
+            data = _maint_good.get(path, {})
+        if gen == _maint_gen:      # no write landed meanwhile
+            _maint_cache[path] = (data, now)
+        return _copy_map(data)
+
+
+def in_maintenance(printer_id: str, db_path: Optional[str] = None) -> bool:
+    """True while the printer is in maintenance mode (cached, never raises)."""
+    return printer_id in maintenance_map(db_path)
+
+
+def maintenance_of(printer_id: str, db_path: Optional[str] = None) -> Optional[Dict[str, Any]]:
+    """The printer's {"since", "note", "by"} in maintenance mode, else None (cached, never raises)."""
+    return maintenance_map(db_path).get(printer_id)
+
+
+def set_maintenance(printer_id: str, on: bool, note: Optional[str] = None, by: Optional[str] = None,
+                    now: Optional[float] = None,
+                    db_path: Optional[str] = None) -> Optional[Tuple[str, Optional[Dict[str, Any]]]]:
+    """Turn maintenance mode on / off, or change its note.
+
+    Returns None for an unknown printer, else (change, info):
+    "on" (since = now, note, by), "note" (already on: only the note changes,
+    since and by stay), "off" (all three NULL) or "none" (nothing to change);
+    info is the mode after the call ({"since", "note", "by"}) or None.
+    An empty note is stored as NULL. Raises on a storage error.
+    """
+    note = note or None
+    conn = _connect(db_path)
+    try:
+        # Read and write under one write lock: two admins switching at once
+        # must not both see "off" and both answer "on".
+        conn.execute("BEGIN IMMEDIATE")
+        row = conn.execute("SELECT maintenance_since, maintenance_note, maintenance_by FROM printers"
+                           " WHERE id = ?", (printer_id,)).fetchone()
+        if row is None:
+            conn.rollback()
+            return None
+        cur = {"maintenance_since": row[0], "maintenance_note": row[1], "maintenance_by": row[2]}
+        if on and cur["maintenance_since"] is None:
+            change = "on"
+            cur = {"maintenance_since": time.time() if now is None else float(now),
+                   "maintenance_note": note, "maintenance_by": by}
+        elif on:
+            change = "note" if note != cur["maintenance_note"] else "none"
+            cur["maintenance_note"] = note
+        else:
+            change = "off" if cur["maintenance_since"] is not None else "none"
+            cur = {"maintenance_since": None, "maintenance_note": None, "maintenance_by": None}
+        if change != "none":
+            conn.execute("UPDATE printers SET maintenance_since = ?, maintenance_note = ?, maintenance_by = ?"
+                         " WHERE id = ?", (cur["maintenance_since"], cur["maintenance_note"],
+                                           cur["maintenance_by"], printer_id))
+        conn.commit()
+    finally:
+        conn.close()
+    if change != "none":
+        _invalidate_maintenance()
+    return change, maintenance_info(cur)
+
+
 def _connect(db_path: Optional[str] = None) -> sqlite3.Connection:
     conn = sqlite3.connect(db_path or DB_PATH, timeout=10)
     conn.row_factory = sqlite3.Row
@@ -98,6 +229,10 @@ def init_db(db_path: Optional[str] = None) -> None:
                 conn.execute("ALTER TABLE printers DROP COLUMN discover_hostname")
             except sqlite3.OperationalError:
                 pass
+        # Maintenance mode columns (nullable, no default: a schema-only change).
+        for col, typ in MAINT_COLUMNS:
+            if col not in cols:
+                conn.execute("ALTER TABLE printers ADD COLUMN %s %s" % (col, typ))
         conn.commit()
     finally:
         conn.close()
@@ -234,6 +369,7 @@ def delete_printer(printer_id: str, db_path: Optional[str] = None) -> Optional[s
             mode = "hard"
         conn.commit()
         _invalidate_label(printer_id)
+        _invalidate_maintenance()
         return mode
     finally:
         conn.close()
@@ -250,27 +386,37 @@ def restore_printer(printer_id: str, db_path: Optional[str] = None) -> Optional[
     finally:
         conn.close()
     _invalidate_label(printer_id)
+    _invalidate_maintenance()
     return get_printer(printer_id, db_path)
 
 
 def discard_changes(db_path: Optional[str] = None) -> int:
-    """Reset the table to the running snapshot. Returns number of restored rows."""
+    """Reset the table to the running snapshot. Returns number of restored rows.
+
+    The maintenance mode is no config change: the surviving printers keep
+    their current one (the snapshot holds it as of the start).
+    """
     running = get_running()
     if running is None:
         return 0
     now = time.time()
     conn = _connect(db_path)
     try:
+        maint = {r[0]: tuple(r[1:]) for r in conn.execute(
+            "SELECT id, maintenance_since, maintenance_note, maintenance_by FROM printers"
+            " WHERE maintenance_since IS NOT NULL").fetchall()}
         conn.execute("DELETE FROM printers")
         conn.executemany("""
             INSERT INTO printers (id, kind, label, host, port, model, access_code, serial,
-                                  deleted, created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)
+                                  deleted, created_at, updated_at,
+                                  maintenance_since, maintenance_note, maintenance_by)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?)
         """, [(r["id"], r["kind"], r["label"], r["host"], r.get("port"), r.get("model"),
                r.get("access_code"), r.get("serial"),
-               r.get("created_at", now), now) for r in running])
+               r.get("created_at", now), now) + maint.get(r["id"], (None, None, None)) for r in running])
         conn.commit()
         _invalidate_label()  # bulk reset — clear the whole cache
+        _invalidate_maintenance()
         return len(running)
     finally:
         conn.close()
@@ -323,6 +469,7 @@ def load_for_startup(cfg: Any, db_path: Optional[str] = None) -> List[Dict[str, 
         conn.close()
     if purged:
         logger.info("printer registry: purged %d deleted printers on startup", purged)
+        _invalidate_maintenance()
     rows = list_printers(db_path, include_deleted=False)
     set_running(rows)
     return rows

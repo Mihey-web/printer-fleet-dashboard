@@ -1,4 +1,6 @@
-"""Printer registry: config migration, stable-id CRUD, pending diff, discard."""
+"""Printer registry: config migration, stable-id CRUD, pending diff, discard, maintenance mode."""
+from types import SimpleNamespace
+
 import pytest
 
 from app.services import printer_registry as reg
@@ -26,9 +28,11 @@ class FakeCfg:
 def db(tmp_path):
     path = str(tmp_path / "registry.db")
     reg._invalidate_label()
+    reg._invalidate_maintenance()
     yield path
     reg.set_running(None)
     reg._invalidate_label()
+    reg._invalidate_maintenance()
 
 
 def test_get_label_caches_within_ttl(db, monkeypatch):
@@ -155,3 +159,136 @@ def test_soft_deleted_purged_on_restart(loaded):
     assert reg.get_printer("creality-1", db) is None
     for r in reg.list_printers(db):
         assert reg.pending_state(r) is None
+
+
+# --- maintenance mode (spec_maintenance §1) --------------------------------------
+
+_OLD_PRINTERS = """
+    CREATE TABLE printers (
+        id TEXT PRIMARY KEY, kind TEXT NOT NULL, label TEXT NOT NULL, host TEXT NOT NULL,
+        port INTEGER, model TEXT, access_code TEXT, serial TEXT,
+        deleted INTEGER NOT NULL DEFAULT 0, created_at REAL NOT NULL, updated_at REAL NOT NULL
+    )
+"""
+
+
+def test_init_db_adds_the_maintenance_columns_to_an_old_table_in_place(db):
+    import sqlite3
+    conn = sqlite3.connect(db)
+    conn.execute(_OLD_PRINTERS)
+    conn.execute("INSERT INTO printers VALUES ('bambu-1', 'bambu', 'B1', 'h', NULL, 'P2S', 'code', 'ser', 0, 1.0, 2.0)")
+    conn.commit()
+    conn.close()
+    for _ in range(2):                                   # idempotent on the next start
+        reg.init_db(db)
+    conn = sqlite3.connect(db)
+    cols = [r[1] for r in conn.execute("PRAGMA table_info(printers)")]
+    row = conn.execute("SELECT * FROM printers").fetchone()
+    conn.close()
+    assert cols[-3:] == ["maintenance_since", "maintenance_note", "maintenance_by"]
+    assert len(cols) == 14                               # appended once, nothing rebuilt
+    assert row == ("bambu-1", "bambu", "B1", "h", None, "P2S", "code", "ser", 0, 1.0, 2.0, None, None, None)
+    assert reg.maintenance_map(db) == {}
+
+
+def test_set_maintenance_on_note_off_and_none(loaded):
+    db, _ = loaded
+    assert reg.set_maintenance("klipper-1", True, note="меняю хотенд", by="admin", now=1000.0, db_path=db) == (
+        "on", {"since": 1000.0, "note": "меняю хотенд", "by": "admin"})
+    # already on: only the note changes, since and by stay
+    assert reg.set_maintenance("klipper-1", True, note="жду детали", by="other", now=2000.0, db_path=db) == (
+        "note", {"since": 1000.0, "note": "жду детали", "by": "admin"})
+    assert reg.set_maintenance("klipper-1", True, note="жду детали", by="other", db_path=db) == (
+        "none", {"since": 1000.0, "note": "жду детали", "by": "admin"})
+    assert reg.set_maintenance("klipper-1", True, note="", db_path=db) == (       # empty note -> NULL
+        "note", {"since": 1000.0, "note": None, "by": "admin"})
+    assert reg.get_printer("klipper-1", db)["maintenance_note"] is None
+    assert reg.set_maintenance("klipper-1", False, db_path=db) == ("off", None)
+    row = reg.get_printer("klipper-1", db)
+    assert (row["maintenance_since"], row["maintenance_note"], row["maintenance_by"]) == (None, None, None)
+    assert reg.set_maintenance("klipper-1", False, db_path=db) == ("none", None)
+    assert reg.set_maintenance("nope-1", True, db_path=db) is None
+    assert reg.set_maintenance("nope-1", False, db_path=db) is None
+
+
+def test_set_maintenance_without_a_clock_stamps_now(loaded, monkeypatch):
+    db, _ = loaded
+    monkeypatch.setattr(reg, "time", SimpleNamespace(time=lambda: 1234.5))
+    assert reg.set_maintenance("mks-1", True, db_path=db) == ("on", {"since": 1234.5, "note": None, "by": None})
+
+
+def test_maintenance_map_lists_soft_deleted_printers_and_follows_every_write(loaded):
+    db, _ = loaded
+    reg.set_maintenance("creality-1", True, note="n", by="admin", now=10.0, db_path=db)
+    reg.set_maintenance("mks-1", True, now=20.0, db_path=db)
+    assert reg.maintenance_map(db) == {"creality-1": {"since": 10.0, "note": "n", "by": "admin"},
+                                       "mks-1": {"since": 20.0, "note": None, "by": None}}
+    assert reg.delete_printer("creality-1", db) == "soft"     # still polled until the restart
+    assert reg.in_maintenance("creality-1", db) and reg.in_maintenance("mks-1", db)
+    assert not reg.in_maintenance("bambu-1", db)
+    assert reg.maintenance_of("mks-1", db) == {"since": 20.0, "note": None, "by": None}
+    assert reg.maintenance_of("bambu-1", db) is None
+    reg.set_maintenance("mks-1", False, db_path=db)
+    assert reg.maintenance_map(db) == {"creality-1": {"since": 10.0, "note": "n", "by": "admin"}}
+    reg.load_for_startup(FakeCfg, db)                         # the restart purges the deleted row
+    assert reg.maintenance_map(db) == {}
+
+
+def test_maintenance_map_is_cached_within_its_ttl(loaded, monkeypatch):
+    db, _ = loaded
+    reg.set_maintenance("bambu-1", True, now=5.0, db_path=db)
+    reads = []
+    real = reg._connect
+    monkeypatch.setattr(reg, "_connect", lambda d=None: (reads.append(d), real(d))[1])
+    clock = {"t": 1000.0}
+    monkeypatch.setattr(reg, "time", SimpleNamespace(time=lambda: clock["t"]))
+    for _ in range(3):
+        assert reg.in_maintenance("bambu-1", db)
+    assert len(reads) == 1
+    clock["t"] += reg._MAINT_TTL + 0.1
+    assert reg.in_maintenance("bambu-1", db) and len(reads) == 2
+    m = reg.maintenance_map(db)
+    m["bambu-1"]["note"] = "mutated"                          # callers get a copy
+    assert reg.maintenance_of("bambu-1", db)["note"] is None
+
+
+def test_maintenance_map_answers_the_last_good_read_when_sqlite_fails(loaded, monkeypatch):
+    db, _ = loaded
+    reg.set_maintenance("klipper-1", True, now=7.0, db_path=db)
+    assert reg.in_maintenance("klipper-1", db)
+
+    def broken(d=None):
+        raise reg.sqlite3.OperationalError("database is locked")
+
+    monkeypatch.setattr(reg, "_connect", broken)
+    reg._invalidate_maintenance()
+    assert reg.maintenance_map(db) == {"klipper-1": {"since": 7.0, "note": None, "by": None}}
+    assert reg.in_maintenance("klipper-1", db)
+    # without any good read of that DB: nobody is in maintenance, and nothing raises
+    assert reg.maintenance_map(db + ".other") == {}
+    assert reg.in_maintenance("klipper-1", db + ".other") is False
+
+
+def test_discard_keeps_the_maintenance_mode(loaded):
+    db, _ = loaded
+    reg.set_maintenance("klipper-1", True, note="меняю хотенд", by="admin", now=100.0, db_path=db)
+    reg.set_maintenance("mks-1", True, now=200.0, db_path=db)
+    reg.update_printer("klipper-1", {"host": "10.9.9.9"}, db)
+    reg.create_printer({"kind": "mks", "label": "(8) Extra", "host": "10.0.0.8"}, db)
+    created = [r["id"] for r in reg.list_printers(db) if r["id"].startswith("p-")]
+    reg.set_maintenance(created[0], True, now=300.0, db_path=db)   # a dropped row takes its mode along
+    assert reg.discard_changes(db) == 5
+    assert reg.get_printer("klipper-1", db)["host"] == "10.0.0.4"
+    assert reg.maintenance_map(db) == {"klipper-1": {"since": 100.0, "note": "меняю хотенд", "by": "admin"},
+                                       "mks-1": {"since": 200.0, "note": None, "by": None}}
+
+
+def test_maintenance_is_no_pending_change(loaded):
+    db, _ = loaded
+    reg.set_maintenance("bambu-1", True, note="x", by="admin", db_path=db)
+    row = reg.get_printer("bambu-1", db)
+    assert row["maintenance_since"] is not None
+    assert reg.pending_state(row) is None
+    # the regular PUT does not touch it
+    reg.update_printer("bambu-1", {"maintenance_since": None, "maintenance_note": "y", "label": "(1) B"}, db)
+    assert reg.maintenance_of("bambu-1", db)["note"] == "x"

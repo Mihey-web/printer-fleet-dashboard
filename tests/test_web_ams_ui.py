@@ -173,12 +173,49 @@ def _pop(p):
 def test_ams_popover_idle():
     html = _pop(_printer())
     assert re.findall(r'data-ams-load="(\d+:\d+)"', html) == ["0:1", "1:0"]
-    assert 'class="pc-pop-preset on" disabled' in html            # the loaded slot (1)
-    assert html.count("disabled") == 3                             # loaded + 2 empty slots
+    # the loaded slot (1): aria-disabled, not disabled, and a data-tip, not a title — its tip reaches a
+    # hover and a phone tap (plan step 14, deliberately changed)
+    assert 'class="pc-pop-preset on" aria-disabled="true" data-tip="Загружен сейчас"' in html
+    assert html.count(" disabled>") == 2 and "title=" not in html  # the 2 empty slots
     assert "data-ams-unload" in html and "data-dry-open=\"0\"" in html
     assert "<img" not in html and "&lt;img" in html                # device strings escaped
     assert "javascript" not in html                                # colours only as hex
     assert "AMS 2 Pro" in html and "AMS 2" in html
+
+
+def test_ams_popover_without_commands():
+    # IA §5 (plan step 5): the AMS chip is the one way into the AMS popover, for everyone; a viewer (or
+    # an admin whose card takes no AMS command) gets the slots, humidity, temperature and drying, no buttons
+    p = _printer()
+    p["ams"]["units"][0].update(temp=31.6)
+    html = run("amsViewPopHtml(%s)" % json.dumps(p))
+    assert "<button" not in html and "data-ams" not in html and "data-dry" not in html
+    heads = re.findall(r'<div class="pc-pop-h">([^<]*)</div>', html)
+    assert heads == ["AMS 1 · AMS 2 Pro · 💧20% · 🌡32°", "AMS 2"]                  # the 5-level index: no percent
+    slots = re.findall(r'<span class="pc-pop-slot([^"]*)">(?:<span class="pc-ams-slot[^"]*"[^>]*></span>)([^<]*)</span>', html)
+    assert slots == [(" on", "1 · PETG"), ("", "2 · &lt;img src=x&gt;"), (" empty", "3 · пусто"), (" empty", "4 · пусто"),
+                     ("", "5 · ABS")]                                                  # the loaded slot marked, numbered across units
+    assert "javascript" not in html and "<img" not in html
+    assert html.count('<div class="pc-pop-note">Сушка выключена</div>') == 1           # the unit with a dryer
+    drying = _printer()
+    drying["ams"]["units"][0].update(dry=DRYING, dry_time=712)
+    assert '<div class="pc-pop-note">Сушка · осушение · 55 °C · PETG · осталось 11:52</div>' in run(
+        "amsViewPopHtml(%s)" % json.dumps(drying))
+    assert 'class="pc-pop-slot on"' not in run("amsViewPopHtml(%s)" % json.dumps(_printer(filament_loaded=False)))
+    assert run("amsViewPopHtml(%s)" % json.dumps(_printer(ams=None))) == ""
+
+
+def test_ams_chip_opens_its_popover_for_everyone():
+    p = _printer()
+    admin = run("amsChip(%s, true, true)" % json.dumps(p), "amsChip")
+    viewer = run("amsChip(%s, false, true)" % json.dumps(p), "amsChip")
+    plain = run("amsChip(%s, false)" % json.dumps(p), "amsChip")
+    assert admin.startswith('<span class="pc-chip pc-ams pc-editable" data-edit="ams">')
+    assert viewer.startswith('<span class="pc-chip pc-ams pc-chartable" data-chart="ams">')
+    assert plain.startswith('<span class="pc-chip pc-ams">')
+    css = (ROOT / "app" / "web" / "styles.css").read_text(encoding="utf-8")
+    for sel in (".pc-pop-slot {", ".pc-pop-slot.on {", ".pc-pop-slot.empty {", ".pc-chip.pc-chartable { cursor: pointer; }"):
+        assert sel in css, sel
 
 
 def test_ams_popover_while_printing():
@@ -345,10 +382,18 @@ def test_card_chip_shows_the_drying_time_left():
     [(tip, text)] = _chip_temp(p)
     assert text == '<svg class="pc-ic" aria-hidden="true"><use href="#i-hourglass"></use></svg>11:59'
     assert tip == "Сушка · осушение · 55 °C · PETG · осталось 11:59 · в AMS 48°"
-    # not drying: the AMS temperature
+    # not drying, two units (this fixture): the temperature is in the humidity's tooltip — slots,
+    # humidity and two temperatures ran past the card's edge (H2S with AMS 2 Pro + AMS HT)
     p["ams"]["units"][0].update(dry=_dry(status="off", active=False, remaining_min=None), dry_time=None, temp=31.4)
+    assert _chip_temp(p) == []
+    html = run("amsChip(%s, false)" % json.dumps(p), "amsChip")
+    assert 'data-tip="AMS: влажность 20% · 31°">💧20%</span>' in html
+    # one unit: the AMS temperature in the chip
+    p["ams"]["units"] = p["ams"]["units"][:1]
     assert _chip_temp(p) == [("Температура AMS",
                               '<svg class="pc-ic" aria-hidden="true"><use href="#i-steam"></use></svg>31°')]
+    css = (ROOT / "app" / "web" / "styles.css").read_text(encoding="utf-8")
+    assert re.search(r"\.pc-subrow \.pc-ams \{[^}]*max-width: 100%;[^}]*overflow: hidden", css)
 
 
 # --- popover DOM code, run in node against a stub element ------------------------
@@ -361,7 +406,9 @@ def _dom_function(name: str, required: bool = True) -> str:
 
 def test_popover_command_disables_its_buttons_until_the_reply():
     # A second click while the first command waits for the printer would send
-    # it twice: the popover's buttons stay disabled until the reply.
+    # it twice: the popover's buttons stay disabled until the reply. Plan step 14 (deliberately
+    # changed, IA §10 «ответ там, где нажали»): no toast — the popover says «ждём», a sent command
+    # closes it and its AMS block says so (amsReplySet), a refusal stays in the popover (replyIn).
     src = """
     var log = [], resolveSend = null;
     var btns = [{disabled: false}, {disabled: true}, {disabled: false}];
@@ -370,19 +417,25 @@ def test_popover_command_disables_its_buttons_until_the_reply():
       log.push(["send", pid, action, extra]);
       return new Promise(function (r) { resolveSend = r; });
     }
+    function cmdWaitLine(action) { return {k: "wait", t: action}; }
+    function replyIn(box, line) { log.push(["reply", box === pcPop ? "pop" : box, line]); return true; }
+    function amsReplySet(key, line) { log.push(["block", key, line]); }
     function closePop() { log.push(["close"]); }
     function states() { return btns.map(function (b) { return b.disabled; }); }
-    """ + _dom_function("popCmd") + """
+    """ + _js_function("popCmd") + """
     (async function () {
       var out = {};
       var p = popCmd("b1", "ams_unload", null);
       out.during = states();
-      resolveSend(true);
+      resolveSend({ok: true, line: {k: "unk", t: "sent"}});
       out.ok = await p;
       out.after = states();
+      p = popCmd("b1", "dry_start", {ams: 1});
+      resolveSend({ok: true, line: {k: "ok", t: "dry"}});
+      out.ok1 = await p;
       p = popCmd("b1", "dry_stop", {ams: 0});
       out.during2 = states();
-      resolveSend(false);
+      resolveSend({ok: false, line: {k: "bad", t: "no"}});
       out.ok2 = await p;
       out.after2 = states();
       out.log = log;
@@ -392,8 +445,14 @@ def test_popover_command_disables_its_buttons_until_the_reply():
     out = _node(src)
     assert out["during"] == [True, True, True] and out["during2"] == [True, True, True]
     assert out["after"] == out["after2"] == [False, True, False]      # a disabled slot stays disabled
-    assert (out["ok"], out["ok2"]) == (True, False)
-    assert out["log"] == [["send", "b1", "ams_unload", None], ["close"], ["send", "b1", "dry_stop", {"ams": 0}]]
+    assert (out["ok"], out["ok1"], out["ok2"]) == (True, True, False)
+    log = out["log"]
+    assert log[:4] == [["reply", "pop", {"k": "wait", "t": "ams_unload"}], ["send", "b1", "ams_unload", None],
+                       ["close"], ["reply", None, {"k": "unk", "t": "sent"}]]      # no block: the toast path
+    assert log[4:8] == [["reply", "pop", {"k": "wait", "t": "dry_start"}], ["send", "b1", "dry_start", {"ams": 1}],
+                        ["close"], ["block", "b1__1", {"k": "ok", "t": "dry"}]]     # the AMS block it came from
+    assert log[8:] == [["reply", "pop", {"k": "wait", "t": "dry_stop"}], ["send", "b1", "dry_stop", {"ams": 0}],
+                       ["reply", "pop", {"k": "bad", "t": "no"}]]                   # refused: the popover stays and says why
 
 
 def test_dry_form_start_sends_the_fields_as_typed():
@@ -461,6 +520,12 @@ var thePop = (function () {
   return el;
 })();
 function ensurePop() { pcPop = thePop; return thePop; }
+function nfClose() {}   // openPop closes the notifications' popover first (none is open here)
+// a phone's sheet (plan step 15: the backdrop and the «Назад» entry; tests/test_web_phone_ui.py)
+var pcPopBack = {hidden: true};
+function sheetPhone() { return false; }
+function sheetOpened() {}
+function pcPopClose() {}
 function chip(left, top) {
   return {getBoundingClientRect: function () { return {left: left, top: top, right: left + 60, bottom: top + 24}; }};
 }
@@ -513,3 +578,68 @@ def test_next_popover_screen_does_not_cover_its_chip():
       console.log(JSON.stringify(box()));
     """)
     assert out["top"] == 100 + 24 + 6
+
+
+# --- the one drying line of the AMS tab (IA §6, plan step 11) -----------------------------------
+
+def _auto(kind, card="ждёт · 4% (старт от 6%)", cls="wait", **st):
+    return {"card": card, "cls": cls, "status": dict(st, kind=kind)}
+
+
+def _tab_auto(u, p, can, auto):
+    return run("amsTabDryHtml(%s, %s, %s, %s)" % (json.dumps(u), json.dumps(p), json.dumps(can), json.dumps(auto)))
+
+
+def _plain(html):
+    return re.sub(r"<[^>]+>", "", html)
+
+
+def test_ams_tab_one_drying_line_with_the_auto_dry():
+    p = _printer()
+    drying = _tab_unit(dry=DRYING, dry_time=712)
+    # who dries, t° and the material, the time left in one format, Stop for an admin
+    html = _tab_auto(drying, p, True, _auto("dry", series=2, origin="auto"))
+    assert _plain(html) == "🔥авто · прогон 2 · 55 °C PETG · ещё 11:52Стоп"
+    assert "data-ams-dry-stop" in html and "data-ams-dry-stop" not in _tab_auto(drying, p, False, _auto("dry", series=2, origin="auto"))
+    assert "вручную · 55 °C PETG" in _plain(_tab_auto(drying, p, True, _auto("dry", series=1, origin="manual")))
+    foreign = _plain(_tab_auto(drying, p, True, _auto("foreign")))
+    assert foreign.startswith("🔥чужая сушка · 55 °C PETG · ещё 11:52 — не трогаем")
+    assert "🔥сушка · 55 °C PETG" in _plain(_tab_auto(drying, p, True, _auto("starting")))
+    # idle: the auto-dry's word, for a viewer too, «Сушить…» only for an admin who may start it
+    idle = _tab_unit()
+    html = _tab_auto(idle, p, True, _auto("wait"))
+    assert 'class="ams-dry off st-wait"' in html and "ждёт · 4% (старт от 6%)" in html and "data-ams-dry-open" in html
+    html = _tab_auto(idle, p, False, _auto("wait"))
+    assert "ждёт · 4% (старт от 6%)" in html and "data-ams-dry-open" not in html        # a line, not nothing
+    # the reasons a start is blocked follow the auto-dry's word; the printer's own fault comes first
+    blocked = _tab_unit(dry=_dry(status="off", active=False, blockers=[{"code": 3, "text": "Филамент <в выходе>"}]))
+    html = _tab_auto(blocked, p, True, _auto("wait"))
+    assert "ждёт · 4% (старт от 6%)<br><span class=\"warn\">Сушка недоступна: Филамент &lt;в выходе&gt;</span>" in html
+    assert "data-ams-dry-open" not in html
+    err = _tab_unit(dry=_dry(status="error", active=False, remaining_min=None))
+    assert "Ошибка сушки — см. экран принтера · " in _tab_auto(err, p, True, _auto("fault", "⚠ ошибка", "alert"))
+    # an offline unit (no drying block at all) still says what the auto-dry sees
+    assert _plain(_tab_auto(_tab_unit(dry=None), p, True, _auto("offline", "принтер офлайн", "off"))) == "принтер офлайн"
+    # a unit the auto-dry does not see: the old line, unchanged (test_ams_tab_drying_line)
+    assert _tab_auto(_tab_unit(), p, False, None) == "" and "осталось 11:52" in _tab_auto(drying, p, True, None)
+
+
+def test_ams_tab_blocks_by_printer_name():
+    units = [{"label": "P10", "unit_index": 0}, {"label": "H1", "unit_index": 128}, {"label": "P2", "unit_index": 0},
+             {"label": "H1", "unit_index": 0}, {"label": "p3", "unit_index": 1}]
+    got = run("%s.sort(amsUnitOrder).map(function (u) { return u.label + '/' + u.unit_index; })" % json.dumps(units))
+    assert got == ["H1/0", "H1/128", "P2/0", "p3/1", "P10/0"]
+    load = _js_function("loadAms")
+    assert "units.sort(amsUnitOrder);" in load and "sev(" not in load       # no severity order any more
+
+
+def test_ams_card_head_and_its_one_line():
+    shell = _js_function("amsCardShell")
+    # «H1 · AMS 1 · AMS 2 Pro», the printer's model under it; the «Авто:» line and its ⚙ are gone
+    assert "(amsModel ? ' · ' + amsModel : '')" in shell and "ams-auto" not in shell and "data-ad-row" not in shell
+    # plan step 14: the block's own «Остановить сушку?» (amsAsk) and its command answer (amsReply)
+    assert "amsTabDryHtml(u, p, can, auto, amsAsk === key)" in shell and "auto = { card: al.card, cls: al.cls, status: adu.status };" in shell
+    assert "'<div class=\"reply-slot\" data-ams-reply=\"' + key + '\">' + cmdLineHtml(amsReply[key], 'data-reply-x') + '</div>'" in shell
+    assert "'Влажность, %' + (z.goal ? ' · зелёное — цель ≤\u00a0' + z.ok + '\u00a0%' : '')" in shell
+    assert "Температура, °C · полосы — сушка" in shell
+    assert "data-ad-row" not in _js_function("amsInit")

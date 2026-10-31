@@ -1,7 +1,7 @@
 import os
 import sqlite3
 import time
-from typing import Optional, List
+from typing import Dict, Iterable, List, Optional, Sequence, Tuple
 from threading import Lock
 
 from app.domain.user_models import AuditEntry
@@ -36,6 +36,8 @@ class AuditService:
             CREATE INDEX IF NOT EXISTS idx_audit_action_ip
             ON audit_log(action, ip_address, created_at)
         """)
+        # «История → Действия» reads a window of time, newest first.
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_audit_time ON audit_log(created_at)")
         conn.commit()
         conn.close()
 
@@ -54,20 +56,52 @@ class AuditService:
             conn.commit()
             conn.close()
 
-    def get_logs(self, limit: int = 100, offset: int = 0,
-                 user_id: Optional[str] = None,
-                 action: Optional[str] = None) -> List[AuditEntry]:
-        conn = sqlite3.connect(USERS_DB, timeout=10)
-        conn.row_factory = sqlite3.Row
-        where = []
-        params = []
+    @staticmethod
+    def _where(user_id: Optional[str] = None, action: Optional[str] = None,
+               prefixes: Optional[Sequence[str]] = None, exclude: Optional[Iterable[str]] = None,
+               printer: Optional[str] = None, fr: Optional[float] = None,
+               to: Optional[float] = None) -> Tuple[str, list]:
+        """The WHERE of a filtered read. prefixes: the action starts with one of them;
+        exclude: with none of them (plain string starts, no LIKE patterns); printer: the
+        id is one ":"-separated part of the action (printer_command:pause:<id>:st=…);
+        fr <= created_at < to."""
+        where: List[str] = []
+        params: list = []
         if user_id:
             where.append("user_id = ?")
             params.append(user_id)
         if action:
             where.append("action = ?")
             params.append(action)
-        where_clause = " AND ".join(where) if where else "1=1"
+        if prefixes:
+            where.append("(" + " OR ".join("substr(action, 1, ?) = ?" for _ in prefixes) + ")")
+            for p in prefixes:
+                params += [len(p), p]
+        for p in exclude or ():
+            where.append("substr(action, 1, ?) != ?")
+            params += [len(p), p]
+        if printer:
+            where.append("(instr(action, ?) > 0 OR substr(action, -?) = ?)")
+            params += [":" + printer + ":", len(printer) + 1, ":" + printer]
+        if fr is not None:
+            where.append("created_at >= ?")
+            params.append(fr)
+        if to is not None:
+            where.append("created_at < ?")
+            params.append(to)
+        return (" AND ".join(where) if where else "1=1"), params
+
+    def get_logs(self, limit: int = 100, offset: int = 0,
+                 user_id: Optional[str] = None,
+                 action: Optional[str] = None,
+                 prefixes: Optional[Sequence[str]] = None,
+                 exclude: Optional[Iterable[str]] = None,
+                 printer: Optional[str] = None,
+                 fr: Optional[float] = None,
+                 to: Optional[float] = None) -> List[AuditEntry]:
+        conn = sqlite3.connect(USERS_DB, timeout=10)
+        conn.row_factory = sqlite3.Row
+        where_clause, params = self._where(user_id, action, prefixes, exclude, printer, fr, to)
         rows = conn.execute(f"""
             SELECT id, user_id, action, ip_address, user_agent, created_at
             FROM audit_log
@@ -81,6 +115,29 @@ class AuditService:
             ip_address=r["ip_address"], user_agent=r["user_agent"],
             created_at=r["created_at"]
         ) for r in rows]
+
+    def count_by_key(self, printer: Optional[str] = None, fr: Optional[float] = None,
+                     to: Optional[float] = None, limit: int = 500) -> List[Dict[str, object]]:
+        """Rows per (user, action key — the part before the first ":") in a window and for a
+        printer: [{"user", "key", "n"}], the largest first, at most `limit` (failed logins
+        carry whatever name was typed, so the users are not a closed set)."""
+        where_clause, params = self._where(printer=printer, fr=fr, to=to)
+        conn = sqlite3.connect(USERS_DB, timeout=10)
+        try:
+            rows = conn.execute(f"""
+                SELECT user_id,
+                       CASE WHEN instr(action, ':') > 0 THEN substr(action, 1, instr(action, ':') - 1)
+                            ELSE action END AS k,
+                       COUNT(*) AS n
+                FROM audit_log
+                WHERE {where_clause}
+                GROUP BY user_id, k
+                ORDER BY n DESC, k, user_id
+                LIMIT ?
+            """, (*params, limit)).fetchall()
+        finally:
+            conn.close()
+        return [{"user": r[0], "key": r[1], "n": r[2]} for r in rows]
 
     def count_failed_attempts(self, ip_address: str, window_sec: int = 900) -> int:
         conn = sqlite3.connect(USERS_DB, timeout=10)

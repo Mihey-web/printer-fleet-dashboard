@@ -1,6 +1,6 @@
 from dataclasses import dataclass, asdict, field
 from enum import Enum
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List
 from time import time
 
 
@@ -17,8 +17,16 @@ class PrinterState(str, Enum):
     PAUSED = "paused"
     FINISHED = "finished"
     ERROR = "error"
+    # The job was cancelled by the user: the printer reports a failure, but
+    # nothing is wrong (Bambu FAILED with a cancel code, Klipper "cancelled").
+    CANCELLED = "cancelled"
     OFFLINE = "offline"
     UNKNOWN = "unknown"
+
+
+# The printer_history state of a printer in maintenance mode (spec_maintenance):
+# a history-only value, the live state is never it, so it is not a PrinterState.
+MAINTENANCE_STATE = "maintenance"
 
 
 @dataclass
@@ -66,8 +74,15 @@ class PrinterStatus:
     sdcard: Optional[str] = None              # "normal" | "missing" | "abnormal"; None when unknown / eMMC printers
     nozzle: Optional[Dict[str, Any]] = None   # {"diameter": 0.4, "type": "hardened_steel"} (lib slugs)
     signature_required: Optional[bool] = None  # print.fun bit 29: unsigned print commands refused; None without fun
+    # Bambu only: job starts this process saw in the reports (gcode_state idle -> working)
+    # and the wall clock of the last one; the print-job journal's exact print boundary.
+    job_seq: Optional[int] = None
+    job_started_at: Optional[float] = None
     ctl_ready: Optional[bool] = None   # Klipper: klippy host "ready" (commands accepted); None elsewhere / unknown
     light_ctl: Optional[bool] = None   # Klipper: a light output_pin was found; None until looked up / elsewhere
+    # What the printer reports as wrong or worth knowing, worst first
+    # (app/services/notifications.py); last_error stays the one-line form.
+    notifications: List[Dict[str, Any]] = field(default_factory=list)
 
     def to_dict(self) -> Dict[str, Any]:
         data = asdict(self)

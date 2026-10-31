@@ -3,10 +3,188 @@
 All notable changes to this project are documented here.
 The format is loosely based on [Keep a Changelog](https://keepachangelog.com/).
 
-Releases after `1.0.0` are dated sync points rather than semver bumps; they
-match the `Sync to internal v<date>` commits in this repository's history.
+Tagged releases are `1.0.0` and `2.0.0`. The dated entries between them are
+sync points; they match the `Sync to internal v<date>` commits in this
+repository's history.
 
 ## [Unreleased]
+
+## [2.0.0] — 2026-11-01
+
+A new interface and a lot underneath it: four screens instead of seven tabs
+and a phone layout, printer notifications with Bambu Studio's actions, a print
+journal, maintenance mode, an installable app, temperature charts, Creality
+controls, and cards that follow live telemetry every 2 s.
+
+### Added
+- Printer notifications with actions. Every HMS message and print error of
+  each printer is listed on its card (badge «⚠ N» in the colour of the worst
+  level, a plate under the progress for a pause-error or a fatal one, a
+  popover / bottom sheet on phones, maintenance notes collapsed but never
+  hidden), with the time it appeared and a wiki link; a bell in the header
+  lists the printers that need attention. The buttons per code are the ones
+  Bambu Studio shows, from Bambu's own action and Russian text tables,
+  downloaded at runtime once a day (only the 3-character model prefix leaves
+  the server; the cache is not in git). Every action is checked against the
+  live printer right before sending (same error still active, still paused),
+  admin only, «Стоп» / «Прервать» / firmware restart ask for confirmation,
+  verdict and audit like every other command. «Сбросить ошибки» at the foot
+  of the bell with a dry run. The «Ошибки в карточках» switch is gone.
+- A cancelled Bambu job is its own state «ОТМЕНЕНО» (grey) instead of a red
+  «ОШИБКА»; «История → Печати» shows why a printer paused.
+- Klipper stays online in «ОШИБКА» with the reason when klippy shuts down
+  (e.g. «mcu: Unable to connect») and offers «Перезапуск прошивки»;
+  Creality shows its error code.
+- Print journal («История → Печати»): one row per print — start and end,
+  slicer plan vs actual, pauses and their reasons, result (finished,
+  cancelled, failed, power loss, stopped, lost), success rate per printer,
+  top failure and pause reasons, prints per day, CSV export (admin only).
+  Past prints are rebuilt once from the existing history.
+- Maintenance mode per printer (admin, from the card's ⋯, optional note):
+  the card keeps its real status with a «обслуживание · с …» line and folds
+  into «Не в работе»; the printer leaves the state counts, load,
+  «Финиши», notifications, browser pushes, fleet commands (the dry run says
+  why), AMS auto-drying, auto-ignore and the command probe; its time shows as
+  a hatched «обслуживание» segment on the timeline and is left out of the
+  printing share. Single commands from the card still work.
+- Installable app (PWA) from the dashboard's HTTPS address with icons and a
+  theme colour per theme; the service worker caches static files only. The
+  browser tab shows «(N⚠) P% · Кузница» and a progress ring on the favicon.
+- Temperature chart in the chip popover (nozzle, bed, chamber): 6 h / 24 h /
+  7 d, temperature and dashed target, gaps where there was no data, min / avg /
+  max, hover or tap for a value, the live end follows the chip. Admins keep
+  the setter above it; viewers and chips that cannot be set get the chart
+  only. Chamber temperature and the three targets are recorded since 19.10,
+  `GET /api/printers/{id}/temps?hours=1..168`.
+- «Скрыть» for any printer notification (admin): a hidden one no longer
+  colours or counts in the badge, lifts the card, shows in the bell or the tab
+  title or names a browser push; hidden ones sit in a collapsed «скрытые»
+  group with «Вернуть»; kept on the server for every device.
+- Creality K1 series / Ender-5 Max controls on the card, over the printer's
+  own WebSocket `:9999` `set`: the light (`lightSw`), nozzle and bed targets
+  (`nozzleTempControl`, `bedTempControl`; up to 300 / 100 °C, or the lower
+  `maxNozzleTemp` / `maxBedTemp` the printer reports), the four speed modes
+  as `setFeedratePct` 50 / 100 / 124 / 166 % (only while printing or
+  paused), the part / auxiliary / case fans (`M106 P0` / `P2` / `P1`, only
+  the fans the printer reports) and «Остудить всё» (nozzle and bed to 0,
+  not mid-print, nor on a pause that only a `materialStatus` other than the
+  runout value 1 reports). Creality never acknowledges a command: the result
+  is «отправлено», never «подтверждено» (a multi-frame command cut short says
+  how many frames went out). A K1C's `state` 4 after a cancelled print is
+  «Отменено», not «неизвестно», so «Остудить» works there.
+- Cards follow live telemetry every 2 s (`FORGE_LIVE_REFRESH_S`, `0` = off):
+  a started print, a pause or a temperature change shows in 1–4 s instead of
+  up to the next 30 s poll. Only the store is refreshed; history, the job
+  journal and notifications keep the poll's cadence.
+
+### Fixed
+- A lasting «fatal» HMS on a printer that keeps printing (e.g. a dirty lidar lens)
+  no longer puts it on top of the cards / the «Финиш» order, in the bell or
+  the tab title; only a paused or errored printer is lifted.
+
+### Changed
+- The dashboard is laid out anew (information architecture redesign): four
+  screens — «Принтеры · AMS · История · Админ», three for a viewer — instead
+  of seven tabs; «Сводка», «Окно», «Настройки» and «Администрирование» are
+  gone and everything on them has a new home. The screen lives in the address
+  (`#/printers`, `#/ams`, `#/history/<sub>?period=…&printer=…`,
+  `#/admin/<sub>`), so a reload, the automatic reload after a deploy, Back /
+  Forward and shared links keep it; the remembered tab and «История» sub-tab
+  (`forge-ops-active-view`, `forge-history-sub`) are read once, turned into an
+  address and removed. A sticky 48 px header: the bell is the one loud
+  counter, a dot with the poll time (a red «нет связи · 2 мин» on a failure),
+  👤 with the role in words.
+  - «Принтеры»: one farm row — the state chips with their counts are the
+    filters (click, click again for all, Ctrl+click to add; remembered),
+    «Порядок: Имя | Финиш» (a printer that needs a decision is always first;
+    the «Проблемные сверху» switch and the «Онлайн» filter are gone) and the
+    farm's commands (light, «Пауза всех…», «Продолжить N» only when there is
+    any). A «Финиши» row — «Готовы» (finished, the plate waits) and «Дальше»
+    (the next finishes) — unfolds the former «Окно» timeline in place. «Не в
+    работе · N» folds the printers in maintenance and those offline for a day
+    or more. Cards: five buttons, one ⋯ in the head (maintenance, and links
+    to the printer's prints, timeline and settings), the model always next to
+    the name, a coloured notification badge only when a decision is needed or
+    a fatal is under 30 min old (a grey «ⓘ N» otherwise). The bell lists
+    «Нужно решение» first and the rest folded, «Сбросить ошибки (N)» at its
+    foot.
+  - «AMS»: an auto-drying strip on top with «Сушить все…», «Остановить все»
+    and «Правила ›» (admin), one drying line per unit, the units by printer
+    name, humidity zones from the auto-drying goal, the drying journal at the
+    bottom (5 lines, up to 50 in place).
+  - «История»: one sticky head for every sub-tab (period 24 h · 7 d · 30 d ·
+    90 d · «Свой…», one printer choice, «⇩ Выгрузить» for admins) over
+    «Печати» (result chips with counts, 50 rows a page, a row unfolds into
+    every pause with its time and reason, the auto-ignore presses and how the
+    print ended), «Хронология» (up to 7 days, the help under «?»),
+    «Статистика» (the former «Сводка» statistics and the per-printer rows in
+    one table, prints per day, top reasons) and «Действия» (admin: the audit
+    log in groups — commands, automation, park and settings, access — with
+    the token refreshes hidden). The events log is gone: prints, pauses and
+    outages are in «Печати» and «Хронология».
+  - «Админ» (admin only): «Парк» (the printer table; serial number and access
+    code are in the form, a read-only «Управление» column, the maintenance
+    status with «к карточке ›», the Creality light switch in the form),
+    «Автоматика» (the auto-drying rules and units, moved from the AMS tab,
+    and the auto-ignore codes with Bambu's texts — no longer API-only),
+    «Доступ» (users; role, password and delete in the row), «Система»
+    (Telegram and its proxies collapsed, the on/off switch in view).
+    «Этот браузер» (👤) holds what only this browser keeps: the account and
+    «Выйти», theme and text size, browser notifications, the app install,
+    the version. The login page shows this browser's theme.
+  - Phones (under 900 px): a bottom navigation, a 44 px top line, the farm's
+    commands in a «Ферма ▾» sheet, the finishes as a list, every popover as a
+    bottom sheet that Back closes, AMS units as one-line rows, the admin
+    tables as cards, pinch and tap on «Хронология»; PWA shortcuts «Нужно
+    решение», «Финиши» and «AMS»; a browser push opens its printer.
+  - One rule for confirmations, tips and answers: no native confirm / alert /
+    prompt is left — one object is asked in place (stop drying, load or
+    unload filament, end maintenance, delete a printer or a proxy, apply or
+    discard the park's edits), group actions keep their dialogs; tips are
+    `data-tip` only (one floating tooltip for the whole page, a tap on a
+    phone), no native `title`; a command's answer shows where it was pressed,
+    a toast only when that place is gone.
+  - The «Годно / Брак» marks and «Брак %» are removed, the «Оценка» column
+    of the print journal's CSV too (the
+    `PUT /api/admin/history/jobs/{id}/verdict` route stays, unused). The
+    print results read the same in the list, its chips and the CSV:
+    «Успешно · Отменено · Ошибка · Питание · Нет связи · Остановлено · Идёт».
+  - Server: `GET /api/history/jobs.csv` is admin-only (403 for a viewer);
+    `GET /api/admin/audit` takes `prefix` / `exclude` (action starts),
+    `printer` and `fr` / `to`, next to the new `/api/admin/audit/counts` and
+    `/api/admin/audit.csv`; `GET /api/admin/print-error-texts?codes=…` names
+    auto-ignore codes; a print row of `/api/history/jobs` carries
+    `pause_list` (every pause with its time).
+- Setting `printer_light_disabled` replaces `printer_light_enabled`: every
+  Creality has its light button unless its id is listed (a model without a
+  lamp).
+- A Creality's speed chip opens its modes only while a print runs (a
+  Bambu's in any state, as before); the modes show the feed rate they set
+  (Тихий · 50 % … Безумный · 166 %).
+- The card's ⋯ menu no longer repeats the card: speed is the speed chip,
+  «Остудить всё» and «Опустить стол» are the row's ❄ / ⤓ buttons; the menu
+  holds the maintenance section (admin) and the printer's links.
+- Lesser HMS (maintenance reminders) are called «плановые».
+
+### Fixed
+- The card head stays one line at every width: a long name with its model no
+  longer wraps the status pills under it and pushes that card's progress and
+  chips below its neighbours'; short of room the model is left out whole, then
+  the name is cut. Wi-Fi is an icon on every card up to 400 px (dBm in its tip).
+- A printer with two or more AMS units (e.g. AMS 2 Pro + AMS HT) no longer
+  runs the card's AMS row past the edge: each unit's temperature moves into
+  its humidity's tooltip (the drying time left stays), and the row is clipped
+  inside the card whatever the number of units.
+- «История → Печати»: the result badge sits level with the progress text next
+  to it.
+- AMS auto-drying keeps drying: a run the printer switched off on its own is
+  restarted after 5 min instead of holding the unit for 24 h and then
+  switching it off; while printing the Bambu print preset is used (PETG
+  55 °C — at 65 °C P2S printers kept switching the drying off).
+- Auto «Ignore and resume» counted tries per job, but network prints report
+  job id "0", so after 3 tries a printer was never waved through again until
+  a restart; tries are now per pause. A listed pause that is not waved
+  through is written to the audit log with the reason.
 
 ## [2026-10-15]
 

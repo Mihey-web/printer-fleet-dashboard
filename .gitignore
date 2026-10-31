@@ -429,3 +429,5 @@ ams_history.db-*
 pi_status.txt
 timeline*.png
 *.db-journal
+# Runtime downloads (data/hms: Bambu's HMS tables — their data, never commit or mirror it)
+/data/

@@ -1,8 +1,9 @@
 """Fleet-wide (bulk) commands: one admin request, many printers, sent concurrently.
 
 Eligibility is decided from the stored status (the same rules the UI uses);
-printer_commands.send() then re-checks each printer on its live telemetry,
-and its refusals come back as "skipped".
+printer_commands.send() (reset_errors: notification_actions.reset_one) then
+re-checks each printer on its live telemetry, and its refusals come back as
+"skipped".
 """
 import logging
 import secrets
@@ -10,11 +11,13 @@ import threading
 from concurrent.futures import ThreadPoolExecutor, wait
 from typing import Any, Dict, List, Optional
 
-from app.services import printer_commands
+from app.services import notification_actions, printer_commands, printer_registry
 
 logger = logging.getLogger(__name__)
 
-BULK_ACTIONS = ("light_on", "light_off", "pause", "resume")
+# reset_errors: «Закрыть диалог» on every printer with a print error that has it
+# (notification_actions.reset_skip_reason / reset_one).
+BULK_ACTIONS = ("light_on", "light_off", "pause", "resume", "reset_errors")
 BULK_MAX_PRINTERS = 64
 # One worker per printer (<= 64): every send starts at once, so a few silent
 # printers holding a worker for REPLY_TIMEOUT never push the others past the
@@ -23,11 +26,12 @@ BULK_MAX_WORKERS = BULK_MAX_PRINTERS
 # A send already waits up to REPLY_TIMEOUT (8 s) for its reply.
 BULK_DEADLINE = printer_commands.REPLY_TIMEOUT + 4.0
 
-MSG_BAD_ACTION = "Групповое действие: light_on, light_off, pause или resume"
+MSG_BAD_ACTION = "Групповое действие: light_on, light_off, pause, resume или reset_errors"
 MSG_NO_PRINTERS = "Не выбран ни один принтер"
 MSG_TOO_MANY = "За раз — не больше %d принтеров" % BULK_MAX_PRINTERS
 MSG_BUSY = "Групповая команда уже выполняется — дождитесь окончания"
 MSG_NOT_FOUND = "принтер не найден"
+MSG_MAINT = "на обслуживании"
 MSG_OFFLINE = "офлайн"
 MSG_GRACE = "нет связи — данные устарели"
 MSG_NO_LIGHT = "нет управляемой подсветки"
@@ -58,7 +62,14 @@ def _lc_first(s: Optional[str]) -> Optional[str]:
 
 def skip_reason(action: str, d: Dict[str, Any], caps: Dict[str, Any], note: Optional[str]) -> Optional[str]:
     """Why this printer is left out of a bulk `action` (ru, lower case), or None.
-    Mirrored by app.js bulkSkipReason."""
+    Mirrored by app.js bulkSkipReason (reset_errors: nfResetSkipWhy).
+    d["maintenance"]: the printer is in maintenance mode (spec_maintenance) —
+    left out of every bulk action, and said first: an offline printer in
+    maintenance must not read «офлайн»."""
+    if d.get("maintenance"):
+        return MSG_MAINT
+    if action == "reset_errors":
+        return notification_actions.reset_skip_reason(d, caps, note)
     cap = printer_commands.ACTION_CAP[action]
     if not d.get("online") or d.get("state") == "offline":
         return MSG_OFFLINE + (" · " + note if caps.get(cap) is False and note else "")
@@ -78,11 +89,24 @@ def _row(pid: str, label: str, status: str, detail: str) -> Dict[str, Any]:
             "status": status, "detail": detail}
 
 
+def _maintenance_map() -> Dict[str, Any]:
+    try:
+        return printer_registry.maintenance_map()
+    except Exception:
+        logger.debug("maintenance map failed", exc_info=True)
+        return {}
+
+
 def run_bulk(action: str, printer_ids: Optional[List[str]], *, store, labels: Optional[Dict[str, str]] = None,
-             dry_run: bool = False, send=None) -> Dict[str, Any]:
+             dry_run: bool = False, send=None, keys: Optional[Dict[str, str]] = None,
+             maintenance: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     """Send `action` to every eligible printer at once; never blocks past
     BULK_DEADLINE. Returns {"action", "batch", "dry_run", "results", "summary"}
-    with one result row per requested id, in request order."""
+    with one result row per requested id, in request order. keys (reset_errors
+    only): printer id -> the record the admin confirmed; reset_one refuses a
+    printer whose live record is another one. maintenance: printer id -> its
+    maintenance mode (printer_registry.maintenance_map, read when None) —
+    those printers are skipped, a dry run says so too."""
     if action not in BULK_ACTIONS:
         raise BulkError(MSG_BAD_ACTION)
     ids = list(dict.fromkeys(printer_ids or []))        # dedupe, keep order
@@ -95,8 +119,9 @@ def run_bulk(action: str, printer_ids: Optional[List[str]], *, store, labels: Op
         raise BulkBusy(MSG_BUSY)
     pending = None                                      # sends still running when we return
     try:
-        send = send or printer_commands.send
+        send = send or (notification_actions.reset_one if action == "reset_errors" else printer_commands.send)
         labels = labels or {}
+        maintenance = _maintenance_map() if maintenance is None else maintenance
         batch = secrets.token_hex(4)
         statuses = {s.id: s.to_dict() for s in store.get_all()} if store is not None else {}
         res: Dict[str, Dict[str, Any]] = {}
@@ -107,6 +132,7 @@ def run_bulk(action: str, printer_ids: Optional[List[str]], *, store, labels: Op
             if d is None:
                 res[pid] = _row(pid, label, "skipped", MSG_NOT_FOUND)
                 continue
+            d = dict(d, maintenance=maintenance.get(pid))
             caps, note = printer_commands.caps_for(d)
             why = skip_reason(action, d, caps, note)
             if why:
@@ -117,7 +143,9 @@ def run_bulk(action: str, printer_ids: Optional[List[str]], *, store, labels: Op
                 todo.append((pid, label))
         if todo:
             ex = ThreadPoolExecutor(max_workers=min(BULK_MAX_WORKERS, len(todo)), thread_name_prefix="bulk")
-            futs = {ex.submit(send, pid, action, {}): (pid, label) for pid, label in todo}
+            keys = (keys or {}) if action == "reset_errors" else {}
+            futs = {ex.submit(send, pid, action, {"key": keys[pid]} if pid in keys else {}): (pid, label)
+                    for pid, label in todo}
             done, not_done = wait(futs, timeout=BULK_DEADLINE)
             # never block past the deadline; queued (never started) sends are cancelled, not sent later
             ex.shutdown(wait=False, cancel_futures=True)

@@ -260,18 +260,21 @@ def test_creality_numeric_state_5_is_paused():
 def test_creality_numeric_state_known_codes():
     c = CrealityK1Client("host", "E5")
     c.connected = True
-    for code, want in ((0, "idle"), (1, "printing"), (2, "paused"), (3, "finish")):
+    # 4 = stopped: a K1C (fw 1.3.5.22) after a cancelled print (ha_creality_ws fixture)
+    for code, want in ((0, "idle"), (1, "printing"), (2, "paused"), (3, "finish"), (4, "cancelled"), (5, "paused")):
         c.on_message(None, '{"state": %d}' % code)
         assert c.get_data()["state"] == want
 
 
 def test_creality_unknown_numeric_state_is_not_idle():
     # Неизвестный код не должен маскироваться под 'idle' — иначе следующая
-    # незнакомая пауза снова станет невидимой.
+    # незнакомая пауза снова станет невидимой. 7 (finishing a cancel) and 9
+    # (starting a print) are the K1C's busy codes: unknown too.
     c = CrealityK1Client("host", "E5")
-    c.on_message(None, '{"state": 42}')
     c.connected = True
-    assert c.get_data()["state"] == "unknown"
+    for code in (42, 7, 9):
+        c.on_message(None, '{"state": %d}' % code)
+        assert c.get_data()["state"] == "unknown"
 
 
 # --- Klipper: light pin discovery, acknowledged commands (run_action) -------------
@@ -509,3 +512,247 @@ def test_creality_light_state_and_switch():
     assert c.send_command("light_off")["success"] is True
     assert c.send_command("light_on")["success"] is True
     assert sent == [{"method": "set", "params": {"lightSw": 0}}, {"method": "set", "params": {"lightSw": 1}}]
+
+
+def test_creality_fans_and_heater_ceilings_reach_the_data():
+    # K1C (fw 1.3.5.22) frame keys: case / auxiliary fans and the heater ceilings
+    # leave debug for the telemetry (the card's fan popover, the temperature limits)
+    c = CrealityK1Client("host", "K1")
+    c.on_message(None, json.dumps({"modelFanPct": 40, "caseFanPct": 30, "auxiliaryFanPct": 0,
+                                   "maxNozzleTemp": 300, "maxBedTemp": "100", "maxBoxTemp": 60}))
+    c.connected = True
+    d = c.get_data()
+    assert (d["fan_speed_pct"], d["case_fan_pct"], d["aux_fan_pct"]) == (40, 30, 0)
+    assert (d["max_nozzle_temp"], d["max_bed_temp"]) == (300, 100)
+    assert (d["debug"]["case_fan_pct"], d["debug"]["aux_fan_pct"]) == (30, 0)
+    c.on_message(None, '{"maxNozzleTemp": "x", "nozzleTemp": 20}')     # unparseable: last value kept
+    assert c.get_data()["max_nozzle_temp"] == 300
+    c2 = CrealityK1Client("host", "E5")
+    c2.on_message(None, '{"modelFanPct": 0}')                           # a printer without them
+    c2.connected = True
+    assert not {"case_fan_pct", "aux_fan_pct", "max_nozzle_temp", "max_bed_temp"} & set(c2.get_data())
+
+
+def test_creality_set_frames_go_out_one_by_one():
+    c = CrealityK1Client("host", "K1")
+    sent = []
+    c.ws = type("W", (), {"send": lambda self, raw: sent.append(raw)})()
+    frames = [{"nozzleTempControl": 0}, {"bedTempControl": {"num": 0, "val": 0}}]
+    assert c.send_command("set", frames) == {"success": False, "detail": "Not connected"}
+    assert sent == []
+    c.connected = True
+    assert c.send_command("set", frames) == {"success": True, "detail": "Command sent"}
+    assert sent == ['{"method": "set", "params": {"nozzleTempControl": 0}}',
+                    '{"method": "set", "params": {"bedTempControl": {"num": 0, "val": 0}}}']
+    for bad in (None, [], {"nozzleTempControl": 0}, [{}], ["M106"]):
+        assert c.send_command("set", bad) == {"success": False, "detail": "No set params provided"}
+    assert len(sent) == 2
+
+    def broken(self, raw):
+        raise OSError("socket is already closed.")
+    c.ws = type("W", (), {"send": broken})()
+    assert c.send_command("set", frames) == {"success": False, "detail": "socket is already closed."}
+
+
+def test_creality_set_frames_cut_short_say_how_many_went_out():
+    # the socket drops after the first frame: it reached the printer, so the
+    # result is a success (never «nothing sent») marked partial, with the count
+    c = CrealityK1Client("host", "K1")
+    c.connected = True
+    sent = []
+
+    def second_fails(self, raw):
+        if len(sent) == 1:
+            raise OSError("socket is already closed.")
+        sent.append(raw)
+    c.ws = type("W", (), {"send": second_fails})()
+    frames = [{"gcodeCmd": "M106 P0 S0"}, {"gcodeCmd": "M106 P2 S128"}, {"gcodeCmd": "M106 P1 S76"}]
+    assert c.send_command("set", frames) == {
+        "success": True, "partial": True, "detail": "отправлено частично: 1 из 3 (socket is already closed.)"}
+    assert sent == ['{"method": "set", "params": {"gcodeCmd": "M106 P0 S0"}}']
+
+
+# --- Klipper: klippy host state, the host watchdog (notifications spec step 6) -----
+
+import klipper_client
+
+
+def _notice(k, method):
+    k.on_message(None, json.dumps({"jsonrpc": "2.0", "method": method}))
+
+
+def _host_klipper(server_info=None, printer_info=None):
+    """A connected client whose Moonraker answers server.info / printer.info."""
+    def answer(req):
+        if req["method"] == "server.info" and server_info is not None:
+            return {"result": server_info}
+        if req["method"] == "printer.info" and printer_info is not None:
+            return {"result": printer_info}
+        return None
+    return _ready_klipper(answer)
+
+
+_SHUTDOWN_INFO = {"state": "shutdown", "state_message": "Lost communication with MCU 'mcu'\nOnce the underlying..."}
+
+
+def test_klipper_notify_klippy_shutdown_and_ready():
+    k = _host_klipper(printer_info=_SHUTDOWN_INFO)
+    k.parse_status({"print_stats": {"state": "printing"}, "webhooks": {"state": "ready"}})
+    _notice(k, "notify_klippy_shutdown")
+    data = k.get_data()
+    assert data["host_state"] == "shutdown" and data["host_message"] == _SHUTDOWN_INFO["state_message"]
+    assert [r["method"] for r in k.ws.sent] == ["printer.info"]          # the reason, at once
+    assert k.last_host_ts > 0 and k.last_message_ts == 0.0              # a host answer, not telemetry
+    k.ws.sent.clear()
+    _notice(k, "notify_klippy_ready")
+    data = k.get_data()
+    assert (data["host_state"], data["host_message"]) == ("ready", None)
+    # subscribed again (klippy restarted) and the light pin looked up again
+    assert [r["method"] for r in k.ws.sent] == ["printer.objects.subscribe", "printer.objects.query",
+                                                "printer.objects.list"]
+
+
+def test_klipper_notify_klippy_disconnected():
+    k = _host_klipper()
+    _notice(k, "notify_klippy_disconnected")
+    data = k.get_data()                       # served: the host answered, though klippy never sent a status
+    assert (data["host_state"], data["host_message"]) == ("disconnected", "Klippy отключился от Moonraker")
+    assert k.ws.sent == []
+
+
+def test_klipper_host_check_only_when_statuses_stop():
+    k = _host_klipper()
+    now = time.time()
+    k.last_message_ts = now - 5
+    assert k._check_host(now) is False and k.ws.sent == []
+    k.last_message_ts = now - 11
+    assert k._check_host(now) is True
+    assert [r["method"] for r in k.ws.sent] == ["server.info"]
+    k.connected = False
+    assert k._check_host(now) is False and len(k.ws.sent) == 1
+
+
+def test_klipper_server_info_updates_the_host_and_asks_for_the_reason():
+    k = _host_klipper(server_info={"klippy_connected": True, "klippy_state": "shutdown"},
+                      printer_info=_SHUTDOWN_INFO)
+    k.parse_status({"print_stats": {"state": "printing"}, "webhooks": {"state": "ready"}})
+    assert k._check_host(time.time()) is True
+    assert [r["method"] for r in k.ws.sent] == ["server.info", "printer.info"]
+    data = k.get_data()
+    assert (data["host_state"], data["host_message"]) == ("shutdown", _SHUTDOWN_INFO["state_message"])
+    assert time.time() - k.last_host_ts < 5
+    # klippy gone from Moonraker: no printer.info to ask
+    k = _host_klipper(server_info={"klippy_connected": False, "klippy_state": "disconnected"})
+    k._check_host(time.time())
+    assert [r["method"] for r in k.ws.sent] == ["server.info"]
+    assert (k.get_data()["host_state"], k.get_data()["host_message"]) == ("disconnected",
+                                                                          "Klippy отключился от Moonraker")
+    # an error reply changes nothing
+    k = _ready_klipper(lambda req: {"error": {"message": "boom"}})
+    k._check_host(time.time())
+    assert k.last_host_ts == 0.0 and "host_state" not in k.data
+
+
+def test_klipper_server_info_back_to_ready_subscribes_again():
+    k = _host_klipper(server_info={"klippy_connected": True, "klippy_state": "ready"})
+    k.parse_status({"print_stats": {"state": "standby"}, "webhooks": {"state": "shutdown", "state_message": "x"}})
+    k._check_host(time.time())
+    assert [r["method"] for r in k.ws.sent] == ["server.info", "printer.objects.subscribe", "printer.objects.query",
+                                                "printer.objects.list"]
+    assert (k.data["host_state"], k.data["host_message"]) == ("ready", None)
+    k.ws.sent.clear()
+    k._check_host(time.time())                 # still ready: nothing more than the question
+    assert [r["method"] for r in k.ws.sent] == ["server.info"]
+
+
+def test_klipper_get_data_while_the_host_answers():
+    k = _host_klipper()
+    k.parse_status({"print_stats": {"state": "printing"}, "display_status": {"progress": 0.47},
+                    "webhooks": {"state": "shutdown", "state_message": "MCU 'mcu' shutdown: Timer too close"}})
+    k.last_message_ts = time.time() - 120                  # klippy in shutdown sends no status
+    k.last_host_ts = time.time() - 5                       # but the host keeps answering
+    data = k.get_data()
+    assert (data["state"], data["progress"], data["host_state"]) == ("printing", 47, "shutdown")
+    assert data["host_message"] == "MCU 'mcu' shutdown: Timer too close" and k.connected is True
+    # the host stopped answering too: stale, as before
+    k.last_host_ts = time.time() - 31
+    assert k.get_data() == {} and k.connected is False
+
+
+def test_klipper_ready_host_without_statuses_is_still_stale():
+    # A ready klippy always streams statuses: silence then is the old hung-socket case.
+    k = _host_klipper()
+    k.parse_status({"print_stats": {"state": "printing"}, "webhooks": {"state": "ready"}})
+    k.last_message_ts = time.time() - 31
+    k.last_host_ts = time.time()
+    assert k.get_data() == {} and k.connected is False
+
+
+def test_klipper_messages_no_longer_feed_the_stage_or_the_job_name():
+    k = KlipperClient("host", 7125, "L")
+    k.parse_status({"print_stats": {"state": "error", "message": "Move out of range"},
+                    "display_status": {"message": "Hello"},
+                    "webhooks": {"state": "shutdown", "state_message": "MCU shutdown"}})
+    data = k.get_data()
+    assert "message" not in data and data["stage"] is None
+    assert (data["print_message"], data["display_message"]) == ("Move out of range", "Hello")
+    assert (data["host_state"], data["host_message"]) == ("shutdown", "MCU shutdown")
+    # cleared: "" / None from Klipper, ready drops the host message
+    k.parse_status({"print_stats": {"message": ""}, "display_status": {"message": None},
+                    "webhooks": {"state": "ready", "state_message": "Printer is ready"}})
+    data = k.get_data()
+    assert (data["print_message"], data["display_message"], data["host_message"]) == ("", None, None)
+    assert data["debug"]["webhooks_state"] == "ready"
+
+
+def test_klipper_state_message_alone_keeps_the_host_state():
+    # A status diff carries only what changed: a message without the state.
+    k = KlipperClient("host", 7125, "L")
+    k.parse_status({"webhooks": {"state": "startup", "state_message": "Starting"}})
+    k.parse_status({"webhooks": {"state_message": "Printer is not ready"}})
+    data = k.get_data()
+    assert (data["host_state"], data["host_message"], data["debug"]["webhooks_state"]) == (
+        "startup", "Printer is not ready", "startup")
+
+
+@pytest.mark.parametrize("action,method", [("fw_restart", "printer.firmware_restart"),
+                                           ("klippy_restart", "printer.restart")])
+def test_klipper_restart_actions(action, method):
+    k = _ready_klipper(lambda req: {"result": "ok"})
+    assert k.run_action(action, timeout=1)["replied"] is True
+    assert [r["method"] for r in k.ws.sent] == [method]
+
+
+def test_klipper_host_watchdog_thread(monkeypatch):
+    monkeypatch.setattr(klipper_client, "HOST_CHECK_S", 0.01)
+    k = _host_klipper()
+    k._start_host_watch()
+    first = k._host_thread
+    assert first.name == "klipper-host-Ghost 6" and first.daemon
+    k._start_host_watch()                                  # a reconnect's on_open: the same thread
+    assert k._host_thread is first
+    deadline = time.time() + 5
+    while not any(r["method"] == "server.info" for r in list(k.ws.sent)) and time.time() < deadline:
+        time.sleep(0.01)
+    assert any(r["method"] == "server.info" for r in list(k.ws.sent))
+    k._stop_reconnect.set()                                # disconnect() stops it
+    first.join(timeout=2)
+    assert not first.is_alive()
+
+
+# --- Creality: err -> err_code / err_key ---------------------------------------------
+
+def test_creality_err_code_and_key():
+    c = CrealityK1Client("host", "K1")
+    c.connected = True
+    c.on_message(None, '{"state": 1, "err": {"errcode": 2, "key": 5}}')
+    data = c.get_data()
+    assert (data["err_code"], data["err_key"], data["debug"]["err"]) == (2, 5, {"errcode": 2, "key": 5})
+    c.on_message(None, '{"nozzleTemp": 200}')                       # no err in this message: kept
+    assert c.get_data()["err_code"] == 2
+    c.on_message(None, '{"err": {"errcode": 0, "key": 0}}')
+    assert (c.get_data()["err_code"], c.get_data()["err_key"]) == (0, 0)
+    c.on_message(None, '{"err": {"errcode": "x", "key": 1}}')      # unparseable: last value kept
+    c.on_message(None, '{"err": 3}')                                 # not the dict form: debug only
+    data = c.get_data()
+    assert (data["err_code"], data["err_key"], data["debug"]["err"]) == (0, 0, 3)

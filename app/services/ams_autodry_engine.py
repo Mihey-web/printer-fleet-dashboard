@@ -58,6 +58,7 @@ AUTO_USER = "auto-dry"
 MSG_NOT_FOUND = "Блок не найден"
 MSG_BUSY = "Блок занят — команда уже выполняется"
 MSG_OFFLINE = "Принтер офлайн"
+MSG_MAINT = "Принтер на обслуживании"
 MSG_DRYING = "Уже сушится — пропускаем"
 MSG_UNCONFIRMED = "Уже запущена — ждём подтверждения от AMS"
 MSG_NOT_DRYING = "Не сушится — пропускаем"
@@ -215,6 +216,22 @@ def unclaim(printer_id: str, ams: Any) -> None:
             _inflight.discard(rules.unit_key(printer_id, ams))
 
 
+def drying_units(printer_id: str, status: Any) -> List[int]:
+    """The units a printer-wide drying stop (auto_stop_ams_dry: a notification's
+    «Остановить сушку») ends: drying in this live status, or in a run of the
+    engine's (its start window too), as stop_all counts them."""
+    out = set()
+    for u in ((getattr(status, "ams", None) or {}).get("units") or []):
+        if isinstance(u, dict) and _is_int(u.get("index")) and (u.get("dry") or {}).get("active"):
+            out.add(u["index"])
+    with _lock:
+        for key, st in _states.items():
+            parsed = rules.parse_key(key)
+            if parsed is not None and parsed[0] == printer_id and st.get("phase") in ("running", "foreign"):
+                out.add(parsed[1])
+    return sorted(out)
+
+
 # --- observations ---------------------------------------------------------------------
 
 def _label(status) -> str:
@@ -234,17 +251,30 @@ def _cmd_ok(status) -> Optional[bool]:
         return None
 
 
-def _absent_obs(key: str) -> Dict[str, Any]:
+def _absent_obs(key: str, maintenance: bool = False) -> Dict[str, Any]:
     return {"key": key, "present": False, "online": False, "printing": False, "busy": False, "dry_ok": None,
-            "cmd_ok": None, "dry": None, "rh": None, "temp": None, "slots": [], "tz_offset_min": TZ_OFFSET_MIN}
+            "cmd_ok": None, "dry": None, "rh": None, "temp": None, "slots": [], "tz_offset_min": TZ_OFFSET_MIN,
+            "maintenance": maintenance}
+
+
+def _maintenance_ids() -> set:
+    """Printers in maintenance mode (one registry read per pass, cached; never raises)."""
+    try:
+        return set(printer_registry.maintenance_map())
+    except Exception:
+        logger.debug("maintenance map failed", exc_info=True)
+        return set()
 
 
 def _collect(now: float) -> Tuple[Dict[str, Dict[str, Any]], Dict[str, Dict[str, Any]]]:
     """({key: observation without history rows}, {key: display}) of every
     AMS that can dry in the stored status, plus the units the engine knows
-    that are not there (present=False)."""
+    that are not there (present=False). "maintenance": the printer is in
+    maintenance mode — absent units too: an offline printer without its AMS
+    in the status shows «на обслуживании», not «офлайн»."""
     obs: Dict[str, Dict[str, Any]] = {}
     disp: Dict[str, Dict[str, Any]] = {}
+    maint = _maintenance_ids()
     store = _store
     for s in (store.get_all() if store is not None else []):
         if getattr(s.kind, "value", s.kind) != "bambu":
@@ -263,14 +293,16 @@ def _collect(now: float) -> Tuple[Dict[str, Dict[str, Any]], Dict[str, Dict[str,
             obs[key] = {"key": key, "present": True, "online": online, "printing": printing,
                         "busy": s.filament_change is not None, "dry_ok": s.ams_dry_ok, "cmd_ok": cmd_ok,
                         "dry": copy.deepcopy(dry), "rh": u.get("humidity_pct"), "temp": u.get("temp"),
-                        "slots": copy.deepcopy(u.get("slots") or []), "tz_offset_min": TZ_OFFSET_MIN}
+                        "slots": copy.deepcopy(u.get("slots") or []), "tz_offset_min": TZ_OFFSET_MIN,
+                        "maintenance": s.id in maint}
             disp[key] = {"label": label, "name": bambu_extras.ams_unit_name(idx), "device_type": s.device_type,
                          "model": rules.MODEL_NAMES.get(dry.get("type"))}
     with _lock:
         known = list(_states)
     for key in known:
         if key not in obs:
-            obs[key] = _absent_obs(key)
+            pk = rules.parse_key(key)
+            obs[key] = _absent_obs(key, bool(pk and pk[0] in maint))
     return obs, disp
 
 
@@ -377,7 +409,8 @@ def _execute_start(key: str, action: Dict[str, Any], origin: str, now: float):
                     apply = False                 # a stop / toggle landed meanwhile: abort, no event
         if apply:
             prn = printer_registry.get_printer(pid) or {}
-            unit = _unit_of(printer_commands.live_status(pid, prn), ams)
+            live = printer_commands.live_status(pid, prn)
+            unit = _unit_of(live, ams)
             replanned = plan
             if unit is not None and unit.get("dry"):
                 if unit["dry"].get("active"):
@@ -385,8 +418,9 @@ def _execute_start(key: str, action: Dict[str, Any], origin: str, now: float):
                     apply = False
                     result = {"success": False, "status": "refused", "detail": MSG_DRYING}
                 else:
+                    printing = live.state in (PrinterState.PRINTING, PrinterState.PAUSED)
                     replanned = rules.plan_run(cfg, ucfg, unit["dry"], unit.get("slots") or [],
-                                               manual=(origin == "now"))
+                                               manual=(origin == "now"), printing=printing)
             if apply and replanned is None:
                 result = {"success": False, "status": "refused", "detail": MSG_NO_SPOOLS}
             elif apply:
@@ -458,6 +492,9 @@ def run_now(keys: List[str], now: Optional[float] = None) -> List[Dict[str, Any]
             if rules.parse_key(key) is None or o is None or not o["present"] or o["dry"] is None:
                 results[key] = _result(key, d, False, "skipped", MSG_NOT_FOUND)
                 continue
+            if o.get("maintenance"):
+                results[key] = _result(key, d, False, "skipped", MSG_MAINT)
+                continue
             if key in _inflight:
                 results[key] = _result(key, d, False, "skipped", MSG_BUSY)
                 continue
@@ -471,7 +508,8 @@ def run_now(keys: List[str], now: Optional[float] = None) -> List[Dict[str, Any]
             if st["phase"] == "running" and not st["seen_active"]:
                 results[key] = _result(key, d, False, "skipped", MSG_UNCONFIRMED)
                 continue
-            plan = rules.plan_run(cfg, rules.unit_config(cfg, key), o["dry"], o["slots"], manual=True)
+            plan = rules.plan_run(cfg, rules.unit_config(cfg, key), o["dry"], o["slots"], manual=True,
+                                  printing=bool(o["printing"]))
             if plan is None:                      # manual: only a drying type without a preset table
                 results[key] = _result(key, d, False, "skipped", MSG_CANNOT_DRY)
                 continue
@@ -511,13 +549,15 @@ def _claim_wait(key: str, timeout: float) -> bool:
 
 def stop_all(keys: Optional[List[str]], now: Optional[float] = None) -> List[Dict[str, Any]]:
     """«Остановить все»: stop these drying units (None: every drying unit,
-    ours and foreign); each is then left alone for manual_hold_h."""
+    ours and foreign, not of a printer in maintenance mode — its card stops
+    one); each is then left alone for manual_hold_h."""
     now = _time() if now is None else now
     cfg = load_config()
     units, disp = _collect(now)
     with _lock:
         drying = {k for k, o in units.items() if o["present"] and o["dry"] and o["dry"].get("active")}
         drying |= {k for k, st in _states.items() if st.get("phase") in ("running", "foreign")}
+        drying = {k for k in drying if not (units.get(k) or {}).get("maintenance")}
         dmap = {k: _disp_for(k, disp) for k in set(units) | set(keys or [])}
     targets = list(dict.fromkeys(keys)) if keys is not None else sorted(drying)
     hold_s = cfg["manual_hold_h"] * 3600
@@ -526,6 +566,8 @@ def stop_all(keys: Optional[List[str]], now: Optional[float] = None) -> List[Dic
     for key in targets:
         if rules.parse_key(key) is None or key not in units:
             results[key] = _result(key, dmap.get(key), False, "skipped", MSG_NOT_FOUND)
+        elif units[key].get("maintenance"):
+            results[key] = _result(key, dmap.get(key), False, "skipped", MSG_MAINT)
         elif key not in drying:
             results[key] = _result(key, dmap.get(key), False, "skipped", MSG_NOT_DRYING)
         else:
@@ -778,24 +820,31 @@ def _snapshot_unit(key: str, o: Optional[Dict[str, Any]], disp: Optional[Dict[st
     disp = disp or st["display"] or {}
     dry = o["dry"] if present else None
     slots = o["slots"] if present else []
+    prn_now = bool(present and o["printing"])
     ucfg = rules.unit_config(cfg, key)
     mats = rules.materials_of(slots)
     if dry and dry.get("type") != "n3f":
         for m in mats:
             m["ht"] = False                  # an AMS HT dries those materials itself
-    if not present and (status or {}).get("kind") not in ("offline", "off"):
+    # the mode switches without waking the engine: shown at once, its next check agrees
+    if o and o.get("maintenance"):
+        status = {"kind": "maintenance"}
+    elif (status or {}).get("kind") == "maintenance":
+        status = {"kind": "pending"}
+    if not present and (status or {}).get("kind") not in ("offline", "off", "maintenance"):
         status = {"kind": "offline"}
     return {
         "key": key, "printer_id": pid, "ams": ams,
         "label": disp.get("label") or pid, "name": disp.get("name") or bambu_extras.ams_unit_name(ams),
         "device_type": disp.get("device_type"), "model": disp.get("model"),
         "online": bool(present and o["online"]), "printing": bool(present and o["printing"]),
+        "maintenance": bool(o and o.get("maintenance")),
         "rh": o["rh"] if present else None, "temp": o["temp"] if present else None,
         "dry_ok": o["dry_ok"] if present else None, "cmd_ok": o["cmd_ok"] if present else None,
         "dry": {f: dry.get(f) for f in _DRY_FIELDS} if dry else None,
         "materials": mats, "unit_cfg": ucfg,
-        "plan": rules.plan_run(cfg, ucfg, dry, slots) if dry else None,
-        "plan_now": rules.plan_run(cfg, ucfg, dry, slots, manual=True) if dry else None,
+        "plan": rules.plan_run(cfg, ucfg, dry, slots, printing=prn_now) if dry else None,
+        "plan_now": rules.plan_run(cfg, ucfg, dry, slots, manual=True, printing=prn_now) if dry else None,
         "plans": rules.plans_for(dry, slots) if dry else None,
         "plan_ctx": rules.plan_ctx(dry, slots) if dry else None,
         "status": status or {"kind": "pending"},

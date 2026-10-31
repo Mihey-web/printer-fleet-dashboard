@@ -14,12 +14,12 @@ from app.collectors.bambu_collector import BambuCollector, quiet_vendor_logging,
 from app.collectors.creality_collector import CrealityCollector
 from app.collectors.klipper_collector import KlipperCollector
 from app.collectors.mks_wifi_collector import MksWifiCollector
-from app.domain.models import PrinterKind, PrinterState, PrinterStatus, now_ts
+from app.domain.models import MAINTENANCE_STATE, PrinterKind, PrinterState, PrinterStatus, now_ts
 
 from app.services.normalizer import normalize_bambu, normalize_ws_dict
-from app.services.state_store import StateStore
+from app.services.state_store import StateStore, snapshot_reason
 from app.services.ams_store import AmsStore
-from app.services import ams_autodry_engine, printer_commands, settings_service
+from app.services import ams_autodry_engine, job_journal, notification_tracker, printer_commands, settings_service, state_store
 from proxy_checker import RedactingFilter
 import config
 
@@ -94,6 +94,15 @@ def _note_signature(pid, status):
         logger.debug('[%s] note_signature failed', pid, exc_info=True)
 
 
+def _journal_observe(status, now):
+    """Feed the print-job journal (app/services/job_journal) every polled status:
+    live, grace clone or offline. Never breaks the poll loop."""
+    try:
+        job_journal.observe(status, now)
+    except Exception:
+        logger.debug('[%s] job journal observe failed', getattr(status, 'id', '?'))
+
+
 def _close_bambu_collectors(collectors):
     """Stop the Bambu MQTT listeners (shutdown). One failing close() must not
     keep the others running."""
@@ -121,6 +130,24 @@ def _display_label(pid, fallback):
     except Exception:
         logger.debug("display label lookup failed for %s", pid, exc_info=True)
     return fallback
+
+
+def _in_maintenance(pid):
+    """True while an admin keeps the printer in maintenance mode
+    (printer_registry, short-TTL cached); False when the registry cannot tell.
+    Never breaks the poll loop."""
+    try:
+        from app.services import printer_registry
+        return bool(printer_registry.in_maintenance(pid))
+    except Exception:
+        logger.debug("maintenance lookup failed for %s", pid, exc_info=True)
+        return False
+
+
+def _history_state(pid):
+    """StateStore's history_state hook: a printer in maintenance mode writes
+    'maintenance' rows (left out of the stats' shares and the event log)."""
+    return MAINTENANCE_STATE if _in_maintenance(pid) else None
 
 
 def offline_status(pid, label, kind, device_type=None, error=None):
@@ -208,11 +235,13 @@ def _fmt_job(name):
     return f"{unique[0]} +{len(parts)-1}" if len(parts) > 2 else " + ".join(parts)
 
 def _state_sort_key(s):
+    if _in_maintenance(s.id):
+        return (6, s.label)            # in maintenance mode: last, whatever its live state
     if s.state == PrinterState.ERROR:
         group = 0
     elif s.state == PrinterState.PAUSED:
         group = 1
-    elif s.state == PrinterState.FINISHED:
+    elif s.state in (PrinterState.FINISHED, PrinterState.CANCELLED):
         group = 2
     elif s.state == PrinterState.PRINTING:
         group = 3
@@ -237,7 +266,9 @@ def format_status_text(store: StateStore) -> str:
         # parse_mode=HTML message, so a literal '<'/'&' would 400 the whole send;
         # escape them, the <b> markup is ours.
         label = html.escape(str(_display_label(s.id, s.label)))
-        if s.state == PrinterState.PRINTING or s.state == PrinterState.PAUSED:
+        if _in_maintenance(s.id):
+            lines.append(f"\U0001F527 <b>{label}</b> — на обслуживании")
+        elif s.state == PrinterState.PRINTING or s.state == PrinterState.PAUSED:
             icon = "\U0001F7E2" if s.state == PrinterState.PRINTING else "\U0001F7E1"
             pct = f"{s.progress_pct:.0f}%" if s.progress_pct is not None else ""
             job = _fmt_job(s.job_name)
@@ -279,6 +310,10 @@ def format_status_text(store: StateStore) -> str:
                 line += f": {html.escape(str(s.last_error))}"
             lines.append(line)
 
+        elif s.state == PrinterState.CANCELLED:
+            # Not an error: last_error would show the cancel echo as a failure.
+            lines.append(f"\u26AA {label} — отменено")
+
         else:
             line = f"\u26AA {label}"
             if s.nozzle_temp is not None and s.nozzle_temp > 0:
@@ -306,6 +341,9 @@ def poll_loop(
     _prev = prev_states or {}
     _fail_start = fail_start or {}
     _last_snapshot: dict[str, float] = {}
+    # pid -> reason of the last history row: a new reason (another pause code)
+    # is written at once, like a state change, not with the next minute's row.
+    _last_reason: dict[str, Optional[str]] = {}
     # pid -> время последнего «финишного» уведомления (первого или повторного).
     # Пока принтер стоит FINISHED и включён повтор, шлём напоминание каждые
     # telegram_finish_repeat_interval_min минут; запись гасится при любом
@@ -353,7 +391,11 @@ def poll_loop(
                         # to prev_state (incl. OFFLINE) when we never saw it active,
                         # which keeps a reconnect of an already-finished job quiet.
                         effective_prev = _effective_prev_state(prev_state, _last_active_state.get(pid))
-                        if tg is not None and scfg.get('telegram_notify_on_finish'):
+                        # In maintenance mode nothing is sent and no finish repeat
+                        # is due; _prev / _last_active_state still follow it, so
+                        # after the mode only a transition from then on notifies.
+                        quiet = tg is not None and _in_maintenance(pid)
+                        if tg is not None and not quiet and scfg.get('telegram_notify_on_finish'):
                             now = time.time()
                             if status.state == PrinterState.FINISHED:
                                 entered = effective_prev == PrinterState.PRINTING
@@ -381,9 +423,9 @@ def poll_loop(
                                     # опрос (перехода PRINTING→FINISHED не видели) —
                                     # заякорим отсчёт, чтобы повторы шли от now.
                                     _finish_notify_at[pid] = now
-                        if status.state != PrinterState.FINISHED:
+                        if status.state != PrinterState.FINISHED or quiet:
                             _finish_notify_at.pop(pid, None)
-                        if tg is not None and scfg.get('telegram_notify_on_paused'):
+                        if tg is not None and not quiet and scfg.get('telegram_notify_on_paused'):
                             if effective_prev == PrinterState.PRINTING and status.state == PrinterState.PAUSED:
                                 try:
                                     msg = scfg['telegram_paused_template'].replace('{label}', html.escape(str(disp_label)))
@@ -391,7 +433,7 @@ def poll_loop(
                                     logger.info('[%s] Telegram paused notification sent', label)
                                 except Exception as e:
                                     logger.warning('[%s] Telegram notify failed: %s', label, e)
-                        if tg is not None and scfg.get('telegram_notify_on_error'):
+                        if tg is not None and not quiet and scfg.get('telegram_notify_on_error'):
                             if effective_prev is not None and status.state == PrinterState.ERROR and effective_prev not in (PrinterState.ERROR, PrinterState.OFFLINE):
                                 try:
                                     msg = _error_notification(scfg['telegram_error_template'], disp_label, status.last_error)
@@ -403,12 +445,22 @@ def poll_loop(
                         if status.state != PrinterState.OFFLINE:
                             _last_active_state[pid] = status.state
                         store.upsert(status)
+                        _journal_observe(status, time.time())
                         last_ts = _last_snapshot.get(pid, 0)
-                        if time.time() - last_ts >= 60:
+                        # A row a minute, and one at once on a state or reason
+                        # change: a pause the auto-ignore clears within the
+                        # minute still reaches the event log, with its reason.
+                        # Not in maintenance mode: its rows are all 'maintenance'
+                        # anyway, an extra one would only cost an SD-card write.
+                        row_reason = snapshot_reason(status)
+                        if (time.time() - last_ts >= 60
+                                or ((status.state != prev_state or row_reason != _last_reason.get(pid))
+                                    and not _in_maintenance(pid))):
                             store.record_snapshot(status)
                             if ams_store is not None:
                                 ams_store.record_ams(status)
                             _last_snapshot[pid] = time.time()
+                            _last_reason[pid] = row_reason
                     except Exception as e:
                         reason = str(e)
                         prev_item = store.get_one(pid)
@@ -420,6 +472,7 @@ def poll_loop(
                             offline = offline_status(pid, label, kind, device_type=device_type, error=reason)
                             _prev[pid] = PrinterState.OFFLINE
                             store.upsert(offline)
+                            _journal_observe(offline, now)
                             store.record_snapshot(offline)
                             continue
 
@@ -436,6 +489,7 @@ def poll_loop(
                             grace_status = _build_grace_status(prev_item, reason, now, device_type)
                             _prev[pid] = grace_status.state
                             store.upsert(grace_status)
+                            _journal_observe(grace_status, now)
                             last_ts = _last_snapshot.get(pid, 0)
                             if now - last_ts >= 60:
                                 store.record_snapshot(grace_status)
@@ -448,6 +502,7 @@ def poll_loop(
                             offline = offline_status(pid, label, kind, device_type=device_type, error=reason)
                             _prev[pid] = PrinterState.OFFLINE
                             store.upsert(offline)
+                            _journal_observe(offline, now)
                             # Keep _fail_start set so a still-dead printer stays
                             # offline instead of re-entering a fresh grace period
                             # every cycle (which flapped the card offline↔stale and
@@ -471,7 +526,11 @@ def poll_loop(
 
 
 def main():
-    store = StateStore()
+    # A printer in maintenance mode writes 'maintenance' history rows.
+    store = StateStore(history_state=_history_state)
+    # Notification first-seen times and the cancel flag, kept in the history DB
+    # across restarts; loaded before anything upserts a status.
+    notification_tracker.init(state_store.DB_PATH)
     ams_store = AmsStore()
     collectors = build_collectors()
 
@@ -486,8 +545,11 @@ def main():
     # коллектора).
     printer_commands.set_store(store)
     printer_commands.start_probe_loop(store)
+    printer_commands.start_live_refresh()   # cards follow the live telemetry every 2 s, not every poll
     from app.services import auto_ignore
     auto_ignore.start(store)   # «Ignore and resume» for the print errors listed in settings
+    from app.services import hms_catalog
+    hms_catalog.start()        # Bambu's HMS button/text tables: data/hms, refreshed daily
 
     # AMS auto-drying: a daemon thread over the stored status and the AMS
     # history; drying starts go through printer_commands. Ships in shadow mode
@@ -523,6 +585,11 @@ def main():
                 except Exception as e:
                     logger.warning('[%s] connect failed: %s', label, e)
     threading.Thread(target=_connect_bambu, daemon=True).start()
+
+    # Print-job journal: continue the prints left open before the restart (on
+    # the first start: rebuild past prints from the history in the background);
+    # the poll loop feeds it every status (History → «Печати»).
+    job_journal.start(store)
 
     # Run the poll loop on the main thread — it blocks forever and keeps the
     # process alive while the server runs in its daemon thread.

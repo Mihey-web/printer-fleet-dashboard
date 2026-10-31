@@ -1,7 +1,9 @@
-from fastapi import FastAPI, HTTPException, Response, Request, Cookie, Query
+from fastapi import FastAPI, HTTPException, Response, Request, Cookie, Query, Depends
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, StreamingResponse, JSONResponse
+import gzip
 import json
+import math
 import sqlite3
 import os
 import time as time_module
@@ -11,10 +13,34 @@ import threading
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.middleware.gzip import GZipMiddleware
 
+from app.services import job_queries, temp_history
 from app.services.state_store import StateStore
 
 logger = logging.getLogger(__name__)
 
+
+# PWA files: public path -> (file, media type, Cache-Control). Each is served
+# by its own route on a fixed file (create_app), so the client's path never
+# reaches the filesystem. Public because the browser fetches the manifest
+# without cookies, icons may be fetched by Chrome / the WebAPK minter, and the
+# SW update check often runs after the 15-min access token has expired.
+# Media types are explicit: mimetypes may not know .webmanifest, and a worker
+# with a non-JS type is not registered. /sw.js must sit at the root, or its
+# scope would not cover /.
+_PWA_ICON_CACHE = 'public, max-age=604800'
+PWA_FILES = {
+    '/manifest.webmanifest': ('app/web/pwa/manifest.webmanifest', 'application/manifest+json', 'no-cache'),
+    '/sw.js': ('app/web/pwa/sw.js', 'text/javascript', 'no-cache'),
+    '/pwa/icon-192.png': ('app/web/pwa/icon-192.png', 'image/png', _PWA_ICON_CACHE),
+    '/pwa/icon-512.png': ('app/web/pwa/icon-512.png', 'image/png', _PWA_ICON_CACHE),
+    '/pwa/icon-maskable-512.png': ('app/web/pwa/icon-maskable-512.png', 'image/png', _PWA_ICON_CACHE),
+}
+# The login page's own file, served the same way: the page has no session, and
+# it shows the theme this browser chose (IA §9). theme.js holds the theme boot
+# and colour getters only — nothing about the farm.
+LOGIN_FILES = {
+    '/theme.js': ('app/web/theme.js', 'text/javascript', 'no-cache'),
+}
 
 # Everything else — including /static/ and the app shell — is auth-gated so an
 # anonymous visitor can't learn anything about what this dashboard monitors.
@@ -22,7 +48,11 @@ logger = logging.getLogger(__name__)
 PUBLIC_PREFIXES = ('/api/auth/',)
 # Exact matches only — must NOT accidentally cover a future /api/health-*
 # route that could carry real data. Compared with ==, not startswith.
-PUBLIC_EXACT = ('/api/health', '/favicon.ico')
+# Never add a public prefix under /static (e.g. '/static/pwa/'): the check sees
+# the request path before normalization, so /static/pwa/../app.js (or %2e%2e)
+# would pass as public and StaticFiles would then resolve it to app/web/app.js
+# — an auth bypass. Public files get an exact route instead (PWA_FILES, LOGIN_FILES).
+PUBLIC_EXACT = ('/api/health', '/favicon.ico') + tuple(PWA_FILES) + tuple(LOGIN_FILES)
 
 
 def _resolve_app_version():
@@ -97,7 +127,58 @@ def _current_labels(rows=None):
         return {}
 
 
-_EVENT_STATES = {"printing", "idle", "paused", "finished", "error", "offline", "unknown"}
+def _maintenance_of_rows(rows):
+    """printer_id -> {"since", "note", "by"} of the printers in maintenance
+    mode, from registry rows already read for this request (no second read)."""
+    try:
+        from app.services import printer_registry
+        return {p["id"]: info for p in rows
+                for info in (printer_registry.maintenance_info(p),) if info is not None}
+    except Exception:
+        logger.debug("maintenance lookup failed", exc_info=True)
+        return {}
+
+
+def _notification_mutes():
+    """The hidden notifications' setting {printer_id: [key, …]} from the
+    settings cache (no DB read once loaded); {} when unreadable."""
+    try:
+        from app.services import settings_service
+        return settings_service.get("notification_mutes")
+    except Exception:
+        logger.debug("notification_mutes read failed", exc_info=True)
+        return {}
+
+
+_JOBS_WINDOW_S = 7 * 86400  # the print journal's default window
+
+
+def _jobs_window(fr, to):
+    """(fr, to) of a /api/history/jobs* request: the last 7 days by default; 400 on a bad window."""
+    to = time_module.time() if to is None else to
+    fr = to - _JOBS_WINDOW_S if fr is None else fr
+    if not (math.isfinite(fr) and math.isfinite(to)):
+        raise HTTPException(status_code=400, detail="fr and to must be finite")
+    if fr > to:
+        raise HTTPException(status_code=400, detail="fr must be <= to")
+    return fr, to
+
+
+def _jobs_results(result):
+    try:
+        return job_queries.parse_results(result)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="unknown result")
+
+
+def _json_response(payload):
+    """JSON built here, in the threadpool thread of a sync endpoint: FastAPI's
+    default path runs jsonable_encoder on the event loop and stalls it."""
+    return Response(content=json.dumps(payload, ensure_ascii=False, separators=(",", ":")),
+                    media_type="application/json")
+
+
+_EVENT_STATES = {"printing", "idle", "paused", "finished", "error", "cancelled", "offline", "unknown"}
 
 
 def _query_events(db, fr, to, limit, offset, printer_id=None, state=None):
@@ -109,8 +190,15 @@ def _query_events(db, fr, to, limit, offset, printer_id=None, state=None):
     printer_id narrows the inner scan (safe: LAG partitions by printer_id);
     state must filter the outer query — it applies to new_state, which only
     exists after LAG is computed.
+
+    reason: why the printer paused / errored / was cancelled
+    (notifications.top_reason); NULL in rows written before the column.
+
+    Maintenance-mode rows are dropped before LAG: entering and leaving the
+    mode are no events, the first event after it compares with the state
+    before it (spec_maintenance §3.3).
     """
-    inner_where = "recorded_at >= ? AND recorded_at <= ?"
+    inner_where = "recorded_at >= ? AND recorded_at <= ? AND state != 'maintenance'"
     params = [fr, to]
     if printer_id:
         inner_where += " AND printer_id = ?"
@@ -125,13 +213,13 @@ def _query_events(db, fr, to, limit, offset, printer_id=None, state=None):
         conn.row_factory = sqlite3.Row
         rows = conn.execute("""
             WITH ordered AS (
-                SELECT printer_id, label, state, job_name, last_error, recorded_at,
+                SELECT printer_id, label, state, job_name, last_error, reason, recorded_at,
                        LAG(state) OVER (PARTITION BY printer_id ORDER BY recorded_at) AS prev_state
                 FROM printer_history
                 WHERE %s
             )
             SELECT printer_id, label, prev_state AS old_state, state AS new_state,
-                   job_name, last_error, recorded_at AS time
+                   job_name, last_error, reason, recorded_at AS time
             FROM ordered
             WHERE %s
             ORDER BY recorded_at DESC
@@ -287,10 +375,12 @@ def _cached_state_durations(db, fr, to):
 
 
 def _live_raw(store, printer_id):
-    """Bambu only, in any printer state: the report bit fields the vendored lib
-    drops (app/collectors/bambu_raw.py) and its loaded-slot indices, from the
-    live MQTT telemetry. For checking AMS / filament-change telemetry on a real
-    printer; no names or other job data."""
+    """Bambu only, in any printer state: the report fields the vendored lib
+    drops (app/collectors/bambu_raw.py: bit fields, raw print_error with its
+    first-seen time, hms[] with ts_* and first-seen times, the cancel latch) and
+    its loaded-slot indices, from the live MQTT telemetry. For checking AMS /
+    filament-change / notification telemetry on a real printer; no names or
+    other job data."""
     get_collector = getattr(store, 'get_collector', None)
     collector = get_collector(printer_id) if callable(get_collector) else None
     live_device = getattr(collector, 'live_device', None)
@@ -310,9 +400,26 @@ def _live_raw(store, printer_id):
     return raw
 
 
+def _route_path(scope):
+    """The path the router matches (Starlette's get_route_path): scope path minus root_path.
+
+    Never request.url.path: request.url is built as scheme://<Host header><path>,
+    so a Host like "x/sw.js?" makes it read "/sw.js" while the router serves the
+    real path — every closed route would pass as public.
+    """
+    path = scope['path']
+    root_path = scope.get('root_path', '')
+    if root_path and path.startswith(root_path):
+        if path == root_path:
+            return ''
+        if path[len(root_path)] == '/':
+            return path[len(root_path):]
+    return path
+
+
 class JWTAuthMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
-        path = request.url.path
+        path = _route_path(request.scope)
         public = path in PUBLIC_EXACT or any(path.startswith(p) for p in PUBLIC_PREFIXES)
         # Validate the cookie for every request — the '/' route needs the result
         # to choose between the app shell and the anonymous login page.
@@ -357,6 +464,20 @@ class JWTAuthMiddleware(BaseHTTPMiddleware):
         return await call_next(request)
 
 
+async def _admin_only(request: Request):
+    """Route dependency: 403 unless the session is an admin's (the middleware
+    already turned an anonymous request away with 401)."""
+    role = getattr(request.state, 'role', None)
+    if role is None or getattr(role, 'value', None) != 'admin':
+        raise HTTPException(status_code=403, detail='Admin role required')
+
+
+def _pwa_file_endpoint(path, media_type, cache_control):
+    def endpoint():
+        return FileResponse(path, media_type=media_type, headers={'Cache-Control': cache_control})
+    return endpoint
+
+
 def create_app(store: StateStore) -> FastAPI:
     # Disable the interactive docs in production — they sit outside the JWT
     # middleware's /api gate and would otherwise be publicly reachable.
@@ -369,10 +490,17 @@ def create_app(store: StateStore) -> FastAPI:
 
     @app.get('/api/printers')
     def printers():
-        from app.services import printer_commands
+        from app.services import notification_actions, notification_mutes, printer_commands, settings_service
         registry = _registry_rows()
         labels = _current_labels(registry)
+        maint = _maintenance_of_rows(registry)
         reg_models = {p["id"]: p.get("model") for p in registry}
+        try:
+            auto_codes = [c for c in settings_service.get("auto_ignore_print_errors") or [] if isinstance(c, str)]
+        except Exception:
+            logger.debug("auto_ignore_print_errors read failed", exc_info=True)
+            auto_codes = []
+        mutes = _notification_mutes()
         rows = []
         for s in store.get_all():
             d = s.to_dict()
@@ -388,6 +516,9 @@ def create_app(store: StateStore) -> FastAPI:
             # переименование видно на карточках и в браузерных уведомлениях
             # (фронт шлёт p.label) сразу, без ожидания рестарта.
             d["label"] = labels.get(d["id"], d["label"])
+            # Maintenance mode ({since, note, by} or None): the live state
+            # stays as it is, the card adds its plaque on top.
+            d["maintenance"] = maint.get(d["id"])
             d["caps"], d["caps_note"] = caps, note
             # True/False/None: доступно ли управление печатью. У Bambu это
             # вердикт зонда (прошивка может блокировать print-класс), у Creality
@@ -403,18 +534,44 @@ def create_app(store: StateStore) -> FastAPI:
             # цепочка модели, что у команд: статус, затем реестр.
             if printer_commands.has_chamber_heater(d.get("device_type") or reg_models.get(d["id"])):
                 d["chamber_ctl"] = True
+            # The auto-ignore thread's state for a pause on a code it waves
+            # through (tries of this pause, next try, why it did not press):
+            # thread state, not telemetry, so added here and not in the normalizer.
+            if auto_codes:
+                for n in d.get("notifications") or []:
+                    auto = notification_actions.auto_state(d["id"], n, auto_codes)
+                    if auto is not None:
+                        n["auto"] = auto
+            # «Скрыть» (notification_mutes): the admin's choice, not telemetry, so here too.
+            notification_mutes.mark(d["id"], d.get("notifications"), mutes)
             rows.append(d)
         return rows
 
     @app.get('/api/printers/{printer_id}')
     def printer(printer_id: str):
+        from app.services import notification_mutes
         item = store.get_one(printer_id)
         if item is None:
             raise HTTPException(status_code=404, detail='Printer not found')
         d = item.to_dict()
         d.pop("debug", None)  # см. /api/printers: debug только через admin-эндпоинт
-        d["label"] = _current_labels().get(d["id"], d["label"])
+        registry = _registry_rows()
+        d["label"] = _current_labels(registry).get(d["id"], d["label"])
+        d["maintenance"] = _maintenance_of_rows(registry).get(d["id"])
+        notification_mutes.mark(d["id"], d.get("notifications"), _notification_mutes())
         return d
+
+    @app.get('/api/printers/{printer_id}/temps')
+    def printer_temps(printer_id: str, hours: int = Query(6, ge=1, le=168)):
+        # The chip popover's temperature chart, for every logged-in user
+        # (viewers too): numbers only, no job names. The window is the server's
+        # [now - hours, now], so the 60 s cache key means something. The JSON is
+        # built (and cached as a string) here, in the threadpool thread of this
+        # sync endpoint: FastAPI's default path runs jsonable_encoder on the loop.
+        if store.get_one(printer_id) is None:
+            raise HTTPException(status_code=404, detail='Printer not found')
+        return Response(content=temp_history.cached_temps_json(_history_db_path(), printer_id, hours),
+                        media_type="application/json")
 
     @app.get('/api/debug/printers/{printer_id}')
     def debug_printer(printer_id: str, request: Request):
@@ -426,9 +583,12 @@ def create_app(store: StateStore) -> FastAPI:
         item = store.get_one(printer_id)
         if item is None:
             raise HTTPException(status_code=404, detail='Printer not found')
+        from app.services import notification_tracker
+        # tracker: the first-seen time of every active notification key (what
+        # `since` shows, kept across restarts) and the state flags.
         return {'id': item.id, 'label': _current_labels().get(item.id, item.label),
                 'state': item.state.value, 'online': item.online, 'debug': item.debug,
-                'raw': _live_raw(store, printer_id)}
+                'raw': _live_raw(store, printer_id), 'tracker': notification_tracker.view(printer_id)}
 
     @app.get('/api/cameras')
     def cameras_list():
@@ -442,7 +602,9 @@ def create_app(store: StateStore) -> FastAPI:
     def ams_current():
         # Живой срез AMS из памяти: по одной записи на юнит для каждого принтера
         # с непустым status.ams. Не-Bambu и принтеры без AMS отсутствуют.
-        labels = _current_labels()
+        registry = _registry_rows()
+        labels = _current_labels(registry)
+        maint = _maintenance_of_rows(registry)
         out = []
         for s in store.get_all():
             ams = s.ams
@@ -459,6 +621,7 @@ def create_app(store: StateStore) -> FastAPI:
                     "label": labels.get(s.id, s.label),
                     "device_type": s.device_type,
                     "online": s.online,
+                    "maintenance": s.id in maint,   # the printer is in maintenance mode
                     # Physical unit index (matches what record_ams stores), so the
                     # history query below lines up with the right unit's rows.
                     "unit_index": unit.get("index", idx),
@@ -558,19 +721,67 @@ def create_app(store: StateStore) -> FastAPI:
             current_states[s.id] = s.state.value
 
         # Имя — из реестра, свежее (durations кэшируются на TTL, имя нет).
-        labels = _current_labels()
+        # Как и флаг «сейчас на обслуживании».
+        registry = _registry_rows()
+        labels = _current_labels(registry)
+        maint = _maintenance_of_rows(registry)
         result = []
         for pid, data in printers.items():
             resp = {"states": {}}
-            for s in ("printing", "idle", "paused", "error", "finished", "offline", "unknown", "nodata"):
+            for s in ("printing", "idle", "paused", "error", "cancelled", "finished", "offline", "maintenance",
+                      "unknown", "nodata"):
                 if data["states"].get(s, 0) > 0:
                     resp["states"][s] = data["states"][s]
             if resp["states"]:
                 resp["printer_id"] = pid
                 resp["label"] = labels.get(pid, data["label"])
                 resp["current_state"] = current_states.get(pid, "unknown")
+                resp["maintenance"] = pid in maint
                 result.append(resp)
         return result
+
+    # Print journal (spec_job_journal §7). Job names are sensitive: the list
+    # carries them (logged-in users only, like the whole /api/history/*), the
+    # CSV export is the admins' only (IA §13: viewers get 403 and no button),
+    # the stats never do. Sync handlers: SQL, aggregation and serialization all
+    # run in the threadpool, off the event loop.
+    @app.get("/api/history/jobs")
+    def get_jobs(fr: float = None, to: float = None, printer: str = None, result: str = None,
+                 include_maint: bool = True, limit: int = Query(200, ge=1, le=2000),
+                 offset: int = Query(0, ge=0)):
+        fr, to = _jobs_window(fr, to)
+        payload = job_queries.list_jobs(_history_db_path(), fr, to, printer=printer,
+                                        results=_jobs_results(result), include_maint=include_maint,
+                                        limit=limit, offset=offset, labels=_current_labels())
+        return _json_response(payload)
+
+    @app.get("/api/history/jobs/stats")
+    def get_jobs_stats(fr: float = None, to: float = None, printer: str = None,
+                       include_maint: bool = False):
+        fr, to = _jobs_window(fr, to)
+        return _json_response(job_queries.job_stats(_history_db_path(), fr, to, printer=printer,
+                                                    include_maint=include_maint, labels=_current_labels()))
+
+    # A dependency, not a check in the body: it runs before the query is
+    # validated, so a viewer gets 403 for any parameters, never a 400 / 422.
+    @app.get("/api/history/jobs.csv", dependencies=[Depends(_admin_only)])
+    def get_jobs_csv(request: Request, fr: float = None, to: float = None, printer: str = None,
+                     result: str = None, include_maint: bool = True,
+                     limit: int = Query(20000, ge=1, le=20000)):
+        fr, to = _jobs_window(fr, to)
+        text = job_queries.jobs_csv(_history_db_path(), fr, to, printer=printer,
+                                    results=_jobs_results(result), include_maint=include_maint,
+                                    limit=limit, labels=_current_labels())
+        body = text.encode("utf-8")
+        headers = {"Content-Disposition": 'attachment; filename="%s"' % job_queries.csv_filename(fr, to),
+                   "Cache-Control": "no-store"}
+        # Up to ~2.6 MB: compressed here in the threadpool, not by GZipMiddleware
+        # on the event loop (it leaves a response with Content-Encoding alone,
+        # and adds the Vary of an uncompressed one itself).
+        if len(body) >= 1024 and "gzip" in request.headers.get("accept-encoding", ""):
+            body = gzip.compress(body, 6)
+            headers.update({"Content-Encoding": "gzip", "Vary": "Accept-Encoding"})
+        return Response(content=body, media_type="text/csv; charset=utf-8", headers=headers)
 
     app.mount('/static', StaticFiles(directory='app/web'), name='static')
 
@@ -579,6 +790,10 @@ def create_app(store: StateStore) -> FastAPI:
     @app.get('/api/version')
     def version():
         return app_version
+
+    for public_path, (pwa_file, media_type, cache_control) in {**PWA_FILES, **LOGIN_FILES}.items():
+        app.add_api_route(public_path, _pwa_file_endpoint(pwa_file, media_type, cache_control),
+                          methods=['GET'], include_in_schema=False)
 
     @app.get('/')
     def index(request: Request):

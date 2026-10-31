@@ -38,7 +38,7 @@ def _klipper(pid, webhooks="ready", pin="caselight", state="printing"):
 def _verdicts(monkeypatch):
     from app.services import settings_service
 
-    monkeypatch.setattr(settings_service, "get", lambda key, **k: [] if key == "printer_light_enabled" else {})
+    monkeypatch.setattr(settings_service, "get", lambda key, **k: ["c-dark"] if key == "printer_light_disabled" else {})
     printer_commands._capability.clear()
     for pid in ("b1", "b2", "b3", "b4", "b5", "b6", "b7", "b8", "b-grace", "b-off", "b-fin", "b-idle"):
         printer_commands._capability[pid] = {"print_cmds": True, "via": "fun", "ts": 0}
@@ -72,7 +72,9 @@ def _row(d, action="pause"):
     (PrinterStatus(id="m1", label="M", kind=PrinterKind.MKS, online=True, state=PrinterState.PRINTING),
      "pause", "управление не подключено"),
     (PrinterStatus(id="c1", label="C", kind=PrinterKind.CREALITY, online=True, state=PrinterState.PRINTING),
-     "light_on", "нет управляемой подсветки"),
+     "light_on", None),                                                  # Creality: the light by default (27.10)
+    (PrinterStatus(id="c-dark", label="C", kind=PrinterKind.CREALITY, online=True, state=PrinterState.PRINTING),
+     "light_on", "нет управляемой подсветки"),                           # listed in printer_light_disabled
     (_klipper("k1"), "pause", None),
     (_klipper("k1", pin=""), "light_on", "нет управляемой подсветки"),
     (_klipper("k1", webhooks="shutdown"), "pause", "Klipper не готов"),
@@ -85,8 +87,8 @@ def test_skip_reason(status, action, why):
 
 
 @pytest.mark.parametrize("action,ids,detail", [
-    ("stop", ["b1"], "Групповое действие: light_on, light_off, pause или resume"),
-    ("cooldown", ["b1"], "Групповое действие: light_on, light_off, pause или resume"),
+    ("stop", ["b1"], "Групповое действие: light_on, light_off, pause, resume или reset_errors"),
+    ("cooldown", ["b1"], "Групповое действие: light_on, light_off, pause, resume или reset_errors"),
     ("pause", [], "Не выбран ни один принтер"),
     ("pause", None, "Не выбран ни один принтер"),
     ("pause", ["p%d" % i for i in range(65)], "За раз — не больше 64 принтеров"),
@@ -227,3 +229,137 @@ def test_one_lock_per_action_family():
         fleet_commands.run_bulk("resume", ["b1"], store=_Broken(), send=lambda *a: CONFIRMED)
     assert fleet_commands._busy["print"].acquire(blocking=False)
     fleet_commands._busy["print"].release()
+
+
+# --- reset_errors: «Сбросить ошибки» (notification_actions.reset_skip_reason / reset_one) --------
+
+def _rec(key, code, severity, actions, src="print_error", blocking=False):
+    return {"key": key, "src": src, "code": code, "severity": severity, "blocking": blocking,
+            "actions": [{"key": a, "label": a, "style": "", "confirm": None, "yes": None, "bambu_id": None}
+                        for a in actions]}
+
+
+CANCEL = _rec("pe:0300_400C", "0300_400C", "common", ("clean",))
+PAUSE_8011 = _rec("pe:0700_8011", "0700_8011", "pause", ("resume",))
+BLOCKING = _rec("pe:0300_8007", "0300_8007", "pause", ("stop", "resume"), blocking=True)
+HMS = _rec("hms:0300_1100_0002_0001", "0300_1100_0002_0001", "serious", (), src="hms")
+
+
+def _with(status, *records):
+    status.notifications = list(records)
+    return status
+
+
+@pytest.mark.parametrize("status,why", [
+    (_with(_bambu("b1", PrinterState.CANCELLED), CANCEL, HMS), None),
+    (_with(_bambu("b1", PrinterState.PAUSED), PAUSE_8011), "пауза-ошибка 0700_8011 — решается кнопками в уведомлении"),
+    (_with(_bambu("b1", PrinterState.PAUSED), BLOCKING),
+     "0300_8007 после отключения питания — выбор обязателен: продолжить или остановить"),
+    (_with(_bambu("b1"), HMS), "только HMS — сбрасывать нечего, принтер снимет их сам"),
+    (_bambu("b1", PrinterState.IDLE), "уведомлений нет"),
+    (_with(_bambu("b-off", online=False), CANCEL), "офлайн"),
+    (_with(_bambu("b-grace", grace=True), CANCEL), "нет связи — данные устарели"),
+    (_with(_bambu("b-blocked", PrinterState.CANCELLED), CANCEL), "прошивка блокирует (нет Developer Mode)"),
+    (_klipper("k1", webhooks="shutdown"), "Klipper: перезапуск прошивки — только по одному, с подтверждением"),
+    (PrinterStatus(id="m1", label="M", kind=PrinterKind.MKS, online=True, state=PrinterState.PRINTING),
+     "управление не подключено"),
+])
+def test_reset_errors_skip_reason(status, why):
+    assert _row(status.to_dict(), "reset_errors") == why
+
+
+def _reset_store():
+    return _Store([_with(_bambu("b1", PrinterState.CANCELLED), CANCEL),
+                   _with(_bambu("b2", PrinterState.PAUSED), PAUSE_8011),
+                   _bambu("b3", PrinterState.IDLE)])
+
+
+def test_reset_errors_dry_run_lists_who_and_why():
+    out = fleet_commands.run_bulk("reset_errors", ["b1", "b2", "b3"], store=_reset_store(), dry_run=True,
+                                  send=lambda *a: pytest.fail("dry run must not send"))
+    assert [(r["id"], r["status"], r["detail"]) for r in out["results"]] == [
+        ("b1", "dry_run", "будет отправлено"),
+        ("b2", "skipped", "пауза-ошибка 0700_8011 — решается кнопками в уведомлении"),
+        ("b3", "skipped", "уведомлений нет")]
+    assert out["summary"]["dry_run"] == 1 and out["dry_run"] is True
+
+
+def test_reset_errors_sends_through_reset_one(monkeypatch):
+    from app.services import notification_actions
+    sent = []
+    monkeypatch.setattr(notification_actions, "reset_one",
+                        lambda pid, action, params: sent.append((pid, action, params)) or CONFIRMED)
+    out = fleet_commands.run_bulk("reset_errors", ["b1", "b2", "b3"], store=_reset_store())
+    assert sent == [("b1", "reset_errors", {})]                     # the pause and the empty one: never
+    assert [r["status"] for r in out["results"]] == ["confirmed", "skipped", "skipped"]
+    # its refusal (the record went meanwhile) comes back as skipped, lower case
+    monkeypatch.setattr(notification_actions, "reset_one", lambda pid, action, params: {
+        "success": False, "status": "refused", "detail": "Сбрасывать нечего", "replied": False})
+    out = fleet_commands.run_bulk("reset_errors", ["b1"], store=_reset_store())
+    assert out["results"][0]["status"] == "skipped" and out["results"][0]["detail"] == "сбрасывать нечего"
+
+
+def test_reset_errors_carries_the_confirmed_record_per_printer():
+    sent = []
+
+    def send(pid, action, params):
+        sent.append((pid, action, params))
+        return CONFIRMED
+
+    fleet_commands.run_bulk("reset_errors", ["b1"], store=_reset_store(), send=send,
+                            keys={"b1": "pe:0300_400C", "b9": "pe:x"})
+    assert sent == [("b1", "reset_errors", {"key": "pe:0300_400C"})]
+    # another action never takes them
+    sent.clear()
+    fleet_commands.run_bulk("pause", ["b1"], store=_Store([_bambu("b1")]), send=send, keys={"b1": "pe:x"})
+    assert sent == [("b1", "pause", {})]
+
+
+# --- maintenance mode (spec_maintenance B19 / B20): left out of every bulk action ------------
+
+MAINT = {"since": 1000.0, "note": None, "by": "admin"}
+
+
+@pytest.mark.parametrize("action", fleet_commands.BULK_ACTIONS)
+@pytest.mark.parametrize("status", [
+    _bambu("b-off", online=False),                       # one of the five long-offline printers
+    _bambu("b1"), _bambu("b1", PrinterState.PAUSED), _bambu("b-grace", grace=True),
+    _with(_bambu("b1", PrinterState.CANCELLED), CANCEL),
+    PrinterStatus(id="m1", label="M", kind=PrinterKind.MKS, online=False, state=PrinterState.OFFLINE),
+    _klipper("k1", webhooks="shutdown"),
+])
+def test_skip_reason_of_a_printer_in_maintenance_comes_first(status, action):
+    d = status.to_dict()
+    assert _row(dict(d, maintenance=MAINT), action) == "на обслуживании"
+    assert _row(dict(d, maintenance=None), action) == _row(d, action)           # None: as before
+
+
+@pytest.mark.parametrize("dry_run", [True, False])
+def test_run_bulk_skips_the_printers_in_maintenance(dry_run):
+    store = _Store([_bambu("b1"), _bambu("b2"), _bambu("b-off", online=False)])
+    sent = []
+    out = fleet_commands.run_bulk("pause", ["b1", "b2", "b-off"], store=store, dry_run=dry_run,
+                                  maintenance={"b2": MAINT, "b-off": MAINT},
+                                  send=lambda pid, action, params: sent.append(pid) or CONFIRMED)
+    assert [(r["id"], r["status"], r["detail"]) for r in out["results"]] == [
+        ("b1", "dry_run", "будет отправлено") if dry_run else ("b1", "confirmed", "подтверждено принтером"),
+        ("b2", "skipped", "на обслуживании"), ("b-off", "skipped", "на обслуживании")]
+    assert sent == ([] if dry_run else ["b1"])
+    assert out["summary"]["skipped"] == 2
+
+
+def test_run_bulk_reads_the_maintenance_map_itself(monkeypatch):
+    from app.services import printer_registry
+
+    monkeypatch.setattr(printer_registry, "maintenance_map", lambda *a, **k: {"b1": MAINT})
+    out = fleet_commands.run_bulk("light_on", ["b1", "b2"], store=_Store([_bambu("b1"), _bambu("b2")]),
+                                  dry_run=True, send=lambda *a: pytest.fail("dry run must not send"))
+    assert [r["detail"] for r in out["results"]] == ["на обслуживании", "будет отправлено"]
+
+    def broken(*a, **k):
+        raise RuntimeError("registry down")
+
+    monkeypatch.setattr(printer_registry, "maintenance_map", broken)       # never breaks the bulk command
+    out = fleet_commands.run_bulk("light_on", ["b1"], store=_Store([_bambu("b1")]), dry_run=True,
+                                  send=lambda *a: pytest.fail("dry run must not send"))
+    assert out["results"][0]["status"] == "dry_run"

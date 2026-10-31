@@ -160,7 +160,6 @@
       --overlay-bg: rgba(8, 14, 22, 0.92);
       --btn-primary: #60a5fa;
       --btn-primary-text: #ffffff;
-      --alert-text: #fda5a5;
       --temp-nozzle-grad: linear-gradient(90deg, #1a6b5e 0%, var(--ok) 42%, var(--warn) 100%);
       --temp-bed-grad: linear-gradient(90deg, #1a4870 0%, var(--info) 45%, #93cbff 100%);
       --shadow-hover: 0 28px 56px rgba(0, 0, 0, 0.38);
@@ -268,7 +267,6 @@
       --overlay-bg: rgba(10, 14, 18, 0.92);
       --btn-primary: #58a6ff;
       --btn-primary-text: #ffffff;
-      --alert-text: #fd8a85;
       --temp-nozzle-grad: linear-gradient(90deg, #1a6b30 0%, var(--ok) 42%, var(--warn) 100%);
       --temp-bed-grad: linear-gradient(90deg, #1a4870 0%, var(--info) 45%, #8bcbff 100%);
       --shadow-hover: 0 28px 56px rgba(0, 0, 0, 0.42);
@@ -392,7 +390,6 @@
       --overlay-bg: rgba(240, 240, 240, 0.92);
       --btn-primary: #0969da;
       --btn-primary-text: #ffffff;
-      --alert-text: #a0181e;
       --temp-nozzle-grad: linear-gradient(90deg, #1a7a32 0%, var(--ok) 42%, var(--warn) 100%);
       --temp-bed-grad: linear-gradient(90deg, #0548a0 0%, var(--info) 45%, #58a0ff 100%);
       --shadow-hover: 0 28px 56px rgba(0, 0, 0, 0.10);
@@ -500,7 +497,6 @@
       --overlay-bg: rgba(0, 0, 0, 0.92);
       --btn-primary: #3291ff;
       --btn-primary-text: #000000;
-      --alert-text: #ff7777;
       --temp-nozzle-grad: linear-gradient(90deg, #1a6b5e 0%, var(--ok) 42%, var(--warn) 100%);
       --temp-bed-grad: linear-gradient(90deg, #1a4870 0%, var(--info) 45%, #60b5ff 100%);
       --shadow-hover: 0 28px 56px rgba(0, 0, 0, 0.50);
@@ -608,7 +604,6 @@
       --overlay-bg: rgba(5, 5, 16, 0.92);
       --btn-primary: #ff1493;
       --btn-primary-text: #0a0a1a;
-      --alert-text: #ff8050;
       --temp-nozzle-grad: linear-gradient(90deg, #0d6b3e 0%, var(--ok) 42%, var(--warn) 100%);
       --temp-bed-grad: linear-gradient(90deg, #6b2060 0%, var(--info) 45%, #ff60b8 100%);
       --shadow-hover: 0 28px 56px rgba(0, 0, 0, 0.55);
@@ -716,7 +711,6 @@
       --overlay-bg: rgba(3, 6, 10, 0.92);
       --btn-primary: #5fd9f5;
       --btn-primary-text: #03212b;
-      --alert-text: #ffaeb6;
       --temp-nozzle-grad: linear-gradient(90deg, #17694a 0%, var(--ok) 42%, var(--warn) 100%);
       --temp-bed-grad: linear-gradient(90deg, #1d4d60 0%, var(--info) 45%, #8ee9ff 100%);
       --shadow-hover: 0 28px 56px rgba(0, 0, 0, 0.50);
@@ -788,25 +782,17 @@
       justify-content: flex-end;
       margin-left: auto;
     }
+    /* The status chip (IA §4): the dot and the time of the last answer; words
+       only on a failure — amber while an answer is late, red «нет связи · N»
+       from the same 30 s as the tab title's «нет связи». */
     .status-chip {
       display: inline-flex;
       align-items: center;
-      gap: 8px;
-      min-height: 36px;
-      padding: 0 12px;
-      background: var(--bg-soft);
-      border: 1px solid var(--line);
-      border-radius: 999px;
+      gap: 6px;
       color: var(--text-dim);
-      font-size: 0.76rem;
-      backdrop-filter: blur(12px);
-      white-space: nowrap;
-    }
-    .status-chip strong,
-    .status-chip span:last-child {
-      color: var(--text);
       font-family: "IBM Plex Mono", monospace;
-      font-size: 0.8rem;
+      font-size: 0.76rem;
+      white-space: nowrap;
     }
     .status-dot-live {
       width: 9px;
@@ -819,121 +805,10 @@
       box-shadow: 0 0 6px var(--ok);
       flex: 0 0 auto;
     }
+    .status-chip.late .status-dot-live { background: var(--warn); box-shadow: 0 0 6px var(--warn); }
+    .status-chip.down { color: var(--danger); font-weight: 600; }
+    .status-chip.down .status-dot-live { background: var(--danger); box-shadow: 0 0 6px var(--danger); }
     /* ── Dashboard Summary ─────────────────────── */
-    .dash-kpi-row {
-      display: flex;
-      gap: 8px;
-      margin-bottom: 8px;
-      flex-wrap: wrap;
-    }
-    .dash-kpi {
-      appearance: none;
-      display: flex;
-      flex-direction: column;
-      align-items: flex-start;
-      gap: 2px;
-      padding: 8px 14px;
-      border-radius: 12px;
-      background: linear-gradient(180deg, var(--bg-panel) 0%, var(--bg-panel-2) 100%);
-      border: 1px solid var(--line);
-      backdrop-filter: blur(16px);
-      flex: 1 1 0;
-      min-width: 0;
-      cursor: pointer;
-      font-family: inherit;
-      text-align: left;
-      transition: border-color 0.15s ease, transform 0.15s ease;
-    }
-    .dash-kpi:hover {
-      border-color: var(--line-strong);
-      transform: translateY(-1px);
-    }
-    .dash-kpi span {
-      color: var(--text-muted);
-      font-size: 0.7rem;
-      white-space: nowrap;
-    }
-    .dash-kpi strong {
-      font-family: "IBM Plex Mono", monospace;
-      font-size: 1.3rem;
-      font-weight: 600;
-      line-height: 1.1;
-    }
-    .dash-kpi.total strong { color: var(--text); }
-    .dash-kpi.online strong { color: var(--ok); }
-    .dash-kpi.printing strong { color: var(--info); }
-    .dash-kpi.paused strong { color: var(--warn); }
-    .dash-kpi.error strong { color: var(--danger); }
-    .dash-kpi.offline strong { color: var(--steel); }
-    .dash-meta-row {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 6px 16px;
-      padding: 8px 16px;
-      margin-bottom: 16px;
-      border-radius: 14px;
-      background: var(--bg-soft);
-      border: 1px solid var(--line);
-      backdrop-filter: blur(16px);
-      align-items: center;
-    }
-    .dash-meta-item {
-      color: var(--text-dim);
-      font-size: 0.78rem;
-      display: inline-flex;
-      align-items: center;
-      gap: 5px;
-      white-space: nowrap;
-    }
-    .dash-meta-item strong {
-      color: var(--text);
-      font-family: "IBM Plex Mono", monospace;
-      font-weight: 600;
-      font-size: 0.82rem;
-    }
-    .dash-meta-ic {
-      width: 14px;
-      height: 14px;
-      stroke: currentColor;
-      stroke-width: 1.7;
-      fill: none;
-      stroke-linecap: round;
-      stroke-linejoin: round;
-      color: var(--text-muted);
-      flex: 0 0 auto;
-    }
-    .dash-meta-item .dash-meta-finish { color: var(--ok); }
-    .dash-stats-section {
-      margin-bottom: 16px;
-    }
-    .dash-stats-controls {
-      display: flex;
-      gap: 6px;
-    }
-    .stats-period-btn {
-      appearance: none;
-      border: 1px solid var(--line);
-      background: var(--bg-soft);
-      color: var(--text-dim);
-      padding: 6px 12px;
-      border-radius: 999px;
-      cursor: pointer;
-      font-family: "IBM Plex Sans", sans-serif;
-      font-size: 0.74rem;
-      font-weight: 500;
-      transition: all 0.2s ease;
-    }
-    .stats-period-btn:hover {
-      color: var(--text);
-      border-color: var(--line-strong);
-    }
-    .stats-period-btn.active {
-      color: var(--tab-active-text);
-      background: linear-gradient(135deg, var(--ok-grad-end) 0%, var(--ok-grad-mid) 100%);
-      border-color: transparent;
-      box-shadow: 0 10px 24px var(--ok-shadow);
-      font-weight: 700;
-    }
 .dash-stats-legend {
   display: flex;
   gap: 14px;
@@ -956,42 +831,15 @@
 .seg-idle { background: var(--steel); }
 .seg-paused { background: var(--warn); }
 .seg-error { background: var(--danger); }
+/* a cancelled job: a grey of its own, apart from idle (the timeline takes --gray-9 too, theme.js) */
+.seg-cancelled { background: var(--gray-9); }
 .seg-finished { background: var(--ok); }
 /* Офлайн — штриховка: тёмная сплошная заливка сливалась с пустым треком */
 .seg-offline { background: repeating-linear-gradient(45deg, var(--gray-5) 0 4px, var(--gray-7) 4px 8px); }
+/* Maintenance mode: the same hatching in yellow (solid --warn is the pause; --warn-1..12 exist in every theme) */
+.seg-maintenance { background: repeating-linear-gradient(45deg, var(--warn-5) 0 4px, var(--warn-7) 4px 8px); }
 /* A history gap: no record of what the printer did (not idle, not offline). */
 .seg-nodata { background: transparent; box-shadow: inset 0 0 0 1px var(--line-strong); }
-.dash-stats-list {
-  display: grid;
-  gap: 3px;
-}
-.dash-stats-row {
-  display: grid;
-  grid-template-columns: 190px minmax(0, 1fr) 96px;
-  gap: 12px;
-  padding: 6px 10px;
-  border-radius: 10px;
-  font-size: 0.8rem;
-  align-items: center;
-}
-.dash-stats-row:hover {
-  background: var(--bg-soft);
-}
-.dash-stats-dot {
-  display: inline-block;
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  margin-right: 7px;
-  flex: 0 0 auto;
-}
-.dash-stats-label {
-  font-weight: 600;
-  color: var(--text);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
 .dash-stats-bar {
   display: flex;
   height: 14px;
@@ -1009,24 +857,17 @@
 .dash-stats-bar .dash-seg:first-child { border-radius: 6px 0 0 6px; }
 .dash-stats-bar .dash-seg:last-child { border-radius: 0 6px 6px 0; }
 .dash-stats-bar .dash-seg:only-child { border-radius: 6px; }
-.dash-stats-key {
-  text-align: right;
-  font-family: "IBM Plex Mono", monospace;
-  font-size: 0.76rem;
-  color: var(--text-dim);
-  white-space: nowrap;
-}
-.dash-stats-key b {
-  color: var(--info);
-  font-weight: 600;
-}
 .dot- { background: var(--text-muted); }
 .dot-printing { background: var(--info); }
 .dot-idle { background: var(--steel); }
 .dot-paused { background: var(--warn); }
 .dot-error { background: var(--danger); }
+.dot-cancelled { background: var(--gray-9); }
 .dot-finished { background: var(--ok); }
 .dot-offline { background: var(--gray-7); }
+.dot-maintenance { background: var(--warn); }
+/* the whole window in maintenance mode: «— обслуживание» in the narrow key column (a phone's
+   72 px column keeps the dash only; the hatched bar and the legend say the rest) */
     .dash-stats-empty {
       padding: 24px;
       text-align: center;
@@ -1169,15 +1010,6 @@
       color: var(--text-dim);
       font-size: 0.82rem;
     }
-    /* Поллинг телеметрии временно не отвечает — данные на экране устарели. */
-    #lastUpdate.stale {
-      color: var(--warn);
-      opacity: 0.85;
-    }
-    #lastUpdate.stale::after {
-      content: " (устар.)";
-      font-size: 0.85em;
-    }
     .view-tabs {
       display: flex;
       align-items: center;
@@ -1210,6 +1042,80 @@
       border-color: transparent;
       box-shadow: 0 10px 24px var(--ok-shadow);
     }
+    /* ── Header (IA §4). On a desktop: sticky, 48 px, opaque over the page that
+       scrolls under it (the translucent --bg-soft tint over the opaque
+       --bg-elev, see theme-soft-colors-translucent), the brand and text tabs.
+       A phone (≤ 900 px, plan step 10) gets a 44 px bar and the bottom navigation, below. */
+    .topbar-brand { display: none; }
+    .topbar-scr, .view-tab .vt-ic { display: none; }
+    @media (min-width: 901px) {
+      html { scroll-padding-top: 64px; }
+      .topbar {
+        position: sticky;
+        top: 0;
+        z-index: 90;
+        height: 48px;
+        margin: -26px -20px 16px;
+        padding: 0 20px;
+        gap: 18px;
+        justify-content: flex-start;
+        background-color: var(--bg-elev);
+        background-image: linear-gradient(var(--bg-soft), var(--bg-soft));
+        border-bottom: 1px solid var(--line-strong);
+      }
+      .topbar-brand {
+        appearance: none;
+        display: inline-flex;
+        align-items: center;
+        gap: 7px;
+        flex: 0 0 auto;
+        padding: 0;
+        border: 0;
+        background: none;
+        color: var(--text);
+        font: 700 0.98rem "IBM Plex Sans", sans-serif;
+        white-space: nowrap;
+        cursor: pointer;
+      }
+      .topbar-brand-mark { color: var(--info); }
+      .view-tabs {
+        align-self: stretch;
+        align-items: stretch;
+        flex-wrap: nowrap;
+        gap: 2px;
+        min-width: 0;
+        overflow-x: auto;
+        scrollbar-width: none;
+      }
+      .view-tabs::-webkit-scrollbar { display: none; }
+      .view-tabs .view-tab {
+        position: relative;
+        flex: 0 0 auto;
+        padding: 0 12px;
+        border: 0;
+        border-radius: 0;
+        background: none;
+        box-shadow: none;
+        color: var(--text-dim);
+        font-size: 0.86rem;
+        letter-spacing: 0;
+        text-transform: none;
+        transition: color 0.15s ease;
+      }
+      .view-tabs .view-tab:hover { color: var(--text); transform: none; }
+      .view-tabs .view-tab.active { color: var(--text); background: none; box-shadow: none; }
+      .view-tabs .view-tab.active::after {
+        content: "";
+        position: absolute;
+        left: 10px;
+        right: 10px;
+        bottom: 0;
+        height: 3px;
+        border-radius: 3px 3px 0 0;
+        background: var(--info);
+      }
+      .topbar-side { flex: 0 0 auto; flex-wrap: nowrap; }
+    }
     .view-panel {
       display: none;
     }
@@ -1227,37 +1133,6 @@
       margin-bottom: 10px;
       flex-wrap: wrap;
     }
-    .filters {
-      display: flex;
-      gap: 8px;
-      flex-wrap: wrap;
-      justify-content: flex-end;
-    }
-    .filter-btn {
-      appearance: none;
-      border: 1px solid var(--line);
-      background: var(--bg-soft);
-      color: var(--text-dim);
-      padding: 9px 12px;
-      border-radius: 999px;
-      cursor: pointer;
-      font-family: "IBM Plex Sans", sans-serif;
-      font-size: 0.74rem;
-      font-weight: 500;
-      transition: all 0.22s ease;
-    }
-    .filter-btn:hover {
-      color: var(--text);
-      border-color: var(--line-strong);
-      transform: translateY(-1px);
-    }
-    .filter-btn.active {
-      color: var(--tab-active-text);
-      background: linear-gradient(135deg, var(--ok-grad-end) 0%, var(--ok-grad-mid) 100%);
-      border-color: transparent;
-      box-shadow: 0 10px 24px var(--ok-shadow);
-      font-weight: 700;
-    }
     .printer-grid {
       display: grid;
       grid-template-columns: repeat(auto-fill, minmax(min(300px, 100%), 1fr));
@@ -1266,16 +1141,6 @@
          кнопки внутри прижаты к низу (margin-top:auto), поэтому равная высота
          выглядит намеренно, а не пустой «дырой» */
       align-items: stretch;
-    }
-    .sort-bar {
-      display: flex;
-      align-items: center;
-      gap: 12px;
-      margin-bottom: 12px;
-      flex-wrap: wrap;
-    }
-    .sort-dropdown-wrap {
-      position: relative;
     }
     .sort-btn {
       appearance: none;
@@ -1301,59 +1166,6 @@
     .sort-btn-caret {
       font-size: 0.65rem;
       opacity: 0.6;
-    }
-    .sort-dropdown {
-      display: none;
-      position: absolute;
-      top: 100%;
-      left: 0;
-      margin-top: 6px;
-      background: var(--bg-elev);
-      border: 1px solid var(--line);
-      border-radius: 14px;
-      padding: 6px;
-      min-width: 200px;
-      z-index: 100;
-      box-shadow: var(--shadow-card);
-    }
-    .sort-dropdown.open {
-      display: block;
-    }
-    .sort-option {
-      display: block;
-      width: 100%;
-      appearance: none;
-      border: none;
-      background: transparent;
-      color: var(--text-dim);
-      padding: 8px 12px;
-      border-radius: 10px;
-      cursor: pointer;
-      font-family: "IBM Plex Sans", sans-serif;
-      font-size: 0.78rem;
-      text-align: left;
-      transition: all 0.15s ease;
-    }
-    .sort-option:hover {
-      background: var(--bg-soft);
-      color: var(--text);
-    }
-    .sort-option.active {
-      color: var(--ok);
-      font-weight: 600;
-    }
-    .alerts-toggle {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      cursor: pointer;
-      user-select: none;
-    }
-    .alerts-label {
-      font-size: 0.74rem;
-      font-weight: 500;
-      color: var(--text-dim);
-      white-space: nowrap;
     }
     .printer-card {
       padding: 13px 14px 12px;
@@ -1397,7 +1209,8 @@
       border-color: var(--info-border-strong);
     }
     .printer-card.idle,
-    .printer-card.unknown {
+    .printer-card.unknown,
+    .printer-card.cancelled {
       background: linear-gradient(180deg, var(--bg-panel) 0%, var(--bg-panel-2) 100%);
     }
     .pc-head {
@@ -1487,7 +1300,8 @@
       gap: 8px;
       margin-top: 4px;
     }
-    .pc-subrow .pc-ams { padding: 2px 6px; }
+    /* never past the card's edge, whatever the number of units: the chip is clipped inside the row */
+    .pc-subrow .pc-ams { padding: 2px 6px; max-width: 100%; min-width: 0; overflow: hidden; }
     /* Wi-Fi живёт в верхнем ряду справа (у бейджа статуса), а не в нижнем ряду
        рядом с AMS-чипом: на узких колонках (5 в ряд на весь экран) AMS + Wi-Fi
        не помещались, и один из них обрезался правым краем карточки. Теперь
@@ -1519,22 +1333,27 @@
       stroke-linejoin: round;
       flex: 0 0 auto;
     }
+    /* one line tall: what does not fit wraps to a second line and is clipped — the model is shown
+       whole or not at all (no «P…» stub); a name alone on its line is cut with «…» as a last resort */
     .printer-name {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: baseline;
+      height: 1.2em;
+      min-width: 0;
       font-size: 1.08rem;
       line-height: 1.2;
       font-weight: 700;
       letter-spacing: -0.02em;
       white-space: nowrap;
       overflow: hidden;
-      text-overflow: ellipsis;
     }
-    .printer-meta {
-      margin-top: 2px;
-      color: var(--text-muted);
-      text-transform: uppercase;
-      letter-spacing: 0.08em;
-      font-size: 0.7rem;
-    }
+    .printer-name .pc-nm { overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+    .printer-name .grace-dot { flex: none; align-self: center; }
+    /* the model next to the name, always (IA §5: «P3 · P2S») while it fits; after the grace dot (order) */
+    .printer-name .pc-model { margin-left: 6px; font-size: 0.66rem; font-weight: 600; letter-spacing: 0.02em; color: var(--text-muted);
+                              order: 1; flex: none; }
+    html[data-theme="light"] .printer-name .pc-model { color: var(--text-dim); }
     .status-badge {
       display: inline-flex;
       align-items: center;
@@ -1587,6 +1406,12 @@
       color: var(--danger-12);
       background: var(--danger-3);
       border-color: var(--danger-border);
+    }
+    /* a cancelled job: grey, not the red «ОШИБКА» */
+    .status-badge.cancelled {
+      color: var(--gray-11);
+      background: var(--gray-3);
+      border-color: var(--steel-border);
     }
     .status-badge.offline {
       color: var(--gray-11);
@@ -1730,35 +1555,8 @@
       transition: opacity 0.12s ease;
     }
     .pc-tip.show { opacity: 1; }
-    /* CSS-тултип для табличных вкладок (сводка/лог) — без изменений */
-    .dash-stats-list [data-tip]::after,
-    .dash-event-log [data-tip]::after {
-      content: attr(data-tip);
-      position: absolute;
-      bottom: calc(100% + 7px);
-      left: 50%;
-      transform: translateX(-50%);
-      background: var(--bg-elev);
-      color: var(--text);
-      border: 1px solid var(--line-strong);
-      padding: 3px 9px;
-      border-radius: 6px;
-      font-size: 0.7rem;
-      font-family: "Inter", system-ui, sans-serif;
-      font-weight: 500;
-      white-space: normal;
-      text-align: center;
-      line-height: 1.3;
-      width: max-content;
-      max-width: 200px;
-      opacity: 0;
-      pointer-events: none;
-      transition: opacity 0.12s ease 0.28s;
-      box-shadow: var(--shadow-lg);
-      z-index: 30;
-    }
-    .dash-stats-list [data-tip]:hover::after,
-    .dash-event-log [data-tip]:hover::after { opacity: 1; }
+    /* CSS-тултип для полос сводки. Лог событий — плавающим .pc-tip (app.js,
+       initChipTooltips): ::after внутри .event-desc с overflow: hidden обрезался. */
     .pc-chip.pc-hot { color: #fb9a5f; }
     /* card indicators that need attention (door open, SD card) */
     .pc-chip.pc-warn { color: var(--warn-11); border-color: var(--warn-border); }
@@ -1844,19 +1642,6 @@
     .printer-card.paused .progress-fill {
       background: linear-gradient(90deg, var(--warn-grad-start) 0%, var(--warn-grad-mid) 48%, var(--warn-grad-end) 100%);
     }
-    .alert-box {
-      margin-top: 8px;
-      padding: 7px 10px;
-      border-radius: 10px;
-      background: var(--danger-bg-grad-start);
-      border: 1px solid var(--danger-border);
-    }
-    .alert-value {
-      color: var(--alert-text);
-      font-size: 0.74rem;
-      line-height: 1.35;
-      word-break: break-word;
-    }
     .empty-state {
       padding: 42px 24px;
       border-radius: 24px;
@@ -1872,26 +1657,16 @@
       margin-bottom: 8px;
     }
     @media (max-width: 900px) {
-      .topbar,
       .fleet-head,
       .panel-head {
         flex-direction: column;
         align-items: flex-start;
       }
-      .topbar-side,
-      .filters,
-      .view-tabs {
+      .filters {
         justify-content: flex-start;
-      }
-      .topbar {
-        gap: 10px;
       }
     }
     @media (max-width: 720px) {
-      .shell {
-        width: min(100% - 24px, 1560px);
-        padding-top: 18px;
-      }
       .section-panel,
       .printer-card {
         border-radius: 22px;
@@ -1905,62 +1680,6 @@
       .fleet-section {
         padding: 16px 14px 14px;
       }
-      .dash-stats-row {
-        grid-template-columns: 110px minmax(0, 1fr) 72px;
-        gap: 8px;
-      }
-      .event-row {
-        grid-template-columns: 74px 110px 90px minmax(0, 1fr);
-        gap: 6px;
-      }
-    }
-    @media (max-width: 640px) {
-      /* Компактная шапка: вкладки и чипы — по одной скроллируемой строке,
-         иначе кнопки складываются столбиком и шапка съедает весь первый экран */
-      .topbar {
-        gap: 6px;
-        padding: 2px 0 8px;
-      }
-      .view-tabs {
-        width: 100%;
-        flex-wrap: nowrap;
-        overflow-x: auto;
-        -webkit-overflow-scrolling: touch;
-        scrollbar-width: none;
-        gap: 6px;
-      }
-      .view-tabs::-webkit-scrollbar { display: none; }
-      .view-tab {
-        flex: 0 0 auto;
-        padding: 8px 12px;
-        font-size: 0.7rem;
-      }
-      .topbar-side {
-        width: 100%;
-        flex-wrap: nowrap;
-        overflow-x: auto;
-        -webkit-overflow-scrolling: touch;
-        scrollbar-width: none;
-        justify-content: flex-start;
-        gap: 6px;
-        margin-left: 0;
-      }
-      .topbar-side::-webkit-scrollbar { display: none; }
-      .status-chip {
-        flex: 0 0 auto;
-        min-height: 30px;
-        padding: 0 10px;
-        font-size: 0.68rem;
-      }
-      .status-chip strong,
-      .status-chip span:last-child { font-size: 0.72rem; }
-      /* Фильтр дат истории: пары «label+input» тянутся и переносятся,
-         вместо фиксированных 525px, вылезавших за 375px-экран */
-      .history-ctl-group { width: 100%; }
-      .history-dt-pair { flex: 1 1 220px; }
-      .history-dt { flex: 1 1 auto; width: 100%; }
-      /* phones: the cards get the whole width (the 300 px column fits from 328 px up) */
-      .shell { padding-left: 0; padding-right: 0; }
     }
     @media (prefers-reduced-motion: reduce) {
       *,
@@ -2251,112 +1970,6 @@
       display: grid;
       gap: 8px;
     }
-    .filters-btn {
-      display: inline-flex;
-      align-items: center;
-      gap: 8px;
-      min-height: 36px;
-      padding: 0 14px;
-      background: var(--bg-soft);
-      border: 1px solid var(--line);
-      border-radius: 999px;
-      color: var(--text-dim);
-      font-family: "IBM Plex Sans", sans-serif;
-      font-size: 0.76rem;
-      cursor: pointer;
-      transition: background 0.2s, color 0.2s, border-color 0.2s;
-      backdrop-filter: blur(12px);
-    }
-    .filters-btn:hover {
-      background: var(--line);
-      color: var(--text);
-      border-color: var(--line-strong);
-    }
-    .filters-btn .filters-btn-badge {
-      display: inline-block;
-      padding: 1px 7px;
-      border-radius: 999px;
-      /* --info-soft полупрозрачен в части тем — кладём поверх непрозрачного
-         --bg-elev, иначе бейдж просвечивает сквозь блюр кнопки. */
-      background-color: var(--bg-elev);
-      background-image: linear-gradient(var(--info-soft), var(--info-soft));
-      color: var(--info);
-      font-size: 0.7rem;
-      font-weight: 600;
-      font-family: "IBM Plex Mono", monospace;
-    }
-    .filters-btn .filters-btn-caret {
-      font-size: 0.6rem;
-      color: var(--text-muted);
-      transition: transform 0.2s;
-    }
-    .settings-dropdown.open + button .filters-btn-caret,
-    .filters-dropdown-wrap.open .filters-btn-caret {
-      transform: rotate(180deg);
-    }
-    .filters-dropdown-wrap {
-      position: relative;
-      display: inline-block;
-    }
-    .filters-dropdown-wrap .settings-dropdown {
-      right: auto;
-      left: 0;
-    }
-    .filters-dropdown-wrap .settings-dropdown .filters {
-      justify-content: flex-start;
-    }
-    .history-range-btns { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
-    .history-ctl-group { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
-    .history-dt-pair { display: inline-flex; gap: 6px; align-items: center; min-width: 0; }
-    .history-ctl-label { color: var(--text-muted); font-size: 0.7rem; white-space: nowrap; }
-    .history-controls { display: flex; align-items: center; gap: 8px 16px; margin-bottom: 12px; flex-wrap: wrap; }
-    [data-panel="history"] .time-btn {
-      appearance: none;
-      padding: 5px 12px;
-      border: 1px solid var(--line);
-      border-radius: 999px;
-      background: var(--bg-soft);
-      color: var(--text-dim);
-      cursor: pointer;
-      font-family: "IBM Plex Sans", sans-serif;
-      font-size: 0.72rem;
-      font-weight: 500;
-      transition: all 0.2s ease;
-    }
-    [data-panel="history"] .time-btn:hover { color: var(--text); border-color: var(--line-strong); }
-    [data-panel="history"] .time-btn.active {
-      color: var(--tab-active-text);
-      background: linear-gradient(135deg, var(--ok-grad-end) 0%, var(--ok-grad-mid) 100%);
-      border-color: transparent;
-      font-weight: 700;
-    }
-    .history-dt {
-      background: var(--bg-soft);
-      border: 1px solid var(--line);
-      border-radius: 10px;
-      color: var(--text);
-      padding: 5px 10px;
-      font-size: 0.72rem;
-      font-family: "IBM Plex Mono", monospace;
-      color-scheme: dark;
-      min-width: 0;
-      max-width: 100%;
-    }
-    [data-theme="light"] .history-dt { color-scheme: light; }
-    #history-apply {
-      appearance: none;
-      padding: 6px 16px;
-      border: none;
-      border-radius: 999px;
-      background: linear-gradient(135deg, var(--ok-grad-end) 0%, var(--ok-grad-mid) 100%);
-      color: var(--tab-active-text);
-      cursor: pointer;
-      font-family: "IBM Plex Sans", sans-serif;
-      font-size: 0.72rem;
-      font-weight: 700;
-      transition: transform 0.15s ease;
-    }
-    #history-apply:hover { transform: translateY(-1px); }
     .timeline-legend-row { margin-bottom: 4px; align-items: center; }
     .timeline-scale-label { margin-left: auto; color: var(--text-dim); font-family: "IBM Plex Mono", monospace; font-size: 0.72rem; }
     #timeline-canvas { width: 100%; height: calc(100vh - 320px); min-height: 420px; cursor: grab; border-radius: 12px; }
@@ -2364,65 +1977,6 @@
     .timeline-tooltip { position: fixed; pointer-events: none; background: var(--bg-panel); border: 1px solid var(--line-strong); border-radius: 8px; padding: 8px 12px; font-size: 12px; color: var(--text); white-space: nowrap; z-index: 1000; display: none; box-shadow: var(--shadow-lg); max-width: 280px; white-space: normal; line-height: 1.5 }
 
     /* Event log */
-    .event-filters {
-      display: flex;
-      gap: 8px;
-      flex-wrap: wrap;
-      align-items: center;
-      margin-bottom: 12px;
-    }
-    .event-printer-wrap { position: relative; }
-    .event-printer-btn {
-      appearance: none;
-      border: 1px solid var(--line);
-      background: var(--bg-soft);
-      color: var(--text);
-      padding: 7px 12px;
-      border-radius: 10px;
-      cursor: pointer;
-      font-family: "IBM Plex Sans", sans-serif;
-      font-size: 0.74rem;
-      font-weight: 500;
-      display: flex;
-      align-items: center;
-      gap: 6px;
-      transition: border-color 0.15s ease;
-    }
-    .event-printer-btn:hover { border-color: var(--line-strong); }
-    .event-printer-dropdown { max-height: 320px; overflow-y: auto; }
-    .event-state-btns { display: flex; gap: 6px; flex-wrap: wrap; }
-    .event-state-btn {
-      appearance: none;
-      border: 1px solid var(--line);
-      background: var(--bg-soft);
-      color: var(--text-dim);
-      padding: 5px 12px;
-      border-radius: 999px;
-      cursor: pointer;
-      font-family: "IBM Plex Sans", sans-serif;
-      font-size: 0.72rem;
-      font-weight: 500;
-      transition: all 0.2s ease;
-    }
-    .event-state-btn:hover { color: var(--text); border-color: var(--line-strong); }
-    .event-state-btn.active {
-      color: var(--tab-active-text);
-      background: linear-gradient(135deg, var(--ok-grad-end) 0%, var(--ok-grad-mid) 100%);
-      border-color: transparent;
-      font-weight: 700;
-    }
-    .event-row {
-      display: grid;
-      grid-template-columns: 86px 170px 104px minmax(0, 1fr);
-      gap: 10px;
-      align-items: baseline;
-      padding: 5px 8px;
-      border-radius: 8px;
-      font-size: 0.8rem;
-    }
-    .event-row:hover { background: var(--bg-soft); }
-    .event-time { color: var(--text-muted); font-family: "IBM Plex Mono", monospace; font-size: 0.72rem; white-space: nowrap; }
-    .event-printer { color: var(--text); font-weight: 600; font-size: 0.78rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
     .event-badge {
       display: inline-block;
       padding: 2px 9px;
@@ -2442,27 +1996,14 @@
     .event-badge-paused { color: var(--warn); background-image: linear-gradient(var(--warn-soft), var(--warn-soft)); }
     .event-badge-finished { color: var(--ok); background-image: linear-gradient(var(--ok-soft), var(--ok-soft)); }
     .event-badge-error { color: var(--danger); background-image: linear-gradient(var(--danger-soft), var(--danger-soft)); }
+    .event-badge-cancelled { color: var(--gray-11); background-image: linear-gradient(var(--steel-soft), var(--steel-soft)); }
     .event-badge-offline { color: var(--text-muted); background-image: linear-gradient(var(--steel-soft), var(--steel-soft)); }
     .event-badge-idle, .event-badge-unknown { color: var(--text-dim); background-image: linear-gradient(var(--steel-soft), var(--steel-soft)); }
-    .event-desc { color: var(--text-dim); font-size: 0.78rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-    .event-job { color: var(--text); position: relative; }
-    .event-err { color: var(--danger); }
+    /* a pause waits for a decision, a cancel is the owner's: not the red of an error */
     /* ≤640px: четыре фиксированные колонки не влезают в ~311px контента —
        время+принтер+бейдж в одну строку, описание задачи — второй строкой */
     @media (max-width: 640px) {
-      .event-row {
-        grid-template-columns: auto minmax(0, 1fr) auto;
-        grid-template-areas:
-          "time printer badge"
-          "desc desc desc";
-        gap: 2px 8px;
-        align-items: center;
-      }
-      .event-time { grid-area: time; }
-      .event-printer { grid-area: printer; }
       .event-badge { grid-area: badge; justify-self: end; }
-      .event-desc { grid-area: desc; }
-      .event-desc:empty { display: none; }
     }
 
     .scroll-top-btn {
@@ -2532,12 +2073,6 @@
     .adm-table .mono { font-family: "IBM Plex Mono", monospace; font-size: 0.78rem; }
     .adm-table .dim { color: var(--text-dim); }
     .adm-table .muted { color: var(--text-muted); }
-    .adm-table .ua-cell {
-      max-width: 240px;
-      overflow: hidden;
-      text-overflow: ellipsis;
-      white-space: nowrap;
-    }
     .adm-actions-col, .adm-actions { text-align: right; white-space: nowrap; }
     .badge {
       display: inline-block;
@@ -2666,7 +2201,7 @@
       text-align: right;
     }
 
-    /* -- Forecast tab (12h finish window) -- */
+    /* -- «Окно» under «Финиши» (the former tab): the finish window, 12 / 24 h -- */
     .forecast-area { position: relative; margin-top: 12px; }
     .forecast-flag { position: absolute; width: 0; }
     .forecast-flag-label {
@@ -2703,9 +2238,6 @@
     .forecast-now { position: absolute; left: 0; width: 2px; height: 18px; background: var(--ok); }
     .forecast-now-label { position: absolute; left: 0; font-size: 12px; color: var(--ok); white-space: nowrap; }
     .forecast-now-time { color: var(--ok); }
-    .forecast-controls { display: flex; gap: 6px; }
-    .forecast-controls .time-btn { padding: 6px 14px; border: 1px solid var(--line-strong); border-radius: 6px; background: var(--bg-soft); color: var(--text-dim); cursor: pointer; font-size: 13px; }
-    .forecast-controls .time-btn.active { background: var(--btn-primary); border-color: var(--btn-primary); color: var(--btn-primary-text); }
     .forecast-end-label { position: absolute; right: 0; font-size: 12px; color: var(--text-muted); }
     .forecast-empty { padding: 24px 0; color: var(--text-muted); }
     .forecast-no-eta { margin-top: 10px; font-size: 12px; color: var(--text-muted); }
@@ -2735,7 +2267,6 @@
 
     #adminPrintersTable tr.row-del td { opacity: 0.45; text-decoration: line-through; }
     #adminPrintersTable tr.row-del td:last-child { text-decoration: none; }
-    .secret { font-family: var(--font-mono, monospace); font-size: 0.78rem; color: var(--text-muted); letter-spacing: 0.15em; }
     .eye { background: transparent; border: none; color: var(--text-muted); cursor: pointer; font-size: 0.85rem; padding: 0 4px; vertical-align: middle; }
     .eye:hover { color: var(--info); }
 
@@ -2775,43 +2306,6 @@
     /* «Последний вход» в таблице пользователей */
     .ll-cell { white-space: nowrap; }
     .ll-sub { font-size: 0.7rem; color: var(--text-muted); margin-top: 2px; }
-
-    /* ── Вкладка «Настройки» ─────────────────────────────────────── */
-    .settings-tab {
-      display: inline-flex;
-      align-items: center;
-      gap: 7px;
-      border: 1px solid var(--line-strong);
-      font-weight: 600;
-    }
-    .settings-tab-gear { font-size: 0.95rem; line-height: 1; }
-    /* Две колонки: Оформление|Уведомления, Telegram|Прокси; подвал на всю ширину */
-    .view-panel[data-panel="settings"].active {
-      display: grid;
-      grid-template-columns: repeat(2, minmax(0, 1fr));
-      gap: 18px;
-      align-items: start;
-      max-width: 1320px;
-      margin: 0 auto;
-    }
-    .view-panel[data-panel="settings"] .section-panel { margin-bottom: 0; }
-    .view-panel[data-panel="settings"] .settings-foot-panel { grid-column: 1 / -1; }
-    @media (max-width: 980px) {
-      .view-panel[data-panel="settings"].active { grid-template-columns: 1fr; }
-    }
-    /* Воздух между подкарточками секции (в попапе его давал flex-gap) */
-    .view-panel[data-panel="settings"] .section-panel {
-      display: flex;
-      flex-direction: column;
-      gap: 12px;
-    }
-    .view-panel[data-panel="settings"] .panel-head { margin-bottom: 2px; }
-    /* Тема: в попапе была сетка 2×N — на странице пусть лежит одной строкой */
-    .view-panel[data-panel="settings"] .theme-grid {
-      display: flex;
-      flex-wrap: wrap;
-      justify-content: flex-end;
-    }
 
     .admin-chip {
       align-self: center;
@@ -2942,14 +2436,6 @@
       text-align: center;
     }
 
-    .settings-foot-row {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 12px;
-      flex-wrap: wrap;
-    }
-
     /* ── Панель управления на карточке (админ) ───── */
     .pc-controls {
       display: flex;
@@ -3002,6 +2488,12 @@
       color: var(--text); border-color: var(--info);
       background-color: var(--bg-elev); background-image: linear-gradient(var(--info-soft), var(--info-soft));
     }
+    /* the card's one ⋯, in its head on every card (IA §5; the mockup's 30 × 28): no fill of its own */
+    .pc-ctl.pc-ctl-head { width: 30px; height: 28px; padding: 0; border-radius: 999px; flex: none; }
+    .pc-ctl.pc-ctl-head:not(.open) { background: transparent; }
+    .pc-ctl.pc-ctl-head .pc-ic { width: 15px; height: 15px; }
+    /* a 40 px tap target around it (the padding box + 2×6; ::after is the outcome mark) */
+    .pc-ctl.pc-ctl-head::before { content: ""; position: absolute; inset: -6px; }
     /* the command's outcome on the button itself (3 s), the spinner while waiting */
     .pc-ctl.is-wait, .pc-ctl.is-ok, .pc-ctl.is-bad, .pc-ctl.is-unk { opacity: 1 !important; pointer-events: none; }
     .pc-ctl.is-wait .pc-ic, .pc-ctl.is-ok .pc-ic, .pc-ctl.is-bad .pc-ic, .pc-ctl.is-unk .pc-ic { opacity: 0; }
@@ -3069,6 +2561,21 @@
     .cf-go:hover { filter: brightness(1.1); }
     .cf-cancel { background: var(--bg-soft); border: 1px solid var(--line-strong); color: var(--text-dim); }
     .cf-cancel:hover { color: var(--text); border-color: var(--text-muted); }
+    /* IA §10, plan step 14: two kinds of confirmation — in place for one object (here) and the
+       dialog for a group; a command's answer where it was pressed (.reply-slot, replyIn). */
+    .reply-slot:empty { display: none; }
+    .reply-slot .pc-cmd { margin-top: 6px; }
+    .pc-pop-ask { margin-top: 2px; }
+    .pc-pop-note.ask { margin-top: 0; font-size: 0.8rem; color: var(--text); line-height: 1.4; }
+    .pc-pop-ask .pc-pop-row { justify-content: flex-end; margin-top: 10px; }
+    .pc-pop-ok.danger { background-color: var(--bg-elev); background-image: linear-gradient(var(--danger-soft), var(--danger-soft));
+                        border-color: var(--danger); color: var(--danger-11); }
+    .ams-dry .ams-ask { margin-left: auto; font-size: 0.8rem; font-weight: 600; color: var(--danger-11); }
+    .ams-dry.asking .pc-ctl { margin-left: 0; }
+    .apply-ask { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
+    .apply-ask[hidden] { display: none; }
+    .apply-ask .adm-ask { font-size: 0.8rem; text-align: left; }
+    .discard-btn.danger { border-color: var(--danger); color: var(--danger-11); }
 
     /* ── Кликабельные чипы параметров ───── */
     .pc-chip.pc-editable {
@@ -3078,6 +2585,9 @@
       border-color: var(--text-muted);
       filter: brightness(1.15);
     }
+    /* a temperature chip that only opens the chart (a viewer, or a chip that cannot be set) */
+    .pc-chip.pc-chartable { cursor: pointer; }
+    .pc-chip.pc-chartable:hover { border-color: var(--text-muted); filter: brightness(1.15); }
 
     /* ── Поповер смены параметра (у чипа / 🔧) ───── */
     .pc-pop {
@@ -3124,14 +2634,24 @@
       cursor: pointer;
       text-align: left;
     }
-    .pc-pop-preset:hover:not(:disabled) {
+    .pc-pop-preset:hover:not(:disabled):not([aria-disabled="true"]) {
       border-color: var(--info);
       color: var(--text);
     }
     .pc-pop-preset:disabled { opacity: 0.45; cursor: default; }
     .pc-pop-preset.on { border-color: var(--ok); color: var(--ok); }
     .pc-pop-preset.on:disabled { opacity: 1; }   /* the loaded slot stays legible */
+    /* the loaded slot: aria-disabled, not disabled — its data-tip still reaches a hover and a tap */
+    .pc-pop-preset[aria-disabled="true"] { cursor: default; }
     .pc-pop-preset .pc-ams-slot { width: 11px; height: 11px; margin-right: 5px; vertical-align: -1px; }
+    /* the AMS popover without commands (a viewer): the slots as plain labels, the loaded one marked */
+    .pc-pop-slot {
+      display: inline-flex; align-items: center; padding: 5px 9px; border-radius: 8px; background: var(--bg-soft);
+      border: 1px solid var(--line); color: var(--text-dim); font-size: 0.8rem; font-family: "IBM Plex Mono", monospace;
+    }
+    .pc-pop-slot.on { border-color: var(--ok); color: var(--ok); }
+    .pc-pop-slot.empty { color: var(--text-muted); }
+    .pc-pop-slot .pc-ams-slot { width: 11px; height: 11px; margin-right: 5px; }
     .pc-pop-h:not(:first-child) { margin-top: 12px; }   /* next AMS unit */
     .pc-pop-note { font-size: 0.72rem; line-height: 1.35; color: var(--text-dim); margin-top: 6px; }
     .pc-pop-note.warn { color: var(--warn-11); }
@@ -3202,32 +2722,107 @@
     .pm-item .val { flex: none; font-family: "IBM Plex Mono", monospace; font-size: 0.7rem; color: var(--text-muted); }
     .pm-item[aria-disabled="true"] { opacity: 0.42; cursor: default; }
     .pm-sep { height: 1px; background: var(--line); margin: 4px 6px; }
-    .pm-speed { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 4px; padding: 0 6px 6px 36px; }
-    .pm-speed button { text-align: center; padding: 5px 4px; font-size: 0.72rem; }
     .pop-why { display: flex; align-items: flex-start; gap: 6px; margin-top: 9px; font-size: 0.72rem; color: var(--warn-11); line-height: 1.35; }
     .pop-why .pc-ic { width: 14px; height: 14px; margin-top: 1px; flex: none; }
     .pc-pop[data-kind="menu"] .pop-why { margin: 2px 9px 6px; }
+    /* «Снять с обслуживания»: a check mark in the icon's place */
+    .pm-item > .pm-check { display: inline-grid; place-items: center; font-size: 0.9rem; font-weight: 700; line-height: 1; }
+    /* the maintenance note form: room for a sentence */
+    .pc-pop[data-kind="maint"] { width: min(320px, calc(100vw - 16px)); }
+    .pc-pop[data-kind="maint"] input[type="text"] { font-family: "IBM Plex Sans", sans-serif; }
 
-    /* ── «Вся ферма»: свет всем, пауза / продолжение с выбором ───── */
-    /* Lives in the sort bar's row (no box of its own): pushed to the right, wraps
-       under the sort / filter controls on narrow screens. */
-    #fleetBulk { display: contents; }
-    .fleet-bulk {
-      position: relative; display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px;
-      margin-left: auto;
+    /* ── Temperature chart in the chip popover (app.js temp-chart block) ───── */
+    /* a fixed width: placePop measures the final size on open, the chart fills it */
+    .pc-pop[data-kind="nozzle"], .pc-pop[data-kind="bed"], .pc-pop[data-kind="chamber"] { width: min(320px, calc(100vw - 16px)); }
+    .tc { margin-top: 10px; }
+    /* admin: the setter stays on top, the chart goes under a divider */
+    .pc-pop-row + .tc { padding-top: 10px; border-top: 1px solid var(--line); }
+    .pc-pop-h + .tc { margin-top: 0; }
+    .tc-h { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+    .tc-now { font-family: "IBM Plex Mono", monospace; font-size: 0.82rem; letter-spacing: 0; text-transform: none; color: var(--text); white-space: nowrap; }
+    .tc-head { display: flex; align-items: center; justify-content: space-between; gap: 6px 8px; flex-wrap: wrap; margin-bottom: 6px; }
+    .tc .ams-range { padding: 2px; flex: none; }
+    .tc .ams-range button { padding: 3px 9px; font-size: 12px; }
+    /* the active period is the popover's own colour: a ring keeps it visible in the light theme too */
+    .tc .ams-range button.active { box-shadow: 0 0 0 1px var(--line-strong); }
+    .tc-mm { font-size: 11px; color: var(--text-muted); white-space: nowrap; font-variant-numeric: tabular-nums; }
+    .tc-box { touch-action: pan-y; }   /* a sideways drag scrubs the chart, a vertical one still scrolls */
+    .tc-box .ams-chart, .tc-box .ams-nodata { height: 112px; }
+    .tc-box .ams-nodata.err { color: var(--warn-11); }
+    .tc-live {
+      position: absolute; width: 7px; height: 7px; border-radius: 50%; transform: translate(-50%, -50%);
+      border: 1.5px solid var(--bg-elev); box-shadow: 0 0 0 1px var(--line-strong); pointer-events: none;
     }
-    .fb-title { font-size: 0.64rem; text-transform: uppercase; letter-spacing: 0.1em; color: var(--text-muted); font-weight: 700; }
-    .fb-group { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; min-width: 0; }
-    .fb-lbl { font-size: 0.74rem; color: var(--text-dim); font-weight: 600; margin-right: 2px; }
+    .tc-legend { display: flex; flex-wrap: wrap; gap: 3px 12px; margin-top: 4px; font-size: 11px; color: var(--text-muted); }
+    .tc-legend span { display: inline-flex; align-items: center; gap: 5px; height: 16px; }
+    .tc-legend span[hidden] { display: none; }
+    .tc:not(.tc-on) .tc-legend { visibility: hidden; }   /* loading / no data / error: the place is kept */
+    .tc-legend i { display: inline-block; width: 14px; height: 0; border-top: 2px solid var(--tc); }
+    .tc-legend i.tgt { border-top-style: dashed; opacity: 0.75; }
+    .tc-legend i.band { width: 11px; height: 9px; border: 0; border-radius: 2px; background: var(--tc); opacity: 0.22; }
+    @media (max-width: 640px) {
+      .tc .ams-range button { min-width: 36px; min-height: 36px; padding: 0 8px; }   /* tap targets */
+    }
+
+    /* ── «Принтеры»: the farm's row over the grid (IA §5) ───── */
+    /* chips = the filters, «Порядок: Имя | Финиш», the farm's commands (admins); rows 1 and 2
+       are one line from 1600 px on. Opaque tints only (theme-soft-colors-translucent). */
+    /* the row only: the bell's popover is «.nf-pop.farm» too and must stay a block flush with the bottom */
+    .fleet-section > .farm { display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; margin-bottom: 12px; }
+    .fleet-section > .farm > *, .farm-top > * { min-width: 0; }
+    .farm-top { display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; }
+    .farm-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; min-height: 36px; }
+    .farm-chips { display: flex; flex-wrap: wrap; gap: 6px; min-width: 0; }
+    .farm-sep { flex: 1 1 auto; min-width: 8px; }
+    .farm-lbl { font-size: 0.72rem; color: var(--text-muted); white-space: nowrap; }
+    .farm-order { display: inline-flex; align-items: center; gap: 8px; flex: none; }
+    .farm-chip {
+      appearance: none; display: inline-flex; align-items: center; gap: 6px; min-height: 30px; padding: 0 11px;
+      border-radius: 999px; border: 1px solid var(--line); background: var(--bg-soft); color: var(--text-dim);
+      font: 600 0.76rem "IBM Plex Sans", sans-serif; cursor: pointer; white-space: nowrap;
+    }
+    .farm-chip b { font-family: "IBM Plex Mono", monospace; color: var(--text); font-weight: 700; }
+    .farm-chip:hover { border-color: var(--line-strong); color: var(--text); }
+    .farm-chip.zero { opacity: 0.45; }
+    .farm-chip.on {
+      border-color: var(--info); color: var(--text); opacity: 1;
+      background-color: var(--bg-elev); background-image: linear-gradient(var(--info-soft), var(--info-soft));
+    }
+    .farm-chip .fc-s { display: none; }
+    .farm-dot { width: 8px; height: 8px; border-radius: 50%; flex: none; background: var(--st, var(--text-muted)); }
+    .farm-x { margin-left: 2px; color: var(--text-muted); }
+    .farm-chip.st-printing { --st: var(--info); }
+    .farm-chip.st-paused { --st: var(--warn); }
+    .farm-chip.st-error { --st: var(--danger); }
+    .farm-chip.st-finished { --st: var(--ok); }
+    .farm-chip.st-cancelled { --st: var(--gray-9); }
+    .farm-chip.st-idle { --st: var(--steel); }
+    .farm-chip.st-offline { --st: var(--gray-7); }
+    .farm-chip.st-maintenance { --st: var(--warn-7); }
+    .farm-seg { display: inline-flex; flex: none; border: 1px solid var(--line); border-radius: 10px; overflow: hidden; background: var(--bg-soft); }
+    .farm-seg button {
+      appearance: none; border: 0; background: none; color: var(--text-dim); min-height: 30px; padding: 0 10px;
+      display: inline-flex; align-items: center; gap: 5px; font: 600 0.74rem "IBM Plex Sans", sans-serif; cursor: pointer; white-space: nowrap;
+    }
+    .farm-seg button + button { border-left: 1px solid var(--line); }
+    .farm-seg button:hover { color: var(--text); }
+    .farm-seg button.active {
+      background-color: var(--bg-elev); background-image: linear-gradient(var(--info-soft), var(--info-soft)); color: var(--text);
+    }
+    .farm-seg button .spin-sm { width: 12px; height: 12px; }
+    .farm-seg button.is-wait { pointer-events: none; }
+    /* the farm's commands (admins): «Свет: вкл · выкл», «Пауза всех…», «Продолжить N» */
+    .fleet-bulk { position: relative; display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; min-height: 32px; }
+    .fb-light-lbl { display: inline-flex; align-items: center; gap: 5px; font-size: 0.74rem; color: var(--text-dim); white-space: nowrap; }
+    .fb-light-lbl .pc-ic { width: 15px; height: 15px; color: var(--warn); fill: rgba(251, 191, 36, 0.22); }
     .fb-btn {
       position: relative; display: inline-flex; align-items: center; gap: 6px; height: 32px; padding: 0 12px;
-      border-radius: 999px; border: 1px solid var(--line); background: var(--bg-soft); color: var(--text-dim);
-      font-family: "IBM Plex Sans", sans-serif; font-size: 0.74rem; font-weight: 500; white-space: nowrap; cursor: pointer;
+      border-radius: 10px; border: 1px solid var(--line-strong); background: var(--bg-soft); color: var(--text);
+      font-family: "IBM Plex Sans", sans-serif; font-size: 0.74rem; font-weight: 600; white-space: nowrap; cursor: pointer;
       transition: border-color 0.15s, color 0.15s;
     }
     .fb-btn .pc-ic { width: 15px; height: 15px; }
-    .fb-btn:hover:not([aria-disabled="true"]) { color: var(--text); border-color: var(--line-strong); }
-    .fb-btn.light .pc-ic { color: var(--warn); fill: rgba(251, 191, 36, 0.22); }
+    .fb-btn:hover:not([aria-disabled="true"]) { border-color: var(--info); }
     .fb-btn.pause { color: var(--warn-11); border-color: rgba(251, 191, 36, 0.35); }
     .fb-btn.pause:hover:not([aria-disabled="true"]) { border-color: var(--warn); color: var(--warn-12); }
     .fb-btn[aria-disabled="true"] { opacity: 0.4; cursor: default; }
@@ -3237,15 +2832,12 @@
       font-family: "IBM Plex Mono", monospace; font-size: 0.7rem; font-weight: 600; padding: 1px 7px;
       border-radius: 999px; background: var(--bg-elev); color: var(--text);
     }
-    .fb-meta { font-size: 0.72rem; color: var(--text-muted); white-space: nowrap; }
-    .fb-meta b { color: var(--warn); font-family: "IBM Plex Mono", monospace; font-weight: 600; }
+    .fb-meta { font-size: 0.74rem; color: var(--text-muted); white-space: nowrap; }
     .fb-meta.ok { color: var(--ok); }
     .fb-meta.bad { color: var(--warn-11); }
-    .fb-sep { width: 1px; height: 22px; background: var(--line); }
-    .fb-meta-m { display: none; }
     .fb-result {
       flex-basis: 100%;
-      display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; margin: 0; padding: 8px 10px;
+      display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; margin: 6px 0 0; padding: 8px 10px;
       border: 1px solid var(--danger-border); border-radius: 12px; background-color: var(--bg-elev);
       background-image: linear-gradient(var(--danger-soft), var(--danger-soft)); font-size: 0.74rem; color: var(--text-dim);
     }
@@ -3254,12 +2846,92 @@
       margin-left: auto; border: 0; background: transparent; color: inherit; font-size: 0.95rem; line-height: 1;
       cursor: pointer; padding: 0 2px;
     }
+    #fleetBulk:empty { display: none; }
+    /* «Финиши» (IA §5): ready to unload and the next ones, «Окно ▾» unfolds the window under it */
+    .fin-row {
+      display: flex; align-items: center; gap: 6px 14px; flex-wrap: wrap; min-height: 32px; padding: 4px 12px;
+      border-radius: 12px; background: var(--bg-soft); border: 1px solid var(--line); font-size: 0.78rem; color: var(--text-dim);
+    }
+    .fin-row b { color: var(--text); }
+    .fin-it { display: inline-flex; gap: 5px; align-items: baseline; white-space: nowrap; }
+    .fin-lbl { font-weight: 700; color: var(--text); }
+    .fin-t { font-family: "IBM Plex Mono", monospace; color: var(--text); font-size: 0.76rem; }
+    .fin-row b.fin-ready { color: var(--ok); }
+    .fin-dim { color: var(--text-muted); }
+    .fin-win-btn { font-size: 0.76rem; white-space: nowrap; }
+    .fin-win { margin-top: 2px; padding: 12px 14px 10px; border-radius: 12px; border: 1px solid var(--line); background: var(--bg-soft); }
+    .fin-win[hidden] { display: none; }
+    .fin-win-h { display: flex; align-items: center; gap: 8px 14px; flex-wrap: wrap; }
+    .fin-win .forecast-area { margin-top: 10px; }
+    /* a phone: one line that opens the list sheet (no scale: its labels overlap at 375 px) */
+    .fin-row.fin-phone {
+      appearance: none; width: 100%; flex-wrap: nowrap; overflow: hidden; cursor: pointer; text-align: left;
+      font: inherit; font-size: 0.76rem; color: var(--text-dim);
+    }
+    .fin-phone .fin-it { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+    .fin-phone .fin-go { margin-left: auto; color: var(--text-muted); flex: none; }
+    .fin-back { position: fixed; inset: 0; z-index: 615; background: rgba(8, 14, 22, 0.45); }
+    .fin-back[hidden], .fin-sheet[hidden] { display: none; }
+    .fin-sheet {
+      position: fixed; z-index: 620; left: 0; right: 0; bottom: 0; max-height: 86vh; max-height: 86dvh;
+      overflow-y: auto; overscroll-behavior: contain; padding-bottom: calc(14px + env(safe-area-inset-bottom));
+      background: var(--bg-elev); color: var(--text); border: 1px solid var(--line-strong); border-bottom: 0;
+      border-radius: 20px 20px 0 0; box-shadow: var(--shadow-xl);
+    }
+    .fin-sheet:focus { outline: none; }
+    .fin-sheet-h {
+      position: sticky; top: 0; z-index: 1; display: flex; align-items: center; gap: 8px; padding: 18px 14px 12px;
+      background: var(--bg-elev); border-bottom: 1px solid var(--line); border-radius: 20px 20px 0 0;
+    }
+    .fin-sheet-h::before {
+      content: ""; position: absolute; top: 6px; left: 50%; width: 40px; height: 4px; margin-left: -20px;
+      border-radius: 2px; background: var(--line-strong);
+    }
+    .fin-sheet-h b { flex: 1 1 auto; font-size: 1rem; }
+    .fin-list { display: grid; padding: 4px 0 6px; }
+    .fin-grp {
+      padding: 12px 16px 4px; font-size: 0.7rem; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase;
+      color: var(--text-muted);
+    }
+    .fin-li {
+      appearance: none; display: grid; grid-template-columns: 52px auto minmax(0, 1fr); align-items: center; gap: 10px;
+      width: 100%; min-height: 44px; padding: 6px 16px; border: 0; border-bottom: 1px solid var(--line); background: none;
+      color: var(--text); font: 500 0.82rem "IBM Plex Sans", sans-serif; text-align: left; cursor: pointer;
+    }
+    .fin-li .fin-sub { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-dim); font-size: 0.76rem; }
+    .fin-li.fin-none { display: block; cursor: default; color: var(--text-muted); }
+    /* «Не в работе · N» (maintenance, offline a day and more): one quiet line in the grid, its cards under it */
+    .fleet-rest {
+      grid-column: 1 / -1; display: flex; align-items: center; gap: 8px 10px; flex-wrap: wrap; min-height: 44px;
+      padding: 6px 12px; border-radius: 12px; border: 1px dashed var(--line-strong); color: var(--text-dim); font-size: 0.78rem;
+    }
+    .fleet-rest .fr-title { color: var(--text); white-space: nowrap; }
+    .fr-mini {
+      display: inline-flex; align-items: center; gap: 4px; padding: 2px 9px; border-radius: 999px; background: var(--bg-soft);
+      border: 1px solid var(--line); font-size: 0.72rem; color: var(--text-dim); white-space: nowrap; max-width: 100%;
+      overflow: hidden; text-overflow: ellipsis;
+    }
+    .fr-mini .pc-ic { width: 12px; height: 12px; flex: none; }
+    .fr-sep { flex: 1 1 auto; }
+    .fleet-rest .fr-toggle { font-size: 0.76rem; }
+    .fleet-empty { grid-column: 1 / -1; }
+    @media (min-width: 1600px) {
+      .farm-top { display: flex; align-items: center; flex-wrap: wrap; gap: 10px 18px; }
+      #fleetBulk:not(:empty) { padding-left: 14px; border-left: 1px solid var(--line); }
+    }
+    @media (max-width: 899px) {
+      /* a phone: the chips that are not zero only, short, with their state's colour under them */
+      .fleet-section > .farm { gap: 6px; margin-bottom: 10px; }
+      .farm-chips { gap: 4px 3px; }
+      .farm-chip.zero { display: none; }
+      .farm-chip { min-height: 30px; padding: 0 6px; gap: 3px; font-size: 0.69rem; box-shadow: inset 0 -2px 0 var(--st, transparent); }
+      .farm-chip .farm-dot { display: none; }
+      .farm-chip.st-maintenance .fc-l { display: none; }
+      .farm-chip.st-maintenance .fc-s { display: inline; }
+    }
     @media (max-width: 640px) {
-      .fleet-bulk { gap: 8px; margin-left: 0; width: 100%; }
-      .fb-sep, .fb-lbl, .fb-group .fb-meta { display: none; }
-      .fb-meta-m { display: inline; margin-left: auto; }
-      .fb-group { width: 100%; flex-wrap: nowrap; }
-      .fb-group .fb-btn { flex: 1 1 0; min-width: 0; justify-content: center; padding: 0 8px; }
+      .fleet-bulk { gap: 8px; }
+      .fleet-rest { padding: 6px 10px; }
     }
 
     /* ── Групповая пауза / продолжение: диалог ───── */
@@ -3380,13 +3052,314 @@
       border: 1px solid var(--line);
     }
 
+    /* ── Printer notifications (app.js nf-ui; mockups/mockup-notifications.html) ── */
+    :root {
+      --sev-pause: #fb923c; --sev-pause-text: #fdba74;
+      --sev-pause-soft: rgba(251, 146, 60, 0.16); --sev-pause-border: rgba(251, 146, 60, 0.45);
+      --sev-fatal-ink: #2a0606;
+    }
+    html[data-theme="dark-classic"] { --sev-pause: #f0883e; --sev-pause-text: #ffa657; --sev-pause-soft: rgba(240, 136, 62, 0.16); --sev-pause-border: rgba(240, 136, 62, 0.45); }
+    html[data-theme="light"] { --sev-pause: #c2410c; --sev-pause-text: #9a3412; --sev-pause-soft: rgba(194, 65, 12, 0.12); --sev-pause-border: rgba(194, 65, 12, 0.40); --sev-fatal-ink: #ffffff; }
+    html[data-theme="night"] { --sev-pause: #f97316; --sev-pause-text: #fdba74; --sev-pause-soft: rgba(249, 115, 22, 0.16); --sev-pause-border: rgba(249, 115, 22, 0.45); }
+    html[data-theme="neon"] { --sev-pause: #ff8c42; --sev-pause-text: #ffb27a; --sev-pause-soft: rgba(255, 140, 66, 0.16); --sev-pause-border: rgba(255, 140, 66, 0.45); }
+    html[data-theme="cosmos"] { --sev-pause: #ff9d5c; --sev-pause-text: #ffc093; --sev-pause-soft: rgba(255, 157, 92, 0.15); --sev-pause-border: rgba(255, 157, 92, 0.42); }
+    /* the floating tooltip shows over every popover, sheet, panel and dialog too (one data-tip
+       binding for the page, plan step 14) */
+    .pc-tip { z-index: 700; }
+
+    /* severity chip; the *-soft tints are translucent in some themes: laid over --bg-elev */
+    .nf-sev {
+      display: inline-flex; align-items: center; height: 22px; padding: 0 8px; border-radius: 999px; white-space: nowrap;
+      font-size: 0.64rem; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; border: 1px solid transparent; flex: none;
+    }
+    .nf-sev.fatal { background: var(--danger); color: var(--sev-fatal-ink); }
+    .nf-sev.pause { background-color: var(--bg-elev); background-image: linear-gradient(var(--sev-pause-soft), var(--sev-pause-soft)); color: var(--sev-pause-text); border-color: var(--sev-pause-border); }
+    .nf-sev.serious { background-color: var(--bg-elev); background-image: linear-gradient(var(--danger-soft), var(--danger-soft)); color: var(--danger-11); border-color: var(--danger-border-strong); }
+    .nf-sev.common { background: var(--bg-soft); color: var(--text-muted); border-color: var(--line-strong); }
+
+    /* the card's badge «⚠ N» */
+    .nf-badge {
+      position: relative; display: inline-flex; align-items: center; gap: 3px; height: 28px; padding: 0 9px; border-radius: 999px;
+      border: 1px solid transparent; font-family: "IBM Plex Mono", monospace; font-size: 0.8rem; font-weight: 700; line-height: 1;
+      cursor: pointer; white-space: nowrap; flex: none; color: inherit; background: transparent;
+    }
+    button.nf-badge { z-index: 1; }
+    button.nf-badge::after { content: ""; position: absolute; inset: -5px -3px; }   /* 38 px hit area */
+    .nf-badge.fatal { background: var(--danger); color: var(--sev-fatal-ink); box-shadow: 0 0 12px var(--danger-glow); }
+    .nf-badge.pause { background-color: var(--bg-elev); background-image: linear-gradient(var(--sev-pause-soft), var(--sev-pause-soft)); color: var(--sev-pause-text); border-color: var(--sev-pause-border); }
+    .nf-badge.serious { background-color: var(--bg-elev); background-image: linear-gradient(var(--danger-soft), var(--danger-soft)); color: var(--danger-11); border-color: var(--danger-border-strong); }
+    .nf-badge.common { background: var(--bg-soft); color: var(--text-muted); border-color: var(--line-strong); }
+    button.nf-badge:hover { filter: brightness(1.08); }
+    button.nf-badge[aria-expanded="true"] { outline: 2px solid var(--info); outline-offset: 2px; }
+    .nf-badge.as-pill { cursor: inherit; height: 24px; padding: 0 8px; font-size: 0.76rem; }
+    /* the badge needs room in the top row at every width (4 cols × ~320px at 1400 cut names to «C…»):
+       Wi-Fi keeps only its icon, dBm stays in the tooltip; the name is never squeezed (long ones stop at 55%) */
+    .pc-toprow:has(.nf-badge) { gap: 6px; }
+    /* the card's one ⋯ sits with the pills (IA §5). The head stays one line: a wrapped head (P1S2 at
+       5 columns, 15 px short in another browser's font) pushed that card's progress and chips below its
+       neighbours'. Short of room, the name gives way (the model first, see .printer-name), never the pills */
+    .pc-toprow { flex-wrap: nowrap; }
+    .pc-toprow > .printer-name { flex: 0 1 auto; }
+    .pc-toprow > .pc-toprow-right { margin-left: auto; }
+    .pc-toprow-right:has(.nf-badge) { gap: 4px; min-width: 0; }
+    .pc-toprow-right:has(.nf-badge) .pc-wifi { font-size: 0; gap: 0; }
+    /* 4–5 columns and phones (≤400 px cards): Wi-Fi is its icon on every card (dBm in its tooltip), not
+       «-54» on some and the icon on others */
+    @container pcard (max-width: 400px) {
+      .pc-toprow-right .pc-wifi { font-size: 0; gap: 0; }
+    }
+    /* narrow cards (≤320: 1340–1366 / 1700 wide, 360–375 phones): tighter pills — «ОТМЕНЕНО» + ⚠ + Wi-Fi fit */
+    @container pcard (max-width: 320px) {
+      .pc-toprow-right .status-badge { padding: 5px 7px; gap: 4px; letter-spacing: 0.04em; }
+      .pc-toprow-right:has(.nf-badge) .status-badge { padding: 5px 6px; letter-spacing: 0.01em; }
+      .pc-toprow-right .nf-badge { padding: 0 7px; }
+      /* the head's ⋯ is on every card now (IA §5): Wi-Fi keeps only its icon (dBm in its tooltip) and gives
+         way to ⚠ / ⓘ, the ⋯ narrows (its 36 px hit area stays, ::before), the model is cut before the pills
+         drop under the name */
+      .pc-toprow-right .pc-wifi { font-size: 0; gap: 0; }
+      .pc-toprow-right:has(.nf-badge) .pc-wifi { display: none; }
+      .pc-ctl.pc-ctl-head { width: 24px; }
+    }
+    /* still less room (≤285: 5 columns at 1366–1700, 4 at 1024, 320 px phones): Wi-Fi gives way to
+       ⚠ + status; the head still keeps one line (the model, then the name give way) */
+    @container pcard (max-width: 285px) {
+      .pc-toprow-right:has(.nf-badge) .pc-wifi { display: none; }
+    }
+
+    /* the card's cause strip (Критично / Пауза-ошибка only) */
+    .nf-strip {
+      display: flex; align-items: flex-start; gap: 8px; width: 100%; margin-top: 10px; padding: 8px 10px; min-height: 40px;
+      border-radius: 11px; border: 1px solid var(--line); text-align: left; cursor: pointer; color: var(--text);
+      font-family: "IBM Plex Sans", sans-serif; background-color: var(--bg-elev);
+    }
+    .nf-strip.pause { background-image: linear-gradient(var(--sev-pause-soft), var(--sev-pause-soft)); border-color: var(--sev-pause-border); }
+    .nf-strip.fatal { background-image: linear-gradient(var(--danger-soft), var(--danger-soft)); border-color: var(--danger-border-strong); }
+    .nf-strip:hover { filter: brightness(1.07); }
+    .nf-strip .ic { flex: none; width: 18px; height: 20px; display: grid; place-items: center; }
+    .nf-strip.pause .ic { color: var(--sev-pause); }
+    .nf-strip.fatal .ic { color: var(--danger); }
+    .nf-strip .ic .pc-ic { width: 16px; height: 16px; }
+    .nf-strip .body { flex: 1 1 auto; min-width: 0; display: grid; gap: 3px; }
+    .nf-strip .t {
+      font-size: 0.76rem; line-height: 1.35; overflow-wrap: anywhere;
+      display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden;
+    }
+    .nf-strip .t code { font-family: "IBM Plex Mono", monospace; font-weight: 600; font-size: 0.72rem; margin-right: 3px; }
+    .nf-strip.pause .t code { color: var(--sev-pause-text); }
+    .nf-strip.fatal .t code { color: var(--danger-11); }
+    .nf-strip .sub { display: flex; align-items: center; gap: 4px; font-size: 0.7rem; color: var(--text-muted); }
+    .nf-strip .sub .pc-ic { width: 12px; height: 12px; }
+    .nf-strip .sub.req { color: var(--sev-pause-text); }
+    .nf-strip .go { flex: none; align-self: center; font-size: 0.74rem; font-weight: 700; color: var(--info); white-space: nowrap; }
+
+    /* popover / bottom sheet */
+    .nf-back { position: fixed; inset: 0; z-index: 590; background: rgba(8, 14, 22, 0.55); backdrop-filter: blur(2px); }
+    .nf-back[hidden] { display: none; }
+    .nf-pop {
+      position: fixed; z-index: 600; left: 8px; top: 8px; width: min(400px, calc(100vw - 16px));
+      max-height: min(80vh, 760px); overflow-y: auto; overscroll-behavior: contain;
+      background: var(--bg-elev); border: 1px solid var(--line-strong); border-radius: 16px; color: var(--text);
+      box-shadow: var(--shadow-xl), 0 10px 30px rgba(0, 0, 0, 0.35);
+    }
+    .nf-pop.farm { width: min(460px, calc(100vw - 16px)); }
+    .nf-pop[hidden] { display: none; }
+    .nf-pop:focus { outline: none; }
+    .nf-pop-h {
+      position: sticky; top: 0; z-index: 2; display: flex; align-items: center; gap: 8px; padding: 10px 10px 10px 14px;
+      background: var(--bg-elev); border-bottom: 1px solid var(--line);
+    }
+    .nf-pop-h > .pc-ic { width: 18px; height: 18px; color: var(--text-dim); }
+    .nf-pop-ttl { display: flex; align-items: baseline; gap: 8px; min-width: 0; flex: 1 1 auto; }
+    .nf-pop-ttl b { font-size: 1rem; letter-spacing: -0.01em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .nf-x {
+      flex: none; width: 38px; height: 38px; border-radius: 10px; border: 1px solid var(--line); background: var(--bg-soft);
+      color: var(--text-dim); font-size: 1.25rem; line-height: 1; cursor: pointer; font-family: "IBM Plex Sans", sans-serif;
+    }
+    .nf-x:hover { color: var(--text); border-color: var(--line-strong); }
+    .nf-sum { padding: 10px 14px 0; font-size: 0.76rem; color: var(--text-dim); line-height: 1.4; }
+    .nf-sum b { color: var(--text); }
+    .nf-line { padding: 0 14px; }
+    /* minmax(0,1fr): the column must not grow to the nowrap codes of .nf-more (was ~402px → sideways scroll) */
+    .nf-body { display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; padding: 10px 12px 12px; }
+    .nf-foot { padding: 0 14px 14px; font-size: 0.7rem; color: var(--text-muted); line-height: 1.4; }
+    .nf-empty { padding: 14px; border-radius: 12px; border: 1px dashed var(--line-strong); font-size: 0.8rem; color: var(--ok); text-align: center; }
+
+    .nf-item {
+      padding: 10px 11px 10px 12px; border-radius: 12px; border: 1px solid var(--line); border-left-width: 3px;
+      background: var(--bg-soft); min-width: 0;
+    }
+    .nf-item.fatal { border-left-color: var(--danger); }
+    .nf-item.pause { border-left-color: var(--sev-pause); }
+    .nf-item.serious { border-left-color: var(--danger-border-strong); }
+    .nf-item.common { border-left-color: var(--line-strong); }
+    .nf-top { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; }
+    .nf-code { font-family: "IBM Plex Mono", monospace; font-size: 0.74rem; color: var(--text-dim); overflow-wrap: anywhere; min-width: 0; }
+    .nf-since { margin-left: auto; font-size: 0.7rem; color: var(--text-muted); white-space: nowrap; font-family: "IBM Plex Mono", monospace; }
+    .nf-text { margin-top: 6px; font-size: 0.82rem; line-height: 1.42; overflow-wrap: anywhere; }
+    .nf-unk { color: var(--text-muted); font-style: italic; }
+    .nf-hint, .nf-auto, .nf-req { display: flex; align-items: flex-start; gap: 6px; margin-top: 6px; font-size: 0.74rem; line-height: 1.38; }
+    .nf-hint { color: var(--text-dim); }
+    .nf-auto { color: var(--info); }
+    .nf-req { color: var(--sev-pause-text); font-weight: 600; }
+    .nf-hint .pc-ic, .nf-auto .pc-ic, .nf-req .pc-ic { width: 14px; height: 14px; margin-top: 1px; }
+    .nf-acts { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 9px; }
+    .nf-btn {
+      position: relative; display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-height: 38px; padding: 0 13px;
+      border-radius: 10px; border: 1px solid var(--line-strong); background: var(--bg-soft); color: var(--text);
+      font-family: "IBM Plex Sans", sans-serif; font-size: 0.8rem; font-weight: 600; cursor: pointer; text-align: center; line-height: 1.2;
+    }
+    .nf-btn:hover:not([aria-disabled="true"]) { border-color: var(--text-muted); }
+    .nf-btn.primary { border-color: var(--info); background-color: var(--bg-elev); background-image: linear-gradient(var(--info-soft), var(--info-soft)); }
+    .nf-btn.primary:hover:not([aria-disabled="true"]) { filter: brightness(1.1); border-color: var(--info); }
+    .nf-btn.danger { color: var(--danger-11); border-color: var(--danger-border-strong); }
+    .nf-btn.danger:hover:not([aria-disabled="true"]) { border-color: var(--danger); color: var(--danger); }
+    .nf-btn[aria-disabled="true"] { opacity: 0.45; cursor: default; }
+    .nf-btn.is-wait { opacity: 1; }
+    .nf-wiki {
+      display: inline-flex; align-items: center; gap: 4px; min-height: 38px; padding: 0 6px; border-radius: 8px;
+      color: var(--info); font-size: 0.78rem; font-weight: 600; text-decoration: none;
+    }
+    .nf-wiki:hover { text-decoration: underline; }
+    .nf-wiki .pc-ic { width: 13px; height: 13px; }
+    .nf-item .pc-confirm { margin-top: 9px; padding-top: 0; flex-wrap: wrap; }
+    .nf-item .pc-confirm .q { height: auto; min-height: 38px; padding: 6px 9px; flex: 1 1 100%; }
+    .nf-item .pc-confirm button { height: 38px; }
+    .nf-item .pc-cmd { margin-top: 8px; }
+    .nf-more {
+      display: flex; align-items: center; gap: 8px; width: 100%; min-height: 40px; padding: 6px 12px; border-radius: 10px;
+      border: 1px dashed var(--line-strong); background: transparent; color: var(--text-dim); cursor: pointer; text-align: left;
+      font-family: "IBM Plex Sans", sans-serif; font-size: 0.76rem; font-weight: 600; min-width: 0;
+    }
+    .nf-more:hover { color: var(--text); border-color: var(--text-muted); }
+    .nf-more .codes { font-family: "IBM Plex Mono", monospace; font-weight: 400; font-size: 0.68rem; color: var(--text-muted); flex: 1 1 0; width: 0; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .nf-more .pc-ic { margin-left: auto; width: 15px; height: 15px; transition: transform 0.15s; flex: none; }
+    .nf-more[aria-expanded="true"] .pc-ic { transform: rotate(180deg); }
+    .nf-coms { display: grid; gap: 8px; }
+    /* hidden records («Скрыть»): a quiet button, a dim record, a grey bell-off pill when all are hidden */
+    .nf-mute {
+      display: inline-flex; align-items: center; gap: 5px; min-height: 38px; margin-left: auto; padding: 0 6px; border: 0;
+      border-radius: 8px; background: transparent; color: var(--text-muted); cursor: pointer;
+      font-family: "IBM Plex Sans", sans-serif; font-size: 0.74rem; font-weight: 600; white-space: nowrap;
+    }
+    .nf-mute:hover:not([aria-disabled="true"]) { color: var(--text); }
+    .nf-mute[aria-disabled="true"] { cursor: default; }
+    .nf-mute .pc-ic { width: 13px; height: 13px; }
+    .nf-mrow { display: flex; justify-content: flex-end; margin-top: 4px; }
+    .nf-item.muted { background: transparent; border-left-color: var(--line-strong); }
+    /* dimmed by colour, not opacity: the code and «с …» keep their contrast (the admin reads the code to «Вернуть») */
+    .nf-item.muted > .nf-text, .nf-item.muted > .nf-hint,
+    .nf-item.muted > .nf-auto, .nf-item.muted > .nf-req { color: var(--text-dim); }
+    .nf-item.muted .nf-sev { background: var(--bg-soft); color: var(--text-dim); border-color: var(--line-strong); }
+    .nf-badge.muted { background: transparent; color: var(--text-muted); border-color: var(--line); font-weight: 600; }
+    .nf-badge.muted .pc-ic { width: 14px; height: 14px; }
+    /* «ⓘ N»: nothing to decide (IA §5 — loud only for a decision or a fresh fatal), the level's colour stays in the list */
+    .nf-badge.quiet { background: var(--bg-soft); color: var(--text-muted); border-color: var(--line); font-weight: 600; }
+    .nf-badge.quiet .pc-ic { width: 13px; height: 13px; }
+    .nf-dim { color: var(--text-muted); }
+    /* «Светлая»: --text-muted on white is 3.4:1 (less on the tints) — small text goes to --text-dim (5.3:1) */
+    html[data-theme="light"] .nf-since, html[data-theme="light"] .nf-badge.common,
+    html[data-theme="light"] .nf-strip .sub:not(.req), html[data-theme="light"] .nf-unk,
+    html[data-theme="light"] .nf-sev.common, html[data-theme="light"] .nf-more .codes,
+    html[data-theme="light"] .nf-foot, html[data-theme="light"] .nf-mute,
+    html[data-theme="light"] .nf-badge.muted, html[data-theme="light"] .nf-badge.quiet,
+    html[data-theme="light"] .nf-dim, html[data-theme="light"] .nf-sec { color: var(--text-dim); }
+
+    /* the farm list under the bell: «Нужно решение», «Прочие» folded, «Сбросить ошибки» at the foot */
+    .nf-sec { padding: 12px 14px 0; font-size: 0.68rem; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: var(--text-muted); }
+    .nf-other {
+      display: flex; align-items: center; gap: 8px; width: 100%; min-height: 44px; padding: 8px 14px; border: 0; border-top: 1px solid var(--line);
+      background: transparent; color: var(--text-dim); font: 600 0.78rem "IBM Plex Sans", sans-serif; cursor: pointer; text-align: left;
+    }
+    .nf-other:hover { color: var(--text); }
+    .nf-other .nf-dim { font-weight: 400; font-size: 0.72rem; }
+    .nf-other > .pc-ic { width: 14px; height: 14px; margin-left: auto; transition: transform 0.15s; }
+    .nf-other[aria-expanded="true"] > .pc-ic { transform: rotate(180deg); }
+    .nf-orows { display: grid; grid-template-columns: minmax(0, 1fr); gap: 2px; padding: 0 8px 10px; }
+    .nf-orow {
+      display: flex; align-items: center; gap: 8px; min-width: 0; min-height: 36px; padding: 4px 6px; border: 0; border-radius: 10px;
+      background: transparent; color: var(--text-dim); font: 400 0.76rem "IBM Plex Sans", sans-serif; cursor: pointer; text-align: left;
+    }
+    .nf-orow:hover { background: var(--bg-soft); color: var(--text); }
+    .nf-orow b { color: var(--text); font-weight: 600; flex: none; }
+    .nf-orow .t { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .nf-orow .nf-badge.as-pill { height: 22px; padding: 0 7px; font-size: 0.72rem; }
+    .nf-pop-foot { position: sticky; bottom: 0; z-index: 2; display: flex; padding: 10px 14px; border-top: 1px solid var(--line); background: var(--bg-elev); }
+    .nf-grp { display: grid; grid-template-columns: minmax(0, 1fr); min-width: 0; gap: 6px; padding: 6px; border-radius: 14px; border: 1px solid var(--line); background: var(--bg-soft); }
+    .nf-grp-h {
+      display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; width: 100%; min-height: 40px; padding: 4px 6px;
+      border-radius: 10px; border: 0; background: transparent; color: var(--text); cursor: pointer; text-align: left;
+      font-family: "IBM Plex Sans", sans-serif;
+    }
+    .nf-grp-h:hover { background: var(--bg-soft); }
+    .nf-grp-h b { font-size: 0.92rem; }
+    .nf-grp-h .status-badge { padding: 3px 7px; font-size: 0.6rem; }
+    .nf-grp-go { margin-left: auto; font-size: 0.72rem; font-weight: 700; color: var(--info); white-space: nowrap; }
+    .nf-grp .pc-cmd { margin: 0 6px; }
+
+    /* the header bell */
+    .nf-bell {
+      display: inline-flex; align-items: center; gap: 7px; min-height: 36px; padding: 0 6px 0 11px; border-radius: 999px;
+      background: var(--bg-soft); border: 1px solid var(--line); color: var(--text-dim); cursor: pointer; flex: 0 0 auto;
+      font-family: "IBM Plex Sans", sans-serif; font-size: 0.76rem; backdrop-filter: blur(12px);
+    }
+    .nf-bell:hover { color: var(--text); border-color: var(--line-strong); }
+    .nf-bell > .pc-ic { width: 17px; height: 17px; }
+    .nf-bell.calm { padding-right: 11px; }
+    .nf-bell[aria-expanded="true"] { border-color: var(--info); color: var(--text); }
+
+    /* «Сбросить ошибки» at the foot of the bell's list and its dialog */
+    .fb-btn.reset { color: var(--text); border-color: var(--info-border); }
+    .fb-btn.reset .pc-ic { color: var(--info); }
+    .fb-btn.reset:hover:not([aria-disabled="true"]) { border-color: var(--info); }
+    .bd .nf-sev { justify-self: end; }
+    .bd-ic.reset { color: var(--info); background-image: linear-gradient(var(--info-soft), var(--info-soft)); border-color: var(--info-border); }
+    .bd-dry { margin-top: 10px; padding: 8px 10px; border-radius: 10px; border: 1px dashed var(--line-strong); font-size: 0.74rem; color: var(--text-dim); line-height: 1.4; }
+    .bd-dry b { color: var(--text); }
+    .bd-off { border-radius: 12px; }
+
+    .app-toast { max-width: calc(100vw - 32px); overflow-wrap: anywhere; text-align: center; }
+    .app-toast.info { background-color: var(--bg-elev); background-image: linear-gradient(var(--info-soft), var(--info-soft)); border: 1px solid var(--info-border); color: var(--text); }
+
+    /* «к карточке ›»: two finite flashes, never a loop (test_no_infinite_animations) */
+    @keyframes nfFlash { 0%, 100% { box-shadow: var(--shadow-xl); } 50% { box-shadow: 0 0 0 3px var(--info), var(--shadow-xl); } }
+    .printer-card.nf-flash { animation: nfFlash 0.7s ease 2; }
+    @keyframes nfUp { from { transform: translateY(24px); opacity: 0.4; } to { transform: none; opacity: 1; } }
+
+    /* a phone (≤ 899 px, plan step 15 — was ≤ 640): the notifications are a bottom sheet */
+    @media (max-width: 899px) {
+      .nf-pop, .nf-pop.farm {
+        left: 0 !important; right: 0; top: auto !important; bottom: 0; width: 100%; max-height: 86vh; max-height: 86dvh;
+        border-radius: 20px 20px 0 0; border-bottom: 0; animation: nfUp 0.18s ease;
+        padding-bottom: env(safe-area-inset-bottom);
+      }
+      .nf-pop-h { padding-top: 16px; }
+      .nf-pop-h::before {
+        content: ""; position: absolute; top: 6px; left: 50%; width: 40px; height: 4px; margin-left: -20px;
+        border-radius: 2px; background: var(--line-strong);
+      }
+    }
+    @media (max-width: 640px) {
+      .nf-badge { padding: 0 7px; }
+      /* reset dialog: code · text · «с …» wraps instead of hiding the since-time */
+      .bd-job { align-items: flex-start; }
+      .bd-job span { white-space: normal; overflow-wrap: anywhere; }
+      .bd-job .pc-ic { margin-top: 2px; }
+      /* the header row scrolls sideways on a phone: the bell is tighter, so 👤 still fits
+         at 375 px — and stays a 36 px tap target */
+      .nf-bell { min-height: 36px; gap: 4px; padding: 0 3px 0 8px; }
+      .nf-bell.calm { padding-right: 8px; }
+      .nf-bell .nf-badge.as-pill { height: 22px; padding: 0 6px; font-size: 0.72rem; }
+      .topbar-side { gap: 4px; }
+    }
+
     /* === AMS tab === */
-    .ams-toolbar { display:flex; gap:16px; align-items:center; margin:4px 0 18px; flex-wrap:wrap; }
-    .ams-range { display:flex; gap:4px; background:var(--bg-panel); border:1px solid var(--line);
+    .ams-toolbar { display:flex; gap:8px 12px; align-items:center; margin:4px 0 14px; flex-wrap:wrap; }
+    .ams-toolbar .ams-legend { margin-left: 4px; }
+    .ams-range, .seg-range { display:flex; gap:4px; background:var(--bg-panel); border:1px solid var(--line);
       border-radius:10px; padding:3px; }
-    .ams-range button { border:0; background:transparent; color:var(--text-muted);
+    .ams-range button, .seg-range button { border:0; background:transparent; color:var(--text-muted);
       padding:6px 13px; border-radius:7px; font-size:13px; cursor:pointer; }
-    .ams-range button.active { background:var(--bg-elev); color:var(--text); }
+    .ams-range button.active, .seg-range button.active { background:var(--bg-elev); color:var(--text); }
     .ams-legend { display:flex; gap:14px; color:var(--text-muted); font-size:12px; align-items:center; flex-wrap:wrap; }
     .ams-legend i { display:inline-block; width:10px; height:10px; border-radius:3px; margin-right:5px; vertical-align:-1px; }
     .ams-legend i.z-ok { background:var(--ok); }
@@ -3411,6 +3384,7 @@
     .ams-dot.off { background:var(--text-muted); }
     .ams-csub { color:var(--text-muted); font-size:12px; margin-top:2px; }
     .ams-badges { display:flex; gap:6px; flex-wrap:wrap; justify-content:flex-end; }
+    .ams-maint { display:flex; margin-top:8px; }
     .ams-badge { font-size:12.5px; padding:4px 9px; border-radius:8px; font-weight:600; white-space:nowrap;
       border:1px solid var(--line); background:var(--bg-elev); color:var(--text-dim); }
     .ams-badge.ok { background:var(--ok-soft); border-color:var(--ok-7); color:var(--ok-11); }
@@ -3429,6 +3403,18 @@
     .ams-dry.off .lbl { color:var(--text-dim); }
     .ams-dry.off .warn { color:var(--warn-11); }
     .ams-dry .pc-ctl { margin-left:auto; padding:4px 10px; font-size:0.8rem; }
+    .ams-dry b { color:var(--warn-12); font-weight:650; }
+    .ams-dry .dim { color:var(--warn-11); opacity:.8; }
+    .ams-dry.off.st-alert .lbl { color:var(--warn-11); }
+    .ams-dry.off.st-alert { border-color:var(--warn-7); }
+    /* the card's maintenance note (spec_maintenance §6.1; owner, 19.10: «прям незаметным, чтобы
+       в глаза не лезло»): one dim line, no fill, no border, a little clearer under the pointer. No animation. */
+    .pc-maint { margin-top:8px; display:flex; gap:6px; align-items:flex-start; background:none; border:0;
+      padding:0 2px; color:var(--text-dim); opacity:0.55; font-size:0.7rem; line-height:1.35; }
+    .pc-maint:hover, .pc-maint:focus-within { opacity:0.9; }
+    .pc-maint > .pc-ic { width:12px; height:12px; margin-top:1px; }
+    .pc-maint .t { flex:1 1 auto; min-width:0; overflow:hidden; overflow-wrap:anywhere;
+      display:-webkit-box; -webkit-box-orient:vertical; -webkit-line-clamp:2; }
     .ams-gwrap { margin-top:12px; }
     .ams-gtitle { display:flex; justify-content:space-between; align-items:baseline; margin-bottom:2px; }
     .ams-gtitle .t { font-size:12px; color:var(--text-dim); font-weight:600; }
@@ -3455,40 +3441,40 @@
     .ams-slot-t.on { color: var(--info-11); }
     .ams-slot-t.none { opacity: .45; }
 
-    /* «Авто: …» line on each AMS card */
-    .ams-auto { margin-top: 11px; padding-top: 10px; border-top: 1px solid var(--line);
-      display: flex; align-items: flex-start; gap: 8px; font-size: 12.5px; line-height: 1.4; color: var(--text-dim); }
-    .ams-auto .d { width: 8px; height: 8px; border-radius: 50%; flex: none; margin-top: 5px; background: var(--text-muted); }
-    .ams-auto .k { color: var(--text-muted); font-weight: 600; flex: none; }
-    .ams-auto .v { min-width: 0; flex: 1; overflow-wrap: anywhere; }
-    .ams-auto .cfg { flex: none; color: var(--text-muted); text-decoration: none; font-size: 13px; line-height: 1.3;
-      padding: 0 2px; border-radius: 6px; }
-    .ams-auto .cfg:hover { color: var(--info); }
-    .ams-auto.st-wait .d { background: var(--ok); }
-    .ams-auto.st-dry .d { background: var(--warn); box-shadow: 0 0 6px var(--warn); }
-    .ams-auto.st-cool .d { background: var(--info); }
-    .ams-auto.st-pause .d { background: transparent; border: 1.5px solid var(--info); }
-    .ams-auto.st-off .d { background: transparent; border: 1.5px solid var(--text-muted); }
-    .ams-auto.st-foreign .d { background: var(--steel); }
-    .ams-auto.st-alert { color: var(--warn-11); }
-    .ams-auto.st-alert .d { background: var(--danger); }
-
     /* Chart extras: thresholds and drying periods */
     .ams-chart .thr { stroke-width: 1; stroke-dasharray: 4 3; }
     .ams-chart .thr-l { font-size: 8px; font-weight: 600; }
-    .ams-legend .ln { display: inline-block; width: 16px; height: 0; border-radius: 0; border-top: 1.5px dashed;
-      margin-right: 5px; vertical-align: 3px; background: none; }
-    .ams-legend .ln.start { border-color: var(--warn); }
-    .ams-legend .ln.target { border-color: var(--ok); }
     .ams-legend i.z-dry { background: var(--warn); opacity: .32; }
-    .ams-legend [hidden], .ams-ad-jump[hidden] { display: none; }
 
-    /* Toolbar jump to the section */
-    .ams-ad-jump { display: inline-flex; align-items: center; gap: 7px; margin-left: auto; padding: 5px 12px; border-radius: 999px;
-      border: 1px solid var(--line-strong); background: var(--bg-soft); color: var(--text-dim); font-size: 12px; cursor: pointer; }
-    .ams-ad-jump:hover { border-color: var(--info); color: var(--info); }
-    .ams-ad-jump .d { width: 8px; height: 8px; border-radius: 50%; border: 1.5px solid var(--text-muted); }
-    .ams-ad-jump.on .d { background: var(--ok); border-color: var(--ok); }
+    /* The auto-drying line of the AMS tab (IA §6): sticky under the header on a desktop,
+       opaque in every theme; its commands and «Правила ›» are the admins' */
+    .ams-strip {
+      position: sticky; top: 0; z-index: 80; display: flex; align-items: center; gap: 8px 10px; flex-wrap: wrap; min-height: 44px;
+      margin: 0 0 12px; padding: 6px 0; background-color: var(--bg-elev); border-bottom: 1px solid var(--line);
+      font-size: .8rem; color: var(--text-dim);
+    }
+    .ams-strip [hidden] { display: none !important; }
+    .ams-strip b { color: var(--text); }
+    .ams-strip b.on { color: var(--ok-11); }
+    .ams-strip .warn, .ams-strip b.warn { color: var(--warn-11); }
+    .ams-strip-st { min-width: 0; overflow-wrap: anywhere; }
+    .ams-strip-acts { display: inline-flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+    .ams-rules {
+      appearance: none; border: 0; background: none; padding: 0 4px; min-height: 32px; color: var(--info-11);
+      font: 600 .78rem "IBM Plex Sans", sans-serif; cursor: pointer; white-space: nowrap;
+    }
+    .ams-rules:hover { text-decoration: underline; }
+    /* unsaved auto-dry edits: a dot on «Правила ›» and on «Автоматика» (the warning stays in sight) */
+    .ams-rules.dirty::after, .adm-seg button.dirty::after {
+      content: ""; display: inline-block; width: 7px; height: 7px; margin-left: 6px; border-radius: 50%;
+      background: var(--warn); vertical-align: 1px;
+    }
+    @media (min-width: 901px) {
+      .ams-strip { top: 48px; margin: -16px -20px 12px; padding: 6px 20px; }
+    }
+    @media (max-width: 640px) {
+      .ams-strip-tail:not(.keep) { display: none; }          /* the goal and «пробный режим выкл»: on the rules' page */
+    }
 
     /* The section «Автосушка AMS» */
     .autodry { margin-top: 24px; overflow: clip; }            /* clip (not hidden): the sticky side column keeps working */
@@ -3498,6 +3484,9 @@
       background-color: var(--bg-elev); background-image: linear-gradient(var(--warn-soft), var(--warn-soft));
       color: var(--warn-11); font-size: .8rem; display: flex; flex-direction: column; gap: 4px; }
     .autodry .ad-na { color: var(--text-muted); font-size: .85rem; padding: 6px 2px; }
+    .ad-journal { margin-top: 18px; }
+    .ad-journal[hidden] { display: none; }
+    .ad-journal .panel-head { margin-bottom: 8px; }
     .autodry .ad-link { background: none; border: 0; padding: 0; color: var(--info); font-size: .7rem; cursor: pointer;
       text-decoration: underline; font-family: inherit; }
     .autodry .ad-banner .ad-link { font-size: .78rem; }
@@ -3507,13 +3496,14 @@
     .autodry.master-off .ad-master { background-image: none; border-color: var(--line); }
     .autodry .ad-dim { transition: opacity .2s; }
     .autodry.master-off .ad-dim { opacity: .45; }
-    .autodry .ad-cols { display: grid; grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr); gap: 22px; align-items: start; margin-top: 20px; }
-    .autodry .ad-side { position: sticky; top: 16px; }
-    @media (max-width: 1100px) { .autodry .ad-cols { grid-template-columns: minmax(0, 1fr); } .autodry .ad-side { position: static; } }
+    .autodry > #adBody > .ad-dim { margin-top: 14px; }
+    .autodry .ad-trial { margin-top: 8px; }
+    .autodry .ad-trial.on { border-color: var(--warn-border); }
+    .autodry .ad-trial.on .setting-text span { color: var(--warn-11); }
+    .autodry .ad-cap-note { text-transform: none; letter-spacing: 0; font-weight: 500; margin-left: 8px; }
+    .autodry details.ad-how { margin-top: 18px; border-top: 1px solid var(--line); }
+    .autodry details.ad-how > .ad-why { margin-top: 4px; }
     .autodry .ad-cap { font-size: .66rem; text-transform: uppercase; letter-spacing: .08em; color: var(--text-muted); font-weight: 600; margin-bottom: 9px; }
-    .autodry .ad-cap-row { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 10px; }
-    .autodry .ad-cap-row .ad-cap { margin-bottom: 0; }
-    .autodry .ad-now-btns { display: flex; flex-wrap: wrap; gap: 8px; }
     .autodry .ad-block { margin-top: 26px; }
 
     .autodry .rules { display: flex; flex-direction: column; gap: 8px; }
@@ -3562,6 +3552,11 @@
     .autodry .ad-table td { vertical-align: top; padding-top: 11px; padding-bottom: 11px; }
     .autodry .ad-table td.c-auto { vertical-align: middle; }
     .autodry .ad-unit strong { font-size: .9rem; }
+    .autodry .ad-unit .nm { color: var(--text-dim); font-size: .8rem; }
+    .autodry .c-mode .run { margin-top: 6px; }
+    .autodry .c-rel { white-space: nowrap; }
+    .autodry .c-rel .stt { display: inline-flex; vertical-align: middle; margin-right: 8px; }
+    .autodry .c-rel .ad-link { font-size: .74rem; }
     .autodry .ad-unit .sub, .autodry .run .why, .autodry .stt .sub { display: block; font-size: .7rem; color: var(--text-muted); margin-top: 3px; line-height: 1.4; }
     .autodry .mat { display: inline-flex; align-items: center; gap: 5px; padding: 2px 8px; border-radius: 7px; border: 1px solid var(--line);
       background: var(--bg-soft); font-family: "IBM Plex Mono", monospace; font-size: .72rem; color: var(--text-dim); margin: 0 4px 4px 0; white-space: nowrap; }
@@ -3583,21 +3578,22 @@
     .autodry .stt.st-alert .m { color: var(--warn-11); }
     .autodry .stt .m { font-size: .82rem; font-weight: 600; }
     .autodry .stt .ad-link { margin-top: 4px; }
-    .autodry .ad-table tr.flash td { background: var(--info-bg-grad-start); transition: background .6s; }
     .autodry .ad-table .inl.on { margin-top: 6px; display: flex; }
 
-    @media (max-width: 760px) {
+    /* «Автоматика → Блоки» as cards on a phone (≤ 899 px since plan step 15, was ≤ 760) */
+    @media (max-width: 899px) {
       .autodry .ad-table-wrap { overflow: visible; }
       .autodry .ad-table thead { display: none; }
       .autodry .ad-table, .autodry .ad-table tbody { display: block; width: 100%; }
       .autodry .ad-table tr { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 10px 12px; padding: 12px;
         margin-bottom: 10px; border: 1px solid var(--line); border-radius: 14px; background: var(--bg-soft); }
       .autodry .ad-table td { display: block; padding: 0 !important; border: 0 !important; min-width: 0; }
-      .autodry .ad-table tbody tr:hover td, .autodry .ad-table tr.flash td { background: none; }
-      .autodry .ad-table tr.flash { border-color: var(--info); }
+      .autodry .ad-table tbody tr:hover td { background: none; }
       .autodry .ad-table td.c-unit { grid-column: 1; grid-row: 1; }
       .autodry .ad-table td.c-auto { grid-column: 2; grid-row: 1; justify-self: end; }
-      .autodry .ad-table td.c-mat, .autodry .ad-table td.c-mode, .autodry .ad-table td.c-run, .autodry .ad-table td.c-st { grid-column: 1 / -1; }
+      .autodry .ad-table td.c-mode, .autodry .ad-table td.c-rel { grid-column: 1 / -1; }
+      .autodry .ad-table td.c-rel { white-space: normal; }
+      .autodry .ad-table td.c-rel:empty { display: none; }
       .autodry .ad-table td[data-l]::before { content: attr(data-l); display: block; font-size: .62rem; text-transform: uppercase;
         letter-spacing: .08em; color: var(--text-muted); margin-bottom: 4px; font-weight: 600; }
     }
@@ -3634,25 +3630,25 @@
     .autodry .ad-save .saved-flash:not(.show) { display: none; }
     .autodry .ad-save .settings-error { flex: 1 1 100%; order: 5; margin: 0; }
 
-    .autodry .jr { display: flex; flex-direction: column; }
-    .autodry .jr-row { display: grid; grid-template-columns: 82px 34px 112px minmax(0, 1fr) auto; gap: 4px 12px; align-items: baseline;
+    .ad-journal .jr { display: flex; flex-direction: column; }
+    .ad-journal .jr-row { display: grid; grid-template-columns: 82px 34px 112px minmax(0, 1fr) auto; gap: 4px 12px; align-items: baseline;
       padding: 9px 4px; border-bottom: 1px solid var(--line); font-size: .8rem; }
-    .autodry .jr-row:last-child { border-bottom: 0; }
-    .autodry .jr-t { font-family: "IBM Plex Mono", monospace; color: var(--text-muted); font-size: .74rem; white-space: nowrap; }
-    .autodry .jr-u { font-weight: 700; overflow-wrap: anywhere; }
-    .autodry .jr-k .badge { white-space: nowrap; }
-    .autodry .jr-x { color: var(--text-dim); min-width: 0; overflow-wrap: anywhere; }
-    .autodry .jr-n { color: var(--text-muted); font-family: "IBM Plex Mono", monospace; font-size: .72rem; }
-    .autodry .jr-rh { font-family: "IBM Plex Mono", monospace; font-size: .76rem; color: var(--text-dim); white-space: nowrap; text-align: right; }
-    .autodry .jr-rh.none { color: var(--text-muted); }
-    .autodry .jr-empty { color: var(--text-muted); font-size: .8rem; padding: 8px 4px; }
-    .autodry .jr-more { margin-top: 8px; font-size: .74rem; color: var(--text-muted); display: flex; gap: 12px; flex-wrap: wrap; align-items: baseline; }
-    .autodry .jr-more .ad-link { font-size: .74rem; }
+    .ad-journal .jr-row:last-child { border-bottom: 0; }
+    .ad-journal .jr-t { font-family: "IBM Plex Mono", monospace; color: var(--text-muted); font-size: .74rem; white-space: nowrap; }
+    .ad-journal .jr-u { font-weight: 700; overflow-wrap: anywhere; }
+    .ad-journal .jr-k .badge { white-space: nowrap; }
+    .ad-journal .jr-x { color: var(--text-dim); min-width: 0; overflow-wrap: anywhere; }
+    .ad-journal .jr-n { color: var(--text-muted); font-family: "IBM Plex Mono", monospace; font-size: .72rem; }
+    .ad-journal .jr-rh { font-family: "IBM Plex Mono", monospace; font-size: .76rem; color: var(--text-dim); white-space: nowrap; text-align: right; }
+    .ad-journal .jr-rh.none { color: var(--text-muted); }
+    .ad-journal .jr-empty { color: var(--text-muted); font-size: .8rem; padding: 8px 4px; }
+    .ad-journal .jr-more { margin-top: 8px; font-size: .74rem; color: var(--text-muted); display: flex; gap: 12px; flex-wrap: wrap; align-items: baseline; }
+    .ad-journal .jr-more .ad-link { font-size: .74rem; }
     @media (max-width: 640px) {
-      .autodry .jr-row { grid-template-columns: 52px 30px minmax(0, 1fr); }
-      .autodry .jr-t { white-space: normal; }
-      .autodry .jr-x { grid-column: 3 / -1; }
-      .autodry .jr-rh { grid-column: 3 / -1; text-align: left; }
+      .ad-journal .jr-row { grid-template-columns: 52px 30px minmax(0, 1fr); }
+      .ad-journal .jr-t { white-space: normal; }
+      .ad-journal .jr-x { grid-column: 3 / -1; }
+      .ad-journal .jr-rh { grid-column: 3 / -1; text-align: left; }
     }
 
     .ad-dlg-back { position: fixed; inset: 0; z-index: 500; display: none; align-items: center; justify-content: center;
@@ -3673,3 +3669,598 @@
     .ad-dlg-item .sub.warn { color: var(--warn-11); }
     .ad-dlg-foot { display: flex; justify-content: flex-end; align-items: center; gap: 10px; margin-top: 14px; flex-wrap: wrap; }
     .ad-dlg-foot .note { flex: 1 1 200px; font-size: .72rem; color: var(--text-muted); }
+
+    /* === «История»: the one head (IA §7) — the sub-tabs, the period, «Свой…», the printer —
+       sticky under the header on a desktop, opaque in every theme; a phone folds it === */
+    .hist-head {
+      position: sticky; top: 0; z-index: 80; display: flex; align-items: center; gap: 8px 12px; flex-wrap: wrap;
+      margin: 0 0 14px; padding: 8px 0; background-color: var(--bg-elev); border-bottom: 1px solid var(--line);
+    }
+    .hist-head [hidden] { display: none !important; }
+    .hist-filters { display: flex; align-items: center; gap: 8px 12px; flex-wrap: wrap; flex: 1 1 auto; min-width: 0; }
+    .hist-ctl { display: inline-flex; align-items: center; gap: 6px; flex-wrap: wrap; min-width: 0; }
+    .hist-sep { flex: 1 1 auto; }
+    .hist-in {
+      min-height: 32px; border-radius: 9px; border: 1px solid var(--line-strong); background: var(--bg); color: var(--text);
+      padding: 0 9px; font: 500 0.78rem "IBM Plex Sans", sans-serif; min-width: 0;
+    }
+    select.hist-in { padding-right: 4px; max-width: 180px; }
+    [data-theme="light"] .hist-in { color-scheme: light; }
+    .hist-btn {
+      appearance: none; display: inline-flex; align-items: center; gap: 6px; min-height: 32px; padding: 0 12px;
+      border-radius: 9px; border: 1px solid var(--line-strong); background: var(--bg-soft); color: var(--text);
+      font: 600 0.76rem "IBM Plex Sans", sans-serif; cursor: pointer; white-space: nowrap;
+    }
+    .hist-btn:hover { border-color: var(--info); }
+    .hist-btn .pc-ic { width: 15px; height: 15px; }
+    .hist-sum { display: none; }
+    .hist-note { margin: 0 0 8px; font-size: 0.74rem; color: var(--text-muted); }
+    .hist-note[hidden], #histHelp[hidden] { display: none; }
+    .hist-help {
+      display: inline-grid; place-items: center; width: 24px; height: 24px; margin-left: 6px; vertical-align: 2px;
+      border-radius: 50%; border: 1px solid var(--line-strong); background: var(--bg-soft); color: var(--text-dim);
+      font: 700 0.74rem "IBM Plex Sans", sans-serif; cursor: pointer;
+    }
+    .hist-help:hover, .hist-help[aria-expanded="true"] { border-color: var(--info); color: var(--text); }
+    .hist-legend { display: contents; }
+    @media (min-width: 901px) {
+      .hist-head { top: 48px; margin: -16px -20px 14px; padding: 8px 20px; }
+    }
+    @media (max-width: 900px) {
+      .hist-head .hist-seg { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); width: 100%; }
+      .hist-head .hist-seg button { min-width: 0; padding: 0 2px; font-size: 0.72rem; overflow: hidden; text-overflow: ellipsis; }
+      .hist-sum {
+        display: flex; align-items: center; gap: 6px; width: 100%; min-height: 36px; padding: 0 12px; border-radius: 999px;
+        border: 1px solid var(--line); background: var(--bg-soft); color: var(--text-dim); font: 600 0.76rem "IBM Plex Sans", sans-serif;
+        cursor: pointer;
+      }
+      .hist-sum .pc-ic { width: 14px; height: 14px; flex: none; }
+      .hist-sum-text { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: left; color: var(--text); }
+      .hist-filters { display: none; }
+      .hist-head.hist-open .hist-filters { display: flex; }
+      .hist-head.hist-open .hist-sum-caret { transform: rotate(180deg); }
+      .hist-sep { display: none; }
+    }
+    @media (max-width: 640px) {
+      .hist-head { padding: 6px 12px; }
+    }
+    /* «Статистика»: the totals, one row per printer, prints per day and the reasons */
+    .hist-kpis { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 16px; }
+    .hist-kpi {
+      appearance: none; display: flex; flex-direction: column; gap: 2px; min-width: 112px; padding: 8px 12px; border-radius: 12px;
+      border: 1px solid var(--line); background: var(--bg-soft); color: var(--text-dim); font: 500 0.7rem "IBM Plex Sans", sans-serif;
+      text-align: left; cursor: pointer;
+    }
+    .hist-kpi b { font: 700 1.08rem "IBM Plex Mono", monospace; color: var(--text); }
+    .hist-kpi:hover { border-color: var(--info); }
+    .hist-kpi.static { cursor: default; }
+    .hist-kpi.static:hover { border-color: var(--line); }
+    .hist-stab { width: 100%; border-collapse: separate; border-spacing: 0; font-size: 0.8rem; }
+    .hist-stab th {
+      text-align: left; font-size: 0.66rem; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--text-muted);
+      padding: 6px 10px; border-bottom: 1px solid var(--line-strong); white-space: nowrap;
+    }
+    .hist-stab td { padding: 7px 10px; border-bottom: 1px solid var(--line); vertical-align: middle; }
+    .hist-stab th:nth-child(n+3), .hist-stab td:nth-child(n+3) { text-align: right; }
+    .hist-stab tbody tr { cursor: pointer; }
+    .hist-stab tbody tr:hover td { background: var(--bg-soft); }
+    .hist-stab td.hs-bar { width: 40%; }
+    .hist-stab td.hs-bar .dash-stats-bar { min-width: 160px; }
+    .hs-pr { font-weight: 700; white-space: nowrap; color: var(--text); }
+    .hs-num { font-family: "IBM Plex Mono", monospace; font-size: 0.76rem; white-space: nowrap; color: var(--text); }
+    .hs-dim { color: var(--text-muted); font-size: 0.7rem; font-family: "IBM Plex Sans", sans-serif; }
+    .hs-maint {
+      display: inline-block; margin-left: 4px; padding: 1px 7px; border-radius: 999px; border: 1px solid var(--warn-border);
+      color: var(--warn); font-size: 0.64rem; font-weight: 600; vertical-align: 1px;
+    }
+    .hs-wait { opacity: 0.5; }
+    .hist-stats .dash-stats-legend { margin: 10px 0 0; }
+    .hist-stats .dash-log-loader { margin-top: 6px; }
+    .hist-stats .dash-stats-empty { padding: 12px 10px; text-align: left; font-size: .8rem; }
+    .hist-2col { display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr); gap: 18px 28px; margin-top: 20px; }
+    .hist-reasons-h { display: flex; align-items: center; gap: 10px; margin: 0 0 8px; }
+    .hist-reasons-h .jobs-h { margin: 0; }
+    .jobs-reasons.hist-reasons { grid-template-columns: minmax(0, 1fr); }
+    .hist-reasons .jobs-reasons-col h4 { display: none; }
+    .hist-reasons[data-show="err"] .jobs-reasons-col + .jobs-reasons-col,
+    .hist-reasons[data-show="pause"] .jobs-reasons-col:first-child { display: none; }
+    @media (max-width: 900px) {
+      .hist-kpi { min-width: 0; flex: 1 1 calc(50% - 4px); }
+      .hist-2col { grid-template-columns: minmax(0, 1fr); }
+      /* a phone: a printer is three short lines, no scrolling sideways */
+      .hist-stab thead { display: none; }
+      .hist-stab, .hist-stab tbody { display: block; }
+      .hist-stab tr { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 4px 10px; padding: 8px 0; border-bottom: 1px solid var(--line); }
+      .hist-stab td { display: block; padding: 0 !important; border: 0 !important; text-align: left !important; font-size: 0.74rem; }
+      .hist-stab td.hs-pr { grid-column: 1; grid-row: 1; overflow: hidden; text-overflow: ellipsis; }
+      .hist-stab td.hs-jobs { grid-column: 2; grid-row: 1; }
+      .hist-stab td.hs-ok { grid-column: 3; grid-row: 1; }
+      .hist-stab td.hs-bar { grid-column: 1 / -1; grid-row: 2; width: auto; }
+      .hist-stab td.hs-bar .dash-stats-bar { min-width: 0; }
+      .hist-stab td.hs-print, .hist-stab td.hs-acc, .hist-stab td.hs-top { grid-row: 3; }
+      .hist-stab td[data-l]::before { content: attr(data-l) " "; color: var(--text-muted); font-size: 0.66rem; font-family: "IBM Plex Sans", sans-serif; }
+    }
+
+    /* === История → Печати: the print journal === */
+    [data-hsub][hidden], .jobs [hidden] { display: none !important; }
+    .jobs-more { appearance: none; padding: 6px 14px; border: 1px solid var(--line-strong); border-radius: 999px;
+      background: var(--bg-soft); color: var(--text-dim); cursor: pointer; font-family: "IBM Plex Sans", sans-serif;
+      font-size: .72rem; font-weight: 600; white-space: nowrap; transition: border-color .2s, color .2s; }
+    .jobs-more:hover { border-color: var(--info); color: var(--info); }
+    .jobs-more { display: block; margin: 12px auto 0; }
+    .jobs-more:disabled { opacity: .5; cursor: default; }
+    .jobs-block { min-width: 0; }
+    .jobs-h { font-size: .68rem; text-transform: uppercase; letter-spacing: .08em; color: var(--text-muted); font-weight: 600; margin: 0 0 8px; }
+    .jobs-block .jobs-h ~ .jobs-h { margin-top: 18px; }
+    .jobs-count { font-family: "IBM Plex Mono", monospace; letter-spacing: 0; color: var(--text-dim); }
+    .jobs .dash-stats-empty { padding: 12px 10px; text-align: left; font-size: .8rem; }
+    #jobsEmpty { padding: 24px; text-align: center; }
+    /* «По принтерам»: name, results bar, success share, fact / plan, top failure code */
+    /* «Частые причины» */
+    .jobs-reasons { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px 20px; }
+    .jobs-reasons-col { min-width: 0; }
+    .jobs-reasons-col h4 { font-size: .72rem; color: var(--text-dim); font-weight: 600; margin: 0 0 4px; }
+    .jobs-reason { display: flex; gap: 8px; align-items: baseline; padding: 4px 0; font-size: .78rem; border-bottom: 1px dashed var(--line); }
+    .jobs-reason code { font-family: "IBM Plex Mono", monospace; font-size: .72rem; color: var(--text-muted); flex: none; }
+    .jobs-reason code:empty { display: none; }
+    .jobs-reason-text { flex: 1 1 auto; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--text); }
+    .jobs-reason b { flex: none; font-family: "IBM Plex Mono", monospace; font-size: .74rem; font-weight: 600; color: var(--text); }
+    .jobs-reason.jobs-cancel .jobs-reason-text { color: var(--text-dim); }
+    /* «Печатей в день»: finished at the bottom, the rest above */
+    .jobs-days { display: flex; gap: 2px; }
+    .jobs-day { flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; align-items: center; }
+    .jobs-day-bar { display: flex; flex-direction: column; justify-content: flex-end; width: 100%; max-width: 34px; height: 96px;
+      border-radius: 3px 3px 0 0; overflow: hidden; background: var(--bg-soft); }
+    .jobs-day-bar i { display: block; flex: none; width: 100%; }
+    .jobs-day:hover .jobs-day-bar { box-shadow: inset 0 0 0 1px var(--line-strong); }
+    .jobs-day-ok { background: var(--ok); }
+    .jobs-day-other { background: var(--danger-soft); }
+    .jobs-day-lbl { align-self: flex-start; height: 14px; margin-top: 3px; font-family: "IBM Plex Mono", monospace; font-size: .6rem;
+      color: var(--text-muted); white-space: nowrap; }
+    /* the table of prints: a click on a row unfolds its details (IA §7); two lines per print on a phone */
+    .jobs-chips { margin-bottom: 12px; }
+    .jobs-table td { white-space: nowrap; }
+    .jobs-table tr.job-row { cursor: pointer; }
+    .jobs-table tr.job-row:hover td { background: var(--bg-soft); }
+    .jobs-table tr.job-row:focus-visible { outline: 2px solid var(--info); outline-offset: -2px; }
+    .jobs-table tr.job-x td { background: var(--bg-soft); border-bottom-color: transparent; }
+    .jobs-table td.job-printer { font-weight: 600; }
+    .job-chev { display: inline-block; width: 14px; color: var(--text-muted); font-weight: 400; }
+    .job-model { color: var(--text-muted); font-weight: 500; font-size: .7rem; }
+    .jobs-table td.job-when, .jobs-table td.job-dur, .jobs-table td.job-pauses, .jobs-table td.job-layers { font-family: "IBM Plex Mono", monospace; font-size: .76rem; }
+    .jobs-table .job-plan { color: var(--text-dim); }
+    .jobs-table .job-delta { white-space: nowrap; }
+    .jobs-table td.job-name { max-width: 280px; overflow: hidden; text-overflow: ellipsis; color: var(--text-dim); }
+    .jobs-table .job-end { color: var(--text-dim); }
+    .jobs-table tr.job-open td:first-child { box-shadow: inset 2px 0 0 var(--info); }
+    /* middle, not a baseline nudge: overflow: hidden puts the badge's baseline at its bottom edge,
+       so it sat above «67% · осталось 16м» next to it */
+    .jobs-table .event-badge { vertical-align: middle; }
+    .jd-ok { color: var(--text-muted); }
+    .jd-slow { color: var(--warn); }
+    .jd-fast { color: var(--info); }
+    .job-live { font-family: "IBM Plex Mono", monospace; font-size: .74rem; color: var(--text-dim); }
+    .job-flag { display: inline-block; padding: 1px 7px; border: 1px solid var(--line); border-radius: 999px; font-size: .66rem;
+      color: var(--text-dim); vertical-align: 1px; }
+    /* an unfolded row: the pauses with their times, the end, the job */
+    .jobs-table tr.job-xrow td { background: var(--bg-soft); padding: 2px 12px 12px 30px; white-space: normal; }
+    .job-xp { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(240px, 100%), 1fr)); gap: 8px 22px; font-size: .76rem; color: var(--text-dim); }
+    .job-xp h5 { margin: 0 0 3px; font-size: .64rem; font-weight: 700; letter-spacing: .07em; text-transform: uppercase; color: var(--text-muted); }
+    .job-xp .r { display: flex; gap: 6px; align-items: baseline; flex-wrap: wrap; padding: 1px 0; }
+    .job-xp code { font-family: "IBM Plex Mono", monospace; font-size: .72rem; color: var(--text); }
+    .job-t { font-family: "IBM Plex Mono", monospace; font-size: .72rem; color: var(--text-muted); }
+    .job-dim { color: var(--text-muted); }
+    .job-full { color: var(--text); overflow-wrap: anywhere; }
+    .job-tag { display: inline-block; padding: 1px 7px; border-radius: 999px; border: 1px solid var(--line); font-size: .66rem;
+      font-weight: 600; color: var(--text-dim); white-space: nowrap; }
+    .job-tag.ok { color: var(--ok); border-color: var(--ok-border); }
+    /* «показано 50 из 216 · Показать ещё 50» */
+    .jobs-foot { display: flex; justify-content: center; align-items: center; gap: 8px 14px; flex-wrap: wrap; margin-top: 12px; }
+    .jobs-foot .jobs-more { margin: 0; }
+    .jobs-foot .jobs-count { font-size: .72rem; color: var(--text-muted); }
+    /* a laptop: the start / end and the result wrap, the name is shorter, so 7 columns fit */
+    @media (max-width: 1440px) {
+      .jobs-table td.job-when, .jobs-table td.job-state { white-space: normal; }
+      .jobs-table td.job-name { max-width: 180px; }
+    }
+    /* tablets and phones: two lines a print (IA §7: ≈ 60 px instead of a 150 px card) —
+       «P3 · 23:46 · Втулка» and the result, «1ч 7м · план 1ч 34м +5%» and the pauses; a running print
+       adds «Идёт 47% · осталось 3ч» as a third line. The model, the layers, the end and the full name
+       are in the unfolded details. */
+    @media (max-width: 1100px) {
+      .jobs-table-wrap { overflow: visible; }
+      .jobs-table thead { display: none; }
+      .jobs-table, .jobs-table tbody { display: block; width: 100%; }
+      .jobs-table tr.job-row { display: grid; grid-template-columns: auto auto minmax(0, 1fr) auto; gap: 3px 10px; align-items: baseline;
+        grid-template-areas: "printer when name state" "dur dur dur pauses"; padding: 9px 12px; border-bottom: 1px solid var(--line); }
+      .jobs-table tr.job-row.job-open { grid-template-areas: "printer when name name" "dur dur dur pauses" "state state state state"; }
+      .jobs-table td { display: block; padding: 0 !important; border: 0 !important; min-width: 0; }
+      .jobs-table td:empty { display: none; }
+      .jobs-table tr.job-open td:first-child { box-shadow: none; }
+      .jobs-table tr.job-row.job-open { box-shadow: inset 2px 0 0 var(--info); }
+      .jobs-table tr.job-x { background: var(--bg-soft); border-bottom-color: transparent; }
+      .jobs-table tr.job-row:hover td, .jobs-table tr.job-x td { background: none; }
+      .jobs-table .job-model { display: none; }
+      .jobs-table td.job-printer { grid-area: printer; }
+      .jobs-table td.job-when { grid-area: when; }
+      .jobs-table td.job-when .job-end { display: none; }
+      .jobs-table td.job-name { grid-area: name; max-width: none; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      .jobs-table td.job-state { grid-area: state; justify-self: end; text-align: right; white-space: nowrap; }
+      .jobs-table tr.job-open td.job-state { justify-self: start; text-align: left; }
+      .jobs-table td.job-state .job-live { display: inline; white-space: nowrap; margin-left: 4px; }   /* «47% · осталось 3ч 10м» whole */
+      .jobs-table td.job-dur { grid-area: dur; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      .jobs-table td.job-pauses { grid-area: pauses; justify-self: end; white-space: nowrap; }
+      .jobs-table td.job-pauses::before { content: "пауз "; font-family: "IBM Plex Sans", sans-serif; font-size: .66rem; color: var(--text-muted); }
+      .jobs-table td.job-pauses.job-nil { visibility: hidden; }   /* «пауз —» says nothing on a phone */
+      .jobs-table td.job-layers { display: none; }
+      .jobs-table tr.job-xrow { display: block; background: var(--bg-soft); border-bottom: 1px solid var(--line); }
+      .jobs-table tr.job-xrow td { display: block; padding: 0 12px 12px !important; background: none; }
+    }
+    @media (max-width: 640px) {
+      .jobs-reasons { grid-template-columns: minmax(0, 1fr); }
+    }
+
+    /* === 👤 «Этот браузер» and «Админ» (IA §4, §8, §9; plan step 3) === */
+    /* the header button: the role in words; a viewer's is dim (no buttons for them) */
+    .me-btn {
+      appearance: none; display: inline-flex; align-items: center; gap: 6px; flex: 0 0 auto;
+      min-height: 34px; padding: 0 12px 0 9px; border-radius: 999px; border: 1px solid var(--line);
+      background: var(--bg-soft); color: var(--text); cursor: pointer; white-space: nowrap;
+      font: 600 0.78rem "IBM Plex Sans", sans-serif;
+    }
+    .me-btn:hover { border-color: var(--line-strong); }
+    .me-btn .pc-ic { width: 16px; height: 16px; color: var(--text-dim); }
+    .me-btn.viewer { color: var(--text-dim); }
+    .me-btn[aria-expanded="true"] { border-color: var(--info); }
+    /* the panel: on the right, 360 px; opaque surfaces only (theme-soft-colors-translucent) */
+    .me-back { position: fixed; inset: 0; z-index: 615; background: transparent; }
+    .me-back[hidden], .me-panel[hidden] { display: none; }
+    .me-panel {
+      position: fixed; z-index: 620; top: 0; right: 0; bottom: 0; width: min(360px, 100vw);
+      overflow-y: auto; overscroll-behavior: contain; padding-bottom: 20px;
+      background: var(--bg-elev); color: var(--text);
+      border-left: 1px solid var(--line-strong); box-shadow: var(--shadow-xl);
+    }
+    .me-panel:focus { outline: none; }
+    .me-h {
+      position: sticky; top: 0; z-index: 1; display: flex; align-items: center; gap: 8px; padding: 12px 14px;
+      background: var(--bg-elev); border-bottom: 1px solid var(--line);
+    }
+    .me-h b { flex: 1 1 auto; font-size: 1rem; }
+    .me-sec { display: grid; gap: 8px; padding: 12px 16px; border-bottom: 1px solid var(--line); font-size: 0.8rem; }
+    .me-sec h4 { font-size: 0.72rem; letter-spacing: 0.06em; text-transform: uppercase; color: var(--text-muted); }
+    .me-row { display: flex; align-items: center; justify-content: space-between; gap: 8px 10px; flex-wrap: wrap; }
+    .me-who-row { grid-template-columns: minmax(0, 1fr) auto; align-items: center; }
+    .me-who { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-dim); }
+    .me-who b, .me-who .me-login { color: var(--text); }
+    .me-note { font-size: 0.72rem; color: var(--text-muted); line-height: 1.4; }
+    .me-panel .theme-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; }
+    .me-panel .theme-seg-btn { min-height: 38px; border-radius: 10px; font-size: 0.74rem; }
+    .me-panel .text-scale-row { flex: 1 1 160px; padding: 0; }
+    .me-panel .settings-list { display: grid; }
+    .me-subs { display: flex; flex-wrap: wrap; gap: 6px 14px; color: var(--text-dim); font-size: 0.76rem; transition: opacity 0.2s; }
+    .me-subs label { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; }
+    .me-subs input { accent-color: var(--ok); }
+    .me-panel .settings-list.master-off .me-subs { opacity: 0.48; }
+    @media (max-width: 899px) {
+      /* a phone (plan step 15 — was ≤ 640): the panel is a bottom sheet (the header button is
+         the icon alone, in the phone's bar: the @media (max-width: 900px) block at the end) */
+      .me-back { background: rgba(8, 14, 22, 0.45); }
+      .me-panel {
+        top: auto; left: 0; width: 100%; max-height: 86vh; max-height: 86dvh;
+        border: 1px solid var(--line-strong); border-bottom: 0; border-radius: 20px 20px 0 0;
+        padding-bottom: calc(14px + env(safe-area-inset-bottom));
+      }
+      .me-h { border-radius: 20px 20px 0 0; padding-top: 18px; }
+      .me-h::before {
+        content: ""; position: absolute; top: 6px; left: 50%; width: 40px; height: 4px; margin-left: -20px;
+        border-radius: 2px; background: var(--line-strong);
+      }
+    }
+
+    /* «Админ»: the sub-tabs and the «неприменённые изменения» bar stay on screen
+       (one sticky head, under the sticky header on a desktop), opaque over the page */
+    .adm-head {
+      position: sticky; top: 0; z-index: 80; margin: 0 0 14px; padding: 8px 0;
+      background-color: var(--bg-elev); border-bottom: 1px solid var(--line);
+    }
+    .adm-head .apply-bar { margin: 8px 0 0; }
+    .adm-sub { display: flex; align-items: center; gap: 8px 12px; flex-wrap: wrap; }
+    .adm-sub-note { font-size: 0.72rem; color: var(--text-muted); }
+    .adm-seg { display: inline-flex; flex: none; border: 1px solid var(--line); border-radius: 10px; overflow: hidden; background: var(--bg-soft); }
+    .adm-seg button {
+      appearance: none; border: 0; background: none; color: var(--text-dim); min-height: 32px; padding: 0 14px;
+      font: 600 0.78rem "IBM Plex Sans", sans-serif; cursor: pointer; white-space: nowrap;
+    }
+    .adm-seg button + button { border-left: 1px solid var(--line); }
+    .adm-seg button:hover { color: var(--text); }
+    .adm-seg button.active { background-color: var(--bg-elev); background-image: linear-gradient(var(--info-soft), var(--info-soft)); color: var(--text); }
+    .adm-pane[hidden] { display: none; }
+    @media (min-width: 901px) {
+      .adm-head { top: 48px; margin: -16px -20px 14px; padding: 8px 20px; }
+      /* a jump inside «Админ» (the printer form) clears the header and the sticky head */
+      html:has(.view-panel[data-panel="admin"].active) { scroll-padding-top: 124px; }
+    }
+    @media (max-width: 640px) {
+      .adm-head { padding: 6px 12px; }
+      .adm-sub-note { display: none; }
+    }
+    /* Система → Telegram: the switch and its status stay in sight, the rest is folded */
+    .adm-tg { display: flex; flex-direction: column; gap: 12px; }
+    .adm-tg .panel-head { margin-bottom: 0; }
+    details.adm-det { border-top: 1px solid var(--line); padding-top: 8px; }
+    details.adm-det > summary {
+      display: flex; align-items: center; gap: 8px; min-height: 32px; cursor: pointer; list-style: none;
+      font-size: 0.8rem; font-weight: 600; color: var(--text);
+    }
+    details.adm-det > summary::-webkit-details-marker { display: none; }
+    details.adm-det > summary::before { content: "▸"; color: var(--text-muted); }
+    details.adm-det[open] > summary::before { content: "▾"; }
+    .adm-det-body { padding: 4px 0 2px; }
+    .adm-proxy { margin-top: 18px; padding-top: 14px; border-top: 1px solid var(--line); }
+    .adm-proxy[hidden], .adm-proxy-off[hidden] { display: none; }
+    .adm-proxy-head h4 { font-size: 0.86rem; color: var(--text); margin-bottom: 4px; }
+    .adm-proxy-head p { font-size: 0.72rem; color: var(--text-muted); margin-bottom: 10px; }
+    .adm-proxy-off { margin-top: 14px; }
+
+    /* === История → Действия (IA §7, plan step 12): the audit journal of people and the automation === */
+    .acts-bar { display: flex; align-items: center; gap: 8px 10px; flex-wrap: wrap; margin-bottom: 12px; }
+    .acts-bar [hidden] { display: none !important; }
+    .acts-chips { flex: 0 1 auto; }
+    .acts-svc { flex: none; }
+    .acts-table-wrap[hidden], #actsEmpty[hidden] { display: none; }
+    .acts-table { width: 100%; }
+    .acts-table td { vertical-align: top; }
+    .acts-table .act-t { white-space: nowrap; color: var(--text-muted); font-size: .76rem; }
+    .acts-table .act-who { white-space: nowrap; font-weight: 600; }
+    .acts-table .act-what { color: var(--text); min-width: 0; overflow-wrap: anywhere; }
+    .acts-table .act-what .dim { color: var(--text-muted); }
+    .acts-table .act-pr { white-space: nowrap; font-weight: 700; }
+    .acts-table .act-dev { white-space: nowrap; color: var(--text-dim); font-size: .76rem; }
+    .acts-table tr.act-row { cursor: pointer; }
+    .acts-table tr.act-row:hover td, .acts-table tr.act-row.open td { background: var(--bg-soft); }
+    .acts-table tr.act-row:focus-visible { outline: 2px solid var(--info); outline-offset: -2px; }
+    .acts-table tr.act-xrow td { background: var(--bg-soft); padding-top: 0; }
+    .act-x { display: flex; flex-wrap: wrap; gap: 4px 18px; font-size: .74rem; color: var(--text-dim); overflow-wrap: anywhere; }
+    .act-x b { color: var(--text); font-weight: 600; }
+    .act-tag { display: inline-block; padding: 0 7px; border-radius: 999px; border: 1px solid var(--line); font-size: .68rem;
+      font-weight: 600; color: var(--text-dim); white-space: nowrap; vertical-align: 1px; }
+    .act-tag.ok { color: var(--ok-11); border-color: var(--ok-border); }
+    .act-tag.warn { color: var(--warn-11); border-color: var(--warn-border); }
+    .act-tag.err { color: var(--danger-11); border-color: var(--danger-border); }
+    @media (max-width: 760px) {
+      /* a phone: two lines a row (time · who · printer, then what), the device in the unfolded row */
+      .acts-table thead { display: none; }
+      .acts-table, .acts-table tbody { display: block; }
+      .acts-table tr.act-row { display: grid; grid-template-columns: auto auto minmax(0, 1fr); gap: 2px 10px; padding: 8px 4px;
+        border-bottom: 1px solid var(--line); }
+      .acts-table tr.act-row td { display: block; padding: 0 !important; border: 0 !important; background: none !important; }
+      .acts-table .act-what { grid-column: 1 / -1; grid-row: 2; }
+      .acts-table .act-pr { justify-self: end; }
+      .acts-table .act-dev { display: none !important; }
+      .acts-table tr.act-xrow { display: block; }
+      .acts-table tr.act-xrow td { display: block; padding: 4px 4px 10px; }
+    }
+
+    /* === «Админ» polish (IA §8, plan step 13): Парк, Автоматика → Автопропуск, Доступ === */
+    .adm-link {
+      appearance: none; border: 0; background: none; padding: 2px 4px; color: var(--info-11); cursor: pointer;
+      font: 600 .76rem "IBM Plex Sans", sans-serif; white-space: nowrap;
+    }
+    .adm-link:hover { text-decoration: underline; }
+    .adm-link.danger { color: var(--danger-11); }
+    /* «Обслуживание»: «🔧 с 19.10» and «к карточке ›» under it (a narrow column: the park fits a PC, IA §8) */
+    .prk-maint .badge { white-space: nowrap; }
+    @media (min-width: 900px) {
+      #adminPrintersTable td.prk-maint .adm-link { display: block; margin-top: 2px; padding-left: 0; }
+    }
+    .prk-ctl .act-tag { white-space: normal; }
+    /* a narrow PC: «Тип» goes at ≤ 1100 px (the model says it, as on a phone), «Изменить» and
+       «Удалить» stack at ≤ 1000 px — the park still fits without a sideways scroll */
+    @media (max-width: 1100px) {
+      #adminPrintersTable th[data-sort="kind"], #adminPrintersTable td.prk-kind { display: none; }
+    }
+    @media (max-width: 1000px) {
+      #adminPrintersTable td.adm-actions { white-space: normal; }
+    }
+    .prn-chk { display: inline-flex !important; align-items: center; gap: 8px; cursor: pointer; color: var(--text) !important; }
+    .fld-wide { grid-column: 1 / -1; }
+    .adm-inrow { display: inline-flex; align-items: center; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
+    .adm-inrow .hist-in { width: 210px; max-width: 100%; }
+    .adm-ask { font-size: .76rem; color: var(--warn-11); white-space: normal; text-align: right; }
+    .adm-err-row { margin-top: 4px; font-size: .74rem; color: var(--danger-11); white-space: normal; text-align: right; }
+    #adminUsersTable select.adm-role { min-height: 30px; }
+    .adm-add[hidden] { display: none; }
+    .adm-ai .ai-code { display: grid; grid-template-columns: 96px minmax(0, 1fr) auto; gap: 10px; align-items: baseline;
+      padding: 8px 2px; border-top: 1px solid var(--line); font-size: .8rem; }
+    .adm-ai .ai-code:first-child { border-top: 0; }
+    .adm-ai .ai-code code { font-family: "IBM Plex Mono", monospace; color: var(--text); }
+    .adm-ai .ai-text { color: var(--text-dim); min-width: 0; overflow-wrap: anywhere; }
+    .adm-ai .ai-empty { color: var(--text-muted); font-size: .8rem; padding: 6px 2px; }
+    .adm-ai .ai-add { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--line); }
+    .adm-ai .ai-add .hist-in { width: 130px; }
+    .adm-ai .ai-add .dirty { display: inline-flex; align-items: center; gap: 8px; font-size: .76rem; color: var(--warn); }
+    .adm-ai .ai-add .dirty[hidden] { display: none; }
+    .adm-ai .ai-add .dirty i { width: 7px; height: 7px; border-radius: 50%; background: var(--warn); }
+    .adm-ai .ai-add .saved-flash:not(.show) { display: none; }
+    .adm-ai .settings-error[hidden] { display: none; }
+    .adm-ai .pill-btn:disabled { opacity: .45; cursor: default; transform: none; box-shadow: none; }
+    @media (max-width: 640px) {
+      .adm-ai .ai-code { grid-template-columns: 88px minmax(0, 1fr); }
+      .adm-ai .ai-code > :last-child { grid-column: 1 / -1; justify-self: start; }
+      .adm-inrow { justify-content: flex-start; }
+      .adm-ask, .adm-err-row { text-align: left; }
+    }
+
+    /* ── A phone and a narrow tablet (≤ 900 px; IA §4, plan step 10): a 44 px bar on top —
+       the screen's name, the bell, ● time, 👤 — and the bottom navigation, 56 px + the
+       safe area: ▦ Принтеры · 💧 AMS · 🕘 История · 🛠 Админ (a viewer's three), no badges
+       (the bell is the one signal). Both sticky / fixed and opaque in every theme (the
+       --bg-soft tint lies on the opaque --bg-elev); the page keeps clear of both. A desktop
+       (≥ 901 px) is not touched. */
+    @media (max-width: 900px) {
+      html { scroll-padding-top: 54px; scroll-padding-bottom: calc(66px + env(safe-area-inset-bottom)); }
+      /* the cards get the whole width (the 300 px column fits from 328 px up) */
+      .shell { width: 100%; padding: 0 12px calc(76px + env(safe-area-inset-bottom)); }
+      .topbar {
+        position: sticky; top: 0; z-index: 90; height: 44px; margin: 0 -12px 10px; padding: 0 12px;
+        flex-wrap: nowrap; gap: 8px; justify-content: flex-start;
+        background-color: var(--bg-elev); background-image: linear-gradient(var(--bg-soft), var(--bg-soft));
+        border-bottom: 1px solid var(--line-strong);
+      }
+      .topbar-scr {
+        display: block; flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+        color: var(--text); font: 700 0.98rem "IBM Plex Sans", sans-serif;
+      }
+      .topbar-scr .ts-sub { color: var(--text-muted); font-weight: 500; }
+      .topbar-side { flex: 0 0 auto; flex-wrap: nowrap; gap: 6px; margin-left: 0; }
+      .status-chip { font-size: 0.72rem; }
+      .me-btn { width: 40px; min-height: 40px; padding: 0; justify-content: center; }
+      .me-btn span { display: none; }
+      .view-tabs {
+        position: fixed; z-index: 85; left: 0; right: 0; bottom: 0; display: grid; grid-auto-flow: column;
+        grid-auto-columns: minmax(0, 1fr); align-items: stretch; gap: 0; height: calc(56px + env(safe-area-inset-bottom));
+        padding: 0 0 env(safe-area-inset-bottom); background-color: var(--bg-elev); border-top: 1px solid var(--line-strong);
+      }
+      .view-tabs .view-tab {
+        display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; min-width: 0;
+        padding: 0 4px; border: 0; border-radius: 0; background: none; box-shadow: none; color: var(--text-muted);
+        font: 600 0.66rem "IBM Plex Sans", sans-serif; letter-spacing: 0; text-transform: none; transition: color 0.15s ease;
+      }
+      .view-tabs .view-tab:hover { color: var(--text); transform: none; border: 0; }
+      .view-tabs .view-tab.active { color: var(--info); background: none; box-shadow: none; }
+      .view-tabs .view-tab .vt-ic { display: block; width: 22px; height: 22px; }
+      /* the order of IA §4 on a phone: Принтеры · AMS · История · Админ */
+      .view-tabs .view-tab[data-view="ams"] { order: 1; }
+      .view-tabs .view-tab[data-view="history"] { order: 2; }
+      .view-tabs .view-tab[data-view="admin"] { order: 3; }
+      /* «Наверх» is a second tap on the screen's item here */
+      .scroll-top-btn { display: none; }
+      .app-toast { bottom: calc(68px + env(safe-area-inset-bottom)); }
+      /* «Принтеры»: the cards on the page itself, as the other screens' blocks (no frame around the grid) */
+      .fleet-section { padding: 0; border: 0; border-radius: 0; background: none; box-shadow: none; backdrop-filter: none; overflow: visible; }
+      .fleet-section::before { display: none; }
+      /* the screens' sticky heads stick right under the bar, edge to edge */
+      .hist-head, .adm-head, .ams-strip { top: 44px; margin: -10px -12px 10px; padding: 6px 12px; }
+      /* the sticky save bar of «Автоматика» clears the bottom navigation */
+      .autodry .ad-save { bottom: calc(56px + env(safe-area-inset-bottom)); }
+      /* the card's row and its question: 44 px touch targets (five buttons fit from 321 px) */
+      .pc-controls .pc-ctl, .printer-card .pc-confirm .q, .printer-card .pc-confirm button { height: 44px; }
+    }
+    /* «Ферма ▾» (IA §5): on a phone the farm row is the chips and this button; the order and the
+       farm's commands are in its sheet (the same controls, moved there while it is open) */
+    .farm-more { display: none; }
+    .farm-sheet-sec { display: grid; gap: 8px; padding: 12px 16px; border-bottom: 1px solid var(--line); }
+    .farm-sheet-sec:last-child { border-bottom: 0; }
+    .farm-sheet-sec[hidden] { display: none; }
+    .farm-sheet-sec h4 { font-size: 0.72rem; letter-spacing: 0.06em; text-transform: uppercase; color: var(--text-muted); }
+    .farm-sheet .farm-seg button, .farm-sheet .fb-btn { min-height: 40px; }
+    .farm-sheet .farm-order { justify-content: space-between; }
+    @media (max-width: 899px) {
+      .farm-row { flex-wrap: nowrap; gap: 6px; }
+      .farm-row .farm-chips { flex: 1 1 auto; }
+      .farm-row .farm-sep, .farm .farm-order, .farm #fleetBulk { display: none; }
+      .farm-more {
+        position: relative; display: inline-flex; align-items: center; flex: none; min-height: 36px; padding: 0 10px;
+        border-radius: 9px; border: 1px solid var(--line-strong); background: var(--bg-soft); color: var(--text);
+        font: 600 0.76rem "IBM Plex Sans", sans-serif; white-space: nowrap; cursor: pointer;
+      }
+      .farm-more[aria-expanded="true"] { border-color: var(--info); }
+      /* a farm command that did not go through waits in the sheet: a dot on its button */
+      .farm-more.warn::after {
+        content: ""; position: absolute; top: -3px; right: -3px; width: 8px; height: 8px; border-radius: 50%; background: var(--warn);
+      }
+    }
+    /* 320–420 px: the dot says the poll is fine, the time makes room for the screen's name
+       (a failure keeps its words: «нет связи · 2 мин») */
+    @media (max-width: 420px) {
+      .status-chip:not(.down) #lastUpdate { display: none; }
+    }
+
+    /* ── A phone II (≤ 899 px; IA §5, §6, §8, §10, plan step 15): every popover is a bottom
+       sheet (the card's chips, AMS, ⋯ and its maintenance note, the AMS tab's drying form —
+       pc-pop; the notifications and 👤 are sheets above), the AMS blocks are rows that unfold,
+       the «Админ» tables are cards, «Хронология» takes a pinch and a tap. A desktop keeps its
+       popovers, its blocks and its tables. */
+    .pc-pop-back { position: fixed; inset: 0; z-index: 94; background: rgba(8, 14, 22, 0.45); }
+    .pc-pop-back[hidden] { display: none; }
+    .ams-row { display: none; }
+    @media (max-width: 899px) {
+      .pc-pop, .pc-pop[data-kind] {
+        left: 0 !important; right: 0; top: auto !important; bottom: 0; width: auto; min-width: 0; max-width: none;
+        max-height: 86vh; max-height: 86dvh; overscroll-behavior: contain;
+        padding: 22px 16px calc(16px + env(safe-area-inset-bottom));
+        border: 1px solid var(--line-strong); border-bottom: 0; border-radius: 20px 20px 0 0;
+        box-shadow: var(--shadow-xl);
+      }
+      .pc-pop::before {
+        content: ""; position: absolute; top: 8px; left: 50%; width: 40px; height: 4px; margin-left: -20px;
+        border-radius: 2px; background: var(--line-strong);
+      }
+      .pc-pop[data-kind="menu"] { padding: 22px 8px calc(10px + env(safe-area-inset-bottom)); }
+      /* touch targets in the sheet */
+      .pc-pop .pc-pop-preset, .pc-pop .pc-pop-ok, .pc-pop .pc-pop-slot { min-height: 40px; }
+      .pc-pop[data-kind="menu"] button { min-height: 44px; }
+      .pc-pop input[type="text"] { min-height: 40px; }
+
+      /* AMS (IA §6): a block is a ≈ 60 px row — the name, 💧, the drying line; a tap unfolds the
+         slots, the charts and the buttons under it */
+      .ams-grid { grid-template-columns: minmax(0, 1fr); gap: 8px; }
+      .ams-row {
+        appearance: none; display: flex; align-items: center; gap: 8px; width: 100%; min-height: 60px; padding: 8px 12px;
+        border-radius: 14px; border: 1px solid var(--line); background: linear-gradient(180deg, var(--bg-panel), var(--bg-panel-2));
+        color: var(--text); text-align: left; cursor: pointer; font: 500 0.78rem "IBM Plex Sans", sans-serif;
+      }
+      .ams-row.drying { border-color: var(--warn-7); }
+      .ams-row[aria-expanded="true"] { border-color: var(--info); }
+      .ams-row-n { font-weight: 700; white-space: nowrap; }
+      .ams-row-s { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-dim); }
+      .ams-row-chev { flex: none; color: var(--text-muted); transition: transform 0.15s ease; }
+      .ams-row[aria-expanded="true"] .ams-row-chev { transform: rotate(180deg); }
+      .ams-card.ph-closed { display: none; }
+
+      /* «Админ» (IA §10: no sideways scroll on a phone): a printer, a user, a proxy — a card. Only the
+         wraps whose tables turn into cards drop their own scroll (adm-cards); another table keeps it. */
+      .adm-table-wrap.adm-cards { overflow: visible; }
+      #adminPrintersTable thead, #adminUsersTable thead { display: none; }
+      #adminPrintersTable, #adminPrintersTable tbody, #adminUsersTable, #adminUsersTable tbody { display: block; width: 100%; }
+      #adminPrintersTable tr, #adminUsersTable tr {
+        display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 6px 12px; align-items: center; padding: 10px 0;
+        border-bottom: 1px solid var(--line);
+      }
+      #adminPrintersTable tbody tr:last-child, #adminUsersTable tbody tr:last-child { border-bottom: 0; }
+      #adminPrintersTable td, #adminUsersTable td {
+        display: block; min-width: 0; padding: 0 !important; border: 0 !important; background: none !important;
+        text-align: left; white-space: normal; font-size: 0.78rem;
+      }
+      #adminPrintersTable td[data-l]::before, #adminUsersTable td.ll-cell::before {
+        content: attr(data-l) ": "; color: var(--text-muted); font-size: 0.68rem;
+      }
+      #adminUsersTable td.ll-cell::before { content: "вход: "; }
+      #adminPrintersTable td.prk-kind, #adminPrintersTable td.prk-ip { display: none; }   /* the model says it, the form has the IP */
+      #adminPrintersTable td.prk-model, #adminPrintersTable td.prk-maint { text-align: right; }
+      #adminPrintersTable tr { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+      #adminPrintersTable td.prk-ctl, #adminPrintersTable td.adm-actions, #adminUsersTable td.adm-actions,
+      #adminUsersTable td.ll-cell { grid-column: 1 / -1; }
+      #adminUsersTable td.ll-cell .ll-sub { display: inline; margin-left: 4px; }
+      .adm-actions .adm-inrow { justify-content: flex-start; }
+      /* «Система → Прокси для Telegram»: the address on its own line, the status, the delay and
+         «используется» under it, «Удалить» across the card */
+      #proxyTable thead { display: none; }
+      #proxyTable, #proxyTable tbody { display: block; width: 100%; }
+      #proxyTable tr {
+        display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; padding: 10px 0;
+        border-bottom: 1px solid var(--line);
+      }
+      #proxyTable tbody tr:last-child { border-bottom: 0; }
+      #proxyTable td {
+        display: block; min-width: 0; padding: 0 !important; border: 0 !important; background: none !important;
+        text-align: left; white-space: normal;
+      }
+      #proxyTable td:empty { display: none; }
+      #proxyTable td.proxy-url, #proxyTable td.adm-actions, #proxyTable td[colspan] { flex: 1 1 100%; }
+      #proxyTable td.adm-actions > .ghost-btn { width: 100%; min-height: 40px; }
+
+      /* «Хронология»: a finger pans sideways and pinches, the page still scrolls up and down */
+      #timeline-canvas { touch-action: pan-y; }
+    }

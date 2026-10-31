@@ -16,9 +16,10 @@ The cycle (owner-approved, see the AMS tab explainer):
      the series, up to max_runs. A series that used all its runs above the
      target pauses the unit for SERIES_BACKOFF_S (48 h).
 Drying the engine did not start («чужая сушка») is tracked, counted as a run
-and never touched; stopped early by someone, it holds the unit. Two
-consecutive interruptions of our runs switch the unit's automation off until
-an admin re-enables it.
+and never touched; stopped early by someone, it holds the unit. Our run going
+dark on its own (the printer switches the drying off: a failed print, too hot
+while printing) is restarted after INTERRUPT_RETRY_S — no hold, no disable
+(the units dry continuously).
 """
 import copy
 import logging
@@ -32,7 +33,10 @@ logger = logging.getLogger(__name__)
 
 MODES = ("auto", "pla", "petg", "tpu", "custom")
 UNIT_MODES = ("inherit",) + MODES
-INTERRUPT_LIMIT = 2
+INTERRUPT_LIMIT = 2           # legacy: an "interrupts" disable left by an older version is lifted
+# Our run went dark, not by our command: restart it this soon (owner, 17.10:
+# P1/P3/H2 sat 24 h idle after the printer switched their drying off).
+INTERRUPT_RETRY_S = 300
 CONFIRM_S = 300               # our start must show dry.active within 5 min
 END_TOLERANCE_MIN = 10        # last remaining <= 10 min -> finished normally
 END_TOLERANCE_S = 900         # or now >= expected end - 15 min
@@ -68,7 +72,7 @@ MODEL_NAMES = {"n3f": "AMS 2 Pro", "n3s": "AMS HT"}
 DRY_STATUS_RU = {"error": "ошибка", "overheat": "перегрев"}
 STATUS_KINDS = ("pending", "off", "offline", "unsupported", "empty", "no_sensor", "wait", "dry_run",
                 "refused", "blocked", "printing", "limit", "window", "starting", "dry", "foreign",
-                "fault", "cool", "pause", "backoff")
+                "fault", "cool", "pause", "backoff", "restart", "maintenance")
 
 DEFAULT_CONFIG: Dict[str, Any] = {
     # Owner decision: shipped in shadow mode — the engine evaluates and journals
@@ -273,11 +277,13 @@ def new_state() -> Dict[str, Any]:
         "backoff_until": None,        # a series ended above the target at max runs: next series not before
         "stop_sent_at": None,         # a dashboard / stop-all stop was sent (any phase)
         "refusals": 0, "retry_at": None, "last_refusal": None,
+        "restart_at": None,           # our run went dark: restart it then
         "blocked_since": None, "blocked_noted_at": None,
         "dry_run_at": None,           # dry_run: last "would start" (status dry_run for 1 h)
         "disabled_reason": None,      # "interrupts": automation off for this unit until released
         "disabled_entry": None,       # journal row id of the last "disabled" (a restart may undo it)
         "display": {},                # {"label", "name", "device_type", "model"}
+        "maint_since": None,          # the printer went into maintenance mode then (None: it is not)
     }
 
 
@@ -453,13 +459,18 @@ def limit_text(dry: Dict[str, Any]) -> str:
 
 
 def plan_run(cfg: Dict[str, Any], ucfg: Dict[str, Any], dry: Optional[Dict[str, Any]], slots: Any,
-             manual: bool = False) -> Optional[Dict[str, Any]]:
+             manual: bool = False, printing: bool = False) -> Optional[Dict[str, Any]]:
     """Temperature / hours / material of the next run, or None (auto mode on a
-    unit without spools, unless `manual`; a unit that cannot dry)."""
+    unit without spools, unless `manual`; a unit that cannot dry).
+
+    `printing`: the printer prints (from this AMS or not) — Bambu's print
+    presets then (PETG 55° instead of 65°): at 65° P1/P3 (P2S) switched the
+    drying off 5–60 min into every run while printing (17.10)."""
     if not dry or dry.get("type") not in ams_drying.TYPE_MAX:
         return None
     dtype = dry["type"]
     i = _idx(dtype)
+    col = "print" if printing and not dry.get("feeding") else "idle"   # feeding: capped by max_temp below
     cap = ams_drying.TYPE_MAX[dtype]
     mode = effective_mode(cfg, ucfg)
     mats = materials_of(slots)
@@ -476,9 +487,9 @@ def plan_run(cfg: Dict[str, Any], ucfg: Dict[str, Any], dry: Optional[Dict[str, 
             why += " · потолок %s %d°" % (MODEL_NAMES[dtype], cap)
     elif mode in ("pla", "petg", "tpu"):
         m_name = mode.upper()
-        temp, hours = table[m_name]["idle"][i], table[m_name]["hours"][i]
+        temp, hours = table[m_name][col][i], table[m_name]["hours"][i]
         filament = name = m_name
-        why = "пресет Bambu"
+        why = "пресет Bambu" + (" для печати" if col == "print" and temp < table[m_name]["idle"][i] else "")
         if m_name == "TPU" and i == 0:
             why += "; AMS 2 Pro может не досушить TPU"
     else:
@@ -491,7 +502,7 @@ def plan_run(cfg: Dict[str, Any], ucfg: Dict[str, Any], dry: Optional[Dict[str, 
                     "why": "пластик неизвестен — %d°, безопасно для любого; свой режим блока — если знаете пластик"
                            % ams_drying.TEMP_MIN,
                     "warn": False, "limit": None, "empty": True}
-        temp = table[softest]["idle"][i]
+        temp = table[softest][col][i]
         hours = max(table[m]["hours"][i] for m in materials)
         filament = softest
         name = "+".join(m["type"] for m in mats)
@@ -505,6 +516,8 @@ def plan_run(cfg: Dict[str, Any], ucfg: Dict[str, Any], dry: Optional[Dict[str, 
             why = "смесь — по самому нежному: " + softest
         else:
             why = "пресет Bambu для " + materials[0]
+        if col == "print" and temp < table[softest]["idle"][i]:
+            why += " · во время печати"
     limit = None
     max_temp = dry.get("max_temp") or cap
     if temp > max_temp:
@@ -660,6 +673,8 @@ def needs_rows(state: Dict[str, Any], cfg: Dict[str, Any], key: str, now: float,
     a rest check or a due measure — not for a unit whose observation fails a
     gate that answers first."""
     st = state
+    if obs is not None and obs.get("maintenance"):
+        return None                              # decide() answers "maintenance" first
     if obs is not None and _seen(obs) and obs["dry"].get("active"):
         if st["phase"] in ("idle", "settle") and not (st["stop_sent_at"] and now - st["stop_sent_at"] < STOP_GRACE_S):
             return ONSET_LOOKBACK_S
@@ -738,6 +753,25 @@ def _undo_early_end(st: Dict[str, Any], dry: Dict[str, Any], now: float) -> Dict
     return ev
 
 
+def _maint_reset(st: Dict[str, Any], now: float) -> List[Dict[str, Any]]:
+    """Forget the tracked drying, series, holds and backoffs of a unit whose
+    printer is in maintenance mode (on entry, and on later checks except for
+    a dashboard run still going). Frozen in "running", the first check after
+    the mode would read an interruption and start a drying on the printer
+    just repaired. Kept: the runs of the last 24 h (the limit), the display
+    and the rest temperature; on a later check also the hold and the stop a
+    card «стоп сушки» set meanwhile (its manual_hold_h outlasts the mode).
+    Returns the events (a pending measure is cancelled: its end row would
+    wait forever)."""
+    events = [_ev("measure", outcome="cancelled", entry=st["measure_entry"])] if st["measure_entry"] else []
+    later = ("hold_until", "hold_reason", "stop_sent_at") if st["maint_since"] is not None else ()
+    keep = {k: st[k] for k in ("runs", "display", "rest_temp") + later}
+    since = st["maint_since"] if st["maint_since"] is not None else now
+    st.clear()
+    st.update(new_state(), maint_since=since, **keep)
+    return events
+
+
 def _run_fields(st: Dict[str, Any], dry: Optional[Dict[str, Any]]) -> Dict[str, Any]:
     dry = dry or {}
     foreign = st["phase"] == "foreign"
@@ -766,6 +800,10 @@ def decide(state: Dict[str, Any], obs: Dict[str, Any], cfg: Dict[str, Any], now:
         return out("blocked", text="сушка останавливается")
 
     st["runs"] = [t for t in st["runs"] if t > now - DAY_S]
+    if st["hold_reason"] == "interrupted":                       # left by an older version
+        st["hold_until"] = st["hold_reason"] = None
+    if st["disabled_reason"] == "interrupts":
+        st["disabled_reason"], st["disabled_entry"] = None, None
     if st["hold_until"] is not None and now >= st["hold_until"]:
         st["hold_until"] = st["hold_reason"] = None
     if st["backoff_until"] is not None and now >= st["backoff_until"]:
@@ -781,6 +819,32 @@ def decide(state: Dict[str, Any], obs: Dict[str, Any], cfg: Dict[str, Any], now:
     if (st["phase"] in ("idle", "settle") and st["stop_sent_at"] and not active
             and now - st["stop_sent_at"] >= STOP_GRACE_S):
         st["stop_sent_at"] = None
+
+    # The printer is in maintenance mode: nothing is tracked and nothing sent, not even a
+    # stop — a drying going on (ours, a foreign one at 23:55) runs out on its own timer.
+    if obs.get("maintenance"):
+        if st["maint_since"] is None:
+            events.append(_ev("maintenance_on"))
+        elif st["phase"] == "running" and st["origin"] == "manual":
+            # A card «сушить» during the mode: tracked, not reset, while it goes (or may
+            # still start), so out of the mode it is the dashboard's run — not a foreign
+            # one journaled twice and counted toward the limit. Ended (or overwritten by
+            # a second start): forgotten below like any drying in the mode.
+            rem = dry.get("remaining_min") if active else None
+            jumped = (active and st["seen_active"] and rem is not None and st["last_remaining_min"] is not None
+                      and rem > st["last_remaining_min"] + END_TOLERANCE_MIN)
+            pending = not st["seen_active"] and st["confirm_by"] is not None and now < st["confirm_by"]
+            if not jumped and (not seen or active or pending):
+                if active:
+                    if rem != st["last_remaining_min"]:
+                        st["remaining_changed_at"] = now
+                    st.update(last_seen_at=now, seen_active=True, last_remaining_min=rem)
+                return out("maintenance")
+        events.extend(_maint_reset(st, now))
+        return out("maintenance")
+    if st["maint_since"] is not None:            # out of it: the usual rules from this check on
+        st["maint_since"] = None
+        events.append(_ev("maintenance_off"))
 
     # A — a drying is being tracked
     if st["phase"] in ("running", "foreign"):
@@ -876,18 +940,15 @@ def decide(state: Dict[str, Any], obs: Dict[str, Any], cfg: Dict[str, Any], now:
             events.append(_ev("lost", **common))
             st["end_kind"] = "lost"
         else:
+            # the printer switched it off (a failed print, too hot while printing...):
+            # dry on — restart soon, never hold or disable the unit for it
             counts = st["origin"] in ("auto", "now")
             n = st["interrupts"] + 1 if counts else st["interrupts"]
-            events.append(_ev("interrupted", ran=ran, planned=(st["run_hours"] or 0) * 3600, hold_h=hold_h, n=n,
-                              origin=st["origin"], **common))
+            events.append(_ev("interrupted", ran=ran, planned=(st["run_hours"] or 0) * 3600,
+                              retry_s=INTERRUPT_RETRY_S, n=n, origin=st["origin"], **common))
             st["end_kind"] = "interrupted"
-            if hold_h:
-                st["hold_until"], st["hold_reason"] = now + hold_h * 3600, "interrupted"
-            if counts:
-                st["interrupts"] = n
-                if n >= INTERRUPT_LIMIT:
-                    events.append(_ev("disabled", n=n, bind="disabled_entry"))
-                    st["disabled_reason"] = "interrupts"
+            st["restart_at"] = now + INTERRUPT_RETRY_S
+            st["interrupts"] = n
         st["phase"], st["dry_end_at"], st["settle_until"] = "settle", now, now + pause_s
         st["stop_sent_at"], st["seen_active"], st["confirm_by"], st["fault_noted"] = None, False, None, False
         return out("cool", end_kind=st["end_kind"], series=st["series"], until=st["settle_until"], dry_end_at=now)
@@ -970,9 +1031,9 @@ def decide(state: Dict[str, Any], obs: Dict[str, Any], cfg: Dict[str, Any], now:
             outcome = "held"
         elif st["backoff_until"]:
             outcome = "backoff"
-        elif cfg["max_runs"] and series >= cfg["max_runs"]:
-            outcome = "unreachable"
-        elif cfg["max_runs"] and len(st["runs"]) >= cfg["max_runs"]:
+        elif cfg["max_runs"] and series >= cfg["max_runs"] and st["end_kind"] != "interrupted":
+            outcome = "unreachable"          # a run the printer switched off never ends the series: redone
+        elif cfg["max_runs"] and len(st["runs"]) >= cfg["max_runs"] and st["end_kind"] != "interrupted":
             outcome = "limit"
         else:
             outcome = "repeat"
@@ -1029,6 +1090,8 @@ def decide(state: Dict[str, Any], obs: Dict[str, Any], cfg: Dict[str, Any], now:
         return out("dry_run", **rep)
     if st["retry_at"] and now < st["retry_at"]:
         return out("refused", until=st["retry_at"], detail=st["last_refusal"], **rep)
+    if st["restart_at"] and now < st["restart_at"]:
+        return out("restart", until=st["restart_at"], **rep)
     blockers = dry.get("blockers") or []
     blk = (blockers[0].get("text") if blockers else
            "идёт смена филамента" if obs.get("busy") else
@@ -1045,7 +1108,7 @@ def decide(state: Dict[str, Any], obs: Dict[str, Any], cfg: Dict[str, Any], now:
     tz = obs.get("tz_offset_min") or 0
     if not in_window(cfg["window"], local_minute(now, tz)):
         return out("window", opens_at=next_window_open(cfg["window"], now, tz), window=cfg["window"], **rep)
-    plan = plan_run(cfg, ucfg, dry, obs.get("slots"))
+    plan = plan_run(cfg, ucfg, dry, obs.get("slots"), printing=bool(obs.get("printing")))
     if plan is None:
         return out("empty")
     actions.append({"type": "start", "trigger": trigger, "plan": plan, "rh_before": rh_before,
@@ -1066,7 +1129,7 @@ def _start_running(st: Dict[str, Any], origin: str, series: int, temp: int, hour
               run_started_at=now, run_expected_end=now + hours * 3600, run_temp=temp, run_hours=hours,
               run_filament=filament, confirm_by=now + CONFIRM_S, seen_active=False, fault_noted=False,
               last_seen_at=now, last_remaining_min=None, remaining_changed_at=now, repeat_pending=False,
-              stop_sent_at=None, measure_entry=None, foreign_since=None, foreign_entry=None)
+              stop_sent_at=None, measure_entry=None, foreign_since=None, foreign_entry=None, restart_at=None)
 
 
 def apply_start_result(state: Dict[str, Any], action: Dict[str, Any], result: Dict[str, Any], origin: str,
@@ -1174,7 +1237,8 @@ def release(state: Dict[str, Any]) -> Tuple[Dict[str, Any], List[Dict[str, Any]]
     cleared = bool(st["hold_until"] or st["retry_at"] or st["refusals"] or st["interrupts"]
                    or st["blocked_since"] or st["disabled_reason"] or st["backoff_until"])
     st.update(hold_until=None, hold_reason=None, retry_at=None, refusals=0, interrupts=0, blocked_since=None,
-              blocked_noted_at=None, disabled_reason=None, disabled_entry=None, backoff_until=None)
+              blocked_noted_at=None, disabled_reason=None, disabled_entry=None, backoff_until=None,
+              restart_at=None)
     if was_disabled:
         return st, [_ev("reenabled")]
     return st, [_ev("released")] if cleared else []
@@ -1219,7 +1283,9 @@ def journal_text(ev: Dict[str, Any]) -> str:
     if k == "interrupted":
         text = "Погасла через %s из %s — не по команде автосушки" % (fmt_dur(ev.get("ran")),
                                                                      fmt_dur(ev.get("planned")))
-        if ev.get("hold_h"):
+        if ev.get("retry_s"):
+            text += " · перезапуск через %s" % fmt_dur(ev["retry_s"])
+        elif ev.get("hold_h"):                                    # rows of older versions
             text += " · не трогаем %s ч" % _hours(ev["hold_h"])
         if (ev.get("n") or 0) >= 2:
             text += " · %d-й раз подряд" % ev["n"]
@@ -1258,6 +1324,10 @@ def journal_text(ev: Dict[str, Any]) -> str:
         return "Автосушка блока включена заново"
     if k == "dry_run":
         return "Пробный режим: запустили бы прогон %s · %s" % (ev.get("series"), _run_head(ev))
+    if k == "maintenance_on":
+        return "Принтер на обслуживании — автосушка блок не трогает"
+    if k == "maintenance_off":
+        return "Принтер снят с обслуживания — автосушка снова следит за блоком"
     if k == "unreachable":
         return "Цель не достигается — проверьте осушитель/цель · новая серия не раньше чем через %d ч" % (
             SERIES_BACKOFF_S // 3600)

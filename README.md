@@ -8,30 +8,69 @@ notifications, and basic remote control.
 Supports **Bambu Lab**, **Creality** (K1 series / Sonic Pad), **Klipper /
 Moonraker**, and **MKS WiFi** printers side by side.
 
-![Live fleet dashboard — a mixed Bambu / Creality / Klipper / MKS farm on one page](docs/screenshots/dashboard.png)
+*All screenshots use a synthetic demo farm — no real printers or jobs.*
 
-*Live board — every printer on one page: state, progress, ETA, nozzle/bed/chamber
-temperatures, AMS slots, and Wi-Fi signal. (Screenshot uses a synthetic demo fleet.)*
+![Printers — a mixed Bambu / Creality / Klipper / MKS farm on one page](docs/screenshots/dashboard.png)
 
-![Fleet summary with per-printer state analytics](docs/screenshots/summary.png)
+*Printers — every printer on one page: state, progress, ETA, temperatures, AMS
+slots and humidity, the notification that needs a decision with its action,
+state chips, which prints finish next, and the admin's control row.*
 
-*Summary view — fleet load, aggregate metrics, and per-printer state-duration analytics.*
+<p align="center"><img src="docs/screenshots/mobile.png" width="320" alt="The same board on a phone, with the bottom navigation"></p>
+
+<p align="center"><em>On a phone — one column, bottom navigation, popovers as bottom sheets.</em></p>
+
+![History → Prints — one row per print with plan vs actual, pauses and the result](docs/screenshots/history-jobs.png)
+
+*History → Prints — one row per print: start, duration against the slicer's
+plan, result, pauses, layers; chips filter by result.*
+
+![History → Statistics — fleet load, success rate and state shares per printer](docs/screenshots/history-stats.png)
+
+*History → Statistics — prints, success rate, print hours, load, the state
+shares of every printer, prints per day and the most frequent errors.*
+
+![History → Timeline — every printer's states over time](docs/screenshots/history-chrono.png)
+
+*History → Timeline — every printer's state over the chosen period.*
+
+![AMS — humidity and temperature per unit with auto-drying](docs/screenshots/ams.png)
+
+*AMS — humidity and temperature of every unit with drying periods, and the
+auto-drying line on top.*
 
 ## Features
 
 - **Unified live board** — every printer on one page: state, progress, ETA,
   nozzle/bed/chamber temperatures, current job, Wi-Fi signal, AMS status.
+  Cards follow live telemetry every 2 s; state chips filter the grid and the
+  «Финиши» line shows which prints end next.
+- **Four screens, phone-ready** — Printers · AMS · History · Admin (three for a
+  viewer), each screen and sub-tab in the address so reloads and shared links
+  keep it; on a phone a bottom navigation, popovers as bottom sheets and admin
+  tables as cards. Installable as an app (PWA) with progress in the tab title.
 - **Multi-protocol** — Bambu (MQTT), Creality and Klipper/Moonraker (WebSocket),
   and MKS WiFi, polled concurrently.
-- **History & analytics** — per-printer state timeline and state-duration
-  summaries backed by SQLite.
-- **Telegram notifications** — configurable alerts on finish / pause / error,
-  with an optional outbound proxy pool, all editable from the UI.
+- **Printer notifications with actions** — every HMS message and print error on
+  its card, the buttons Bambu Studio shows (from Bambu's own tables), each
+  checked against the live printer before it is sent; a bell for what needs a
+  decision; hide a lasting one; browser push notifications.
+- **History** — a print journal (one row per print: plan vs actual, pauses and
+  their reasons, result, CSV export for admins), a per-printer state timeline,
+  statistics (fleet load, success rate, state durations) and, for admins, an
+  audit of every action.
+- **Maintenance mode** — take a printer out of the fleet's counts, alerts,
+  bulk commands and automation without losing its live status.
+- **Temperature charts** — nozzle, bed and chamber over 6 h / 24 h / 7 d in the
+  temperature chip's popover.
+- **Telegram notifications** (optional, off by default) — alerts on finish /
+  pause / error, with an outbound proxy pool, all editable from the UI.
 - **Remote control** — a control row on every card for admins: light,
   pause/resume, stop, cool down, bed down, AMS and print speed on Bambu;
-  pause/resume/stop on Creality; pause/resume/cancel and the light (an
-  `output_pin`, found automatically) on Klipper. Nozzle, bed, fan, and speed
-  control on Bambu, plus chamber temperature on models with an actively heated
+  pause/resume/stop, the light and cool down on Creality (K1 series, Ender-5
+  Max); pause/resume/cancel and the light (an `output_pin`, found
+  automatically) on Klipper. Nozzle, bed, fan, and speed control on Bambu and
+  Creality, plus chamber temperature on models with an actively heated
   chamber (H2 series). AMS on Bambu: load and unload filament (idle printers
   only, checked against live telemetry) and AMS 2 Pro / AMS HT drying with
   Bambu Studio's temperature limits. Each control appears only where the
@@ -113,7 +152,7 @@ On first boot, with no users in the database, an `admin` account is created:
 
 ### Adding printers
 
-Log in as admin, open **Admin → Printers**, and add each machine (kind, label,
+Log in as admin, open **Admin → Park** («Админ → Парк»), and add each machine (kind, label,
 host; for Bambu also the access code and serial). Changes are stored in the
 database; click **Apply** to restart the poller onto the new fleet. Nothing about
 your fleet lives in the source tree.
@@ -130,15 +169,16 @@ All runtime configuration is optional and has safe defaults. See
 | `FORGE_ADMIN_PASSWORD` | random (logged once) | First-run admin password |
 | `COOKIE_SECURE` | `1` | Send auth cookies over HTTPS only |
 | `WEB_HOST` / `WEB_PORT` | `127.0.0.1` / `8000` | Server bind address |
-| `POLL_INTERVAL` / `MAX_WORKERS` | `5` / `10` | Polling cadence / concurrency |
+| `POLL_INTERVAL` / `MAX_WORKERS` | `5` (30 s at least) / `10` | Full poll cadence (history, journal, notifications) / concurrency |
+| `FORGE_LIVE_REFRESH_S` | `2` | Live card refresh from the printers' telemetry; `0` = off |
 | `FORGE_BAMBU_TLS_VERIFY` | empty (off) | Verify Bambu printer TLS certificates against Bambu's CAs: `*` or comma-separated models |
 
 The **Telegram bot token, chat id, notification templates, and proxy list** are
-managed in the database and edited from **Settings** in the UI — not via env or
-code. One expert setting has no UI: `printer_light_enabled`, a list of printer
-ids whose light control is not verified yet (Creality `lightSw`), set with
-`PUT /api/admin/settings` `{"printer_light_enabled": ["<printer id>"]}` after
-checking it on that printer.
+managed in the database and edited from **Admin → System** in the UI — not via env or
+code. One expert setting has no UI: `printer_light_disabled`, a list of
+Creality printer ids without a controllable lamp (no `lightSw`, e.g. K1 SE),
+whose light button is hidden, set with `PUT /api/admin/settings`
+`{"printer_light_disabled": ["<printer id>"]}`.
 
 Run behind a TLS reverse proxy (e.g. nginx) in production and keep
 `COOKIE_SECURE=1`. Serve the app with a process manager such as a systemd
@@ -161,9 +201,11 @@ python -m pytest -q
 
 Самостоятельно размещаемая панель мониторинга фермы 3D-принтеров: Bambu Lab,
 Creality, Klipper/Moonraker и MKS WiFi на одной странице — состояние, прогресс,
-температуры, история, уведомления в Telegram, управление с карточки,
-групповые команды «Вся ферма» (свет, пауза, продолжение) и автосушка AMS
-по влажности в покое (вкладка AMS; по умолчанию пробный режим). Парк
+температуры (с графиками), уведомления принтеров с кнопками как в Bambu Studio,
+журнал печатей, хронология и статистика, режим обслуживания, управление с
+карточки, групповые команды «Вся ферма» (свет, пауза, продолжение) и автосушка
+AMS по влажности в покое. Четыре экрана — Принтеры · AMS · История · Админ, на
+телефоне нижняя навигация, ставится как приложение (PWA). Парк
 принтеров, токен Telegram и прокси задаются в веб-интерфейсе (хранятся в БД), а
 не в коде. Быстрый старт и переменные окружения — см. разделы выше и
 [`.env.example`](./.env.example).

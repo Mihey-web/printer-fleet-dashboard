@@ -1,0 +1,552 @@
+{
+ "_about": "amsChart / amsChartOverlay output of app.js captured before the temperature chart extended them (spec temp-chart §3): AMS calls must stay byte-for-byte.",
+ "chart": [
+  {
+   "name": "humidity_pct_zones_dry_thr_24h",
+   "amsHours": 24,
+   "args": [
+    [
+     {
+      "t": 1760000600,
+      "v": 31.0
+     },
+     {
+      "t": 1760003470,
+      "v": 35.3
+     },
+     {
+      "t": 1760006340,
+      "v": 39.0
+     },
+     {
+      "t": 1760009210,
+      "v": 41.9
+     },
+     {
+      "t": 1760012080,
+      "v": 43.6
+     },
+     {
+      "t": 1760014950,
+      "v": 43.9
+     },
+     {
+      "t": 1760017820,
+      "v": 42.8
+     },
+     {
+      "t": 1760020690,
+      "v": 40.4
+     },
+     {
+      "t": 1760023560,
+      "v": 36.9
+     },
+     {
+      "t": 1760026430,
+      "v": 32.8
+     },
+     {
+      "t": 1760029300,
+      "v": 28.5
+     },
+     {
+      "t": 1760032170,
+      "v": 24.5
+     },
+     {
+      "t": 1760035040,
+      "v": 21.2
+     },
+     {
+      "t": 1760037910,
+      "v": 18.9
+     },
+     {
+      "t": 1760040780,
+      "v": 18.0
+     },
+     {
+      "t": 1760043650,
+      "v": 18.5
+     },
+     {
+      "t": 1760046520,
+      "v": 20.4
+     },
+     {
+      "t": 1760049390,
+      "v": 23.5
+     },
+     {
+      "t": 1760052260,
+      "v": 27.4
+     },
+     {
+      "t": 1760055130,
+      "v": 31.7
+     },
+     {
+      "t": 1760058000,
+      "v": 35.9
+     },
+     {
+      "t": 1760060870,
+      "v": 39.5
+     },
+     {
+      "t": 1760063740,
+      "v": 42.3
+     },
+     {
+      "t": 1760066610,
+      "v": 43.8
+     },
+     {
+      "t": 1760069480,
+      "v": 43.9
+     },
+     {
+      "t": 1760072350,
+      "v": 42.5
+     },
+     {
+      "t": 1760075220,
+      "v": 39.9
+     },
+     {
+      "t": 1760078090,
+      "v": 36.4
+     },
+     {
+      "t": 1760080960,
+      "v": 32.2
+     },
+     {
+      "t": 1760083830,
+      "v": 27.9
+     }
+    ],
+    1760000000,
+    1760086400,
+    10,
+    50,
+    "var(--warn)",
+    {
+     "zones": true,
+     "dry": [
+      [
+       1759999500,
+       1760003600
+      ],
+      [
+       1760040000,
+       1760052000
+      ]
+     ],
+     "thr": [
+      [
+       25,
+       "старт",
+       "var(--warn)"
+      ],
+      [
+       20,
+       "цель",
+       "var(--ok)"
+      ]
+     ]
+    }
+   ],
+   "out": "<svg class=\"ams-chart\" viewBox=\"0 0 378 88\" preserveAspectRatio=\"none\"><defs><linearGradient id=\"amsg523\" x1=\"0\" y1=\"0\" x2=\"0\" y2=\"1\"><stop offset=\"0\" stop-color=\"var(--warn)\" stop-opacity=\"0.28\"/><stop offset=\"1\" stop-color=\"var(--warn)\" stop-opacity=\"0\"/></linearGradient></defs><rect x=\"26\" y=\"48.0\" width=\"344\" height=\"24.0\" fill=\"var(--ok)\" opacity=\"0.05\"/><rect x=\"26\" y=\"24.0\" width=\"344\" height=\"24.0\" fill=\"var(--warn)\" opacity=\"0.05\"/><rect x=\"26\" y=\"8.0\" width=\"344\" height=\"16.0\" fill=\"var(--danger)\" opacity=\"0.05\"/><line class=\"gridline\" x1=\"26\" y1=\"72.0\" x2=\"370\" y2=\"72.0\"/><line class=\"gridline\" x1=\"26\" y1=\"40.0\" x2=\"370\" y2=\"40.0\"/><line class=\"gridline\" x1=\"26\" y1=\"8.0\" x2=\"370\" y2=\"8.0\"/><rect x=\"26.0\" y=\"8\" width=\"14.3\" height=\"64\" fill=\"var(--warn)\" opacity=\"0.11\"/><rect x=\"26.0\" y=\"8\" width=\"14.3\" height=\"2\" fill=\"var(--warn)\" opacity=\"0.75\"/><rect x=\"185.3\" y=\"8\" width=\"47.8\" height=\"64\" fill=\"var(--warn)\" opacity=\"0.11\"/><rect x=\"185.3\" y=\"8\" width=\"47.8\" height=\"2\" fill=\"var(--warn)\" opacity=\"0.75\"/><line class=\"thr\" x1=\"26\" y1=\"48.0\" x2=\"370\" y2=\"48.0\" stroke=\"var(--warn)\" opacity=\"0.85\"/><line class=\"thr\" x1=\"26\" y1=\"56.0\" x2=\"370\" y2=\"56.0\" stroke=\"var(--ok)\" opacity=\"0.85\"/><path d=\"M28.4 38.4 L39.8 31.5 L51.2 25.6 L62.7 21.0 L74.1 18.2 L85.5 17.8 L97.0 19.5 L108.4 23.4 L119.8 29.0 L131.2 35.5 L142.7 42.4 L154.1 48.8 L165.5 54.1 L176.9 57.8 L188.4 59.2 L199.8 58.4 L211.2 55.4 L222.6 50.4 L234.1 44.2 L245.5 37.3 L256.9 30.6 L268.4 24.8 L279.8 20.3 L291.2 17.9 L302.6 17.8 L314.1 20.0 L325.5 24.2 L336.9 29.8 L348.3 36.5 L359.8 43.4 L359.8 72 L28.4 72 Z\" fill=\"url(#amsg523)\"/><path d=\"M28.4 38.4 L39.8 31.5 L51.2 25.6 L62.7 21.0 L74.1 18.2 L85.5 17.8 L97.0 19.5 L108.4 23.4 L119.8 29.0 L131.2 35.5 L142.7 42.4 L154.1 48.8 L165.5 54.1 L176.9 57.8 L188.4 59.2 L199.8 58.4 L211.2 55.4 L222.6 50.4 L234.1 44.2 L245.5 37.3 L256.9 30.6 L268.4 24.8 L279.8 20.3 L291.2 17.9 L302.6 17.8 L314.1 20.0 L325.5 24.2 L336.9 29.8 L348.3 36.5 L359.8 43.4 \" fill=\"none\" stroke=\"var(--warn)\" stroke-width=\"1.6\" stroke-linejoin=\"round\"/><text class=\"thr-l\" x=\"368\" y=\"45.5\" text-anchor=\"end\" fill=\"var(--warn)\">старт 25%</text><text class=\"thr-l\" x=\"368\" y=\"64.5\" text-anchor=\"end\" fill=\"var(--ok)\">цель 20%</text><text class=\"axis\" x=\"22\" y=\"75.0\" text-anchor=\"end\">10</text><text class=\"axis\" x=\"22\" y=\"43.0\" text-anchor=\"end\">30</text><text class=\"axis\" x=\"22\" y=\"11.0\" text-anchor=\"end\">50</text><text class=\"axis\" x=\"26\" y=\"84\" text-anchor=\"start\">-24ч</text><text class=\"axis\" x=\"370\" y=\"84\" text-anchor=\"end\">сейчас</text></svg>"
+  },
+  {
+   "name": "humidity_index_dry_6h",
+   "amsHours": 6,
+   "args": [
+    [
+     {
+      "t": 1760000090,
+      "v": 1
+     },
+     {
+      "t": 1760001880,
+      "v": 2
+     },
+     {
+      "t": 1760003670,
+      "v": 2
+     },
+     {
+      "t": 1760005460,
+      "v": 3
+     },
+     {
+      "t": 1760007250,
+      "v": 4
+     },
+     {
+      "t": 1760009040,
+      "v": 4
+     },
+     {
+      "t": 1760010830,
+      "v": 3
+     },
+     {
+      "t": 1760012620,
+      "v": 2
+     },
+     {
+      "t": 1760014410,
+      "v": 1
+     },
+     {
+      "t": 1760016200,
+      "v": 1
+     },
+     {
+      "t": 1760017990,
+      "v": 2
+     },
+     {
+      "t": 1760019780,
+      "v": 3
+     }
+    ],
+    1760000000,
+    1760021600,
+    0,
+    5,
+    "var(--ok)",
+    {
+     "dry": [
+      [
+       1760005000,
+       1760005050
+      ]
+     ]
+    }
+   ],
+   "out": "<svg class=\"ams-chart\" viewBox=\"0 0 378 88\" preserveAspectRatio=\"none\"><defs><linearGradient id=\"amsg164\" x1=\"0\" y1=\"0\" x2=\"0\" y2=\"1\"><stop offset=\"0\" stop-color=\"var(--ok)\" stop-opacity=\"0.28\"/><stop offset=\"1\" stop-color=\"var(--ok)\" stop-opacity=\"0\"/></linearGradient></defs><line class=\"gridline\" x1=\"26\" y1=\"72.0\" x2=\"370\" y2=\"72.0\"/><line class=\"gridline\" x1=\"26\" y1=\"40.0\" x2=\"370\" y2=\"40.0\"/><line class=\"gridline\" x1=\"26\" y1=\"8.0\" x2=\"370\" y2=\"8.0\"/><rect x=\"105.6\" y=\"8\" width=\"1.5\" height=\"64\" fill=\"var(--warn)\" opacity=\"0.11\"/><rect x=\"105.6\" y=\"8\" width=\"1.5\" height=\"2\" fill=\"var(--warn)\" opacity=\"0.75\"/><path d=\"M27.4 59.2 L55.9 46.4 L84.4 46.4 L113.0 33.6 L141.5 20.8 L170.0 20.8 L198.5 33.6 L227.0 46.4 L255.5 59.2 L284.0 59.2 L312.5 46.4 L341.0 33.6 L341.0 72 L27.4 72 Z\" fill=\"url(#amsg164)\"/><path d=\"M27.4 59.2 L55.9 46.4 L84.4 46.4 L113.0 33.6 L141.5 20.8 L170.0 20.8 L198.5 33.6 L227.0 46.4 L255.5 59.2 L284.0 59.2 L312.5 46.4 L341.0 33.6 \" fill=\"none\" stroke=\"var(--ok)\" stroke-width=\"1.6\" stroke-linejoin=\"round\"/><text class=\"axis\" x=\"22\" y=\"75.0\" text-anchor=\"end\">0</text><text class=\"axis\" x=\"22\" y=\"43.0\" text-anchor=\"end\">3</text><text class=\"axis\" x=\"22\" y=\"11.0\" text-anchor=\"end\">5</text><text class=\"axis\" x=\"26\" y=\"84\" text-anchor=\"start\">-6ч</text><text class=\"axis\" x=\"370\" y=\"84\" text-anchor=\"end\">сейчас</text></svg>"
+  },
+  {
+   "name": "temp_no_opts_7d",
+   "amsHours": 168,
+   "args": [
+    [
+     {
+      "t": 1760001000,
+      "v": 33.37
+     },
+     {
+      "t": 1760016000,
+      "v": 33.73
+     },
+     {
+      "t": 1760031000,
+      "v": 33.73
+     },
+     {
+      "t": 1760046000,
+      "v": 31.73
+     },
+     {
+      "t": 1760061000,
+      "v": 31.08
+     },
+     {
+      "t": 1760076000,
+      "v": 30.16
+     },
+     {
+      "t": 1760091000,
+      "v": 27.4
+     },
+     {
+      "t": 1760106000,
+      "v": 26.14
+     },
+     {
+      "t": 1760121000,
+      "v": 24.83
+     },
+     {
+      "t": 1760136000,
+      "v": 21.87
+     },
+     {
+      "t": 1760151000,
+      "v": 20.65
+     },
+     {
+      "t": 1760166000,
+      "v": 19.59
+     },
+     {
+      "t": 1760181000,
+      "v": 17.09
+     },
+     {
+      "t": 1760196000,
+      "v": 16.52
+     },
+     {
+      "t": 1760211000,
+      "v": 16.27
+     },
+     {
+      "t": 1760226000,
+      "v": 14.72
+     },
+     {
+      "t": 1760241000,
+      "v": 15.2
+     },
+     {
+      "t": 1760256000,
+      "v": 16.04
+     },
+     {
+      "t": 1760271000,
+      "v": 15.6
+     },
+     {
+      "t": 1760286000,
+      "v": 17.14
+     },
+     {
+      "t": 1760301000,
+      "v": 18.98
+     },
+     {
+      "t": 1760316000,
+      "v": 19.41
+     },
+     {
+      "t": 1760331000,
+      "v": 21.67
+     },
+     {
+      "t": 1760346000,
+      "v": 24.05
+     },
+     {
+      "t": 1760361000,
+      "v": 24.82
+     },
+     {
+      "t": 1760376000,
+      "v": 27.21
+     },
+     {
+      "t": 1760391000,
+      "v": 29.49
+     },
+     {
+      "t": 1760406000,
+      "v": 29.95
+     },
+     {
+      "t": 1760421000,
+      "v": 31.82
+     },
+     {
+      "t": 1760436000,
+      "v": 33.4
+     },
+     {
+      "t": 1760451000,
+      "v": 33.0
+     },
+     {
+      "t": 1760466000,
+      "v": 33.89
+     },
+     {
+      "t": 1760481000,
+      "v": 34.41
+     },
+     {
+      "t": 1760496000,
+      "v": 32.9
+     },
+     {
+      "t": 1760511000,
+      "v": 32.7
+     },
+     {
+      "t": 1760526000,
+      "v": 32.16
+     },
+     {
+      "t": 1760541000,
+      "v": 29.7
+     },
+     {
+      "t": 1760556000,
+      "v": 28.66
+     },
+     {
+      "t": 1760571000,
+      "v": 27.45
+     },
+     {
+      "t": 1760586000,
+      "v": 24.51
+     }
+    ],
+    1760000000,
+    1760604800,
+    20,
+    60,
+    "var(--info)"
+   ],
+   "out": "<svg class=\"ams-chart\" viewBox=\"0 0 378 88\" preserveAspectRatio=\"none\"><defs><linearGradient id=\"amsg603\" x1=\"0\" y1=\"0\" x2=\"0\" y2=\"1\"><stop offset=\"0\" stop-color=\"var(--info)\" stop-opacity=\"0.28\"/><stop offset=\"1\" stop-color=\"var(--info)\" stop-opacity=\"0\"/></linearGradient></defs><line class=\"gridline\" x1=\"26\" y1=\"72.0\" x2=\"370\" y2=\"72.0\"/><line class=\"gridline\" x1=\"26\" y1=\"40.0\" x2=\"370\" y2=\"40.0\"/><line class=\"gridline\" x1=\"26\" y1=\"8.0\" x2=\"370\" y2=\"8.0\"/><path d=\"M26.6 50.6 L35.1 50.0 L43.6 50.0 L52.2 53.2 L60.7 54.3 L69.2 55.7 L77.8 60.2 L86.3 62.2 L94.8 64.3 L103.4 69.0 L111.9 71.0 L120.4 72.7 L128.9 76.7 L137.5 77.6 L146.0 78.0 L154.5 80.4 L163.1 79.7 L171.6 78.3 L180.1 79.0 L188.7 76.6 L197.2 73.6 L205.7 72.9 L214.3 69.3 L222.8 65.5 L231.3 64.3 L239.9 60.5 L248.4 56.8 L256.9 56.1 L265.5 53.1 L274.0 50.6 L282.5 51.2 L291.1 49.8 L299.6 48.9 L308.1 51.4 L316.6 51.7 L325.2 52.5 L333.7 56.5 L342.2 58.1 L350.8 60.1 L359.3 64.8 L359.3 72 L26.6 72 Z\" fill=\"url(#amsg603)\"/><path d=\"M26.6 50.6 L35.1 50.0 L43.6 50.0 L52.2 53.2 L60.7 54.3 L69.2 55.7 L77.8 60.2 L86.3 62.2 L94.8 64.3 L103.4 69.0 L111.9 71.0 L120.4 72.7 L128.9 76.7 L137.5 77.6 L146.0 78.0 L154.5 80.4 L163.1 79.7 L171.6 78.3 L180.1 79.0 L188.7 76.6 L197.2 73.6 L205.7 72.9 L214.3 69.3 L222.8 65.5 L231.3 64.3 L239.9 60.5 L248.4 56.8 L256.9 56.1 L265.5 53.1 L274.0 50.6 L282.5 51.2 L291.1 49.8 L299.6 48.9 L308.1 51.4 L316.6 51.7 L325.2 52.5 L333.7 56.5 L342.2 58.1 L350.8 60.1 L359.3 64.8 \" fill=\"none\" stroke=\"var(--info)\" stroke-width=\"1.6\" stroke-linejoin=\"round\"/><text class=\"axis\" x=\"22\" y=\"75.0\" text-anchor=\"end\">20</text><text class=\"axis\" x=\"22\" y=\"43.0\" text-anchor=\"end\">40</text><text class=\"axis\" x=\"22\" y=\"11.0\" text-anchor=\"end\">60</text><text class=\"axis\" x=\"26\" y=\"84\" text-anchor=\"start\">-168ч</text><text class=\"axis\" x=\"370\" y=\"84\" text-anchor=\"end\">сейчас</text></svg>"
+  },
+  {
+   "name": "temp_single_point_dry_empty",
+   "amsHours": 24,
+   "args": [
+    [
+     {
+      "t": 1760043210,
+      "v": 31.25
+     }
+    ],
+    1760000000,
+    1760086400,
+    20,
+    60,
+    "var(--info)",
+    {
+     "dry": []
+    }
+   ],
+   "out": "<svg class=\"ams-chart\" viewBox=\"0 0 378 88\" preserveAspectRatio=\"none\"><defs><linearGradient id=\"amsg564\" x1=\"0\" y1=\"0\" x2=\"0\" y2=\"1\"><stop offset=\"0\" stop-color=\"var(--info)\" stop-opacity=\"0.28\"/><stop offset=\"1\" stop-color=\"var(--info)\" stop-opacity=\"0\"/></linearGradient></defs><line class=\"gridline\" x1=\"26\" y1=\"72.0\" x2=\"370\" y2=\"72.0\"/><line class=\"gridline\" x1=\"26\" y1=\"40.0\" x2=\"370\" y2=\"40.0\"/><line class=\"gridline\" x1=\"26\" y1=\"8.0\" x2=\"370\" y2=\"8.0\"/><path d=\"M198.0 54.0 L198.0 72 L198.0 72 Z\" fill=\"url(#amsg564)\"/><path d=\"M198.0 54.0 \" fill=\"none\" stroke=\"var(--info)\" stroke-width=\"1.6\" stroke-linejoin=\"round\"/><text class=\"axis\" x=\"22\" y=\"75.0\" text-anchor=\"end\">20</text><text class=\"axis\" x=\"22\" y=\"43.0\" text-anchor=\"end\">40</text><text class=\"axis\" x=\"22\" y=\"11.0\" text-anchor=\"end\">60</text><text class=\"axis\" x=\"26\" y=\"84\" text-anchor=\"start\">-24ч</text><text class=\"axis\" x=\"370\" y=\"84\" text-anchor=\"end\">сейчас</text></svg>"
+  },
+  {
+   "name": "no_points",
+   "amsHours": 24,
+   "args": [
+    [],
+    1760000000,
+    1760086400,
+    20,
+    60,
+    "var(--info)",
+    {
+     "dry": []
+    }
+   ],
+   "out": "<div class=\"ams-nodata\">нет данных за период</div>"
+  }
+ ],
+ "overlay": [
+  {
+   "name": "dry_and_thresholds_clipped",
+   "args": [
+    {
+     "W": 378,
+     "H": 88,
+     "PL": 26,
+     "PR": 8,
+     "PT": 8,
+     "PB": 16
+    },
+    1760000000,
+    1760086400,
+    10,
+    50,
+    {
+     "dry": [
+      [
+       1759999900,
+       1760003600
+      ],
+      [
+       1760080000,
+       1760090000
+      ],
+      [
+       1760020000,
+       1760020010
+      ]
+     ],
+     "thr": [
+      [
+       25,
+       "старт",
+       "var(--warn)"
+      ],
+      [
+       20,
+       "a<b",
+       "var(--ok)"
+      ],
+      [
+       60,
+       "x",
+       "var(--ok)"
+      ]
+     ]
+    }
+   ],
+   "out": {
+    "under": "<rect x=\"26.0\" y=\"8\" width=\"14.3\" height=\"64\" fill=\"var(--warn)\" opacity=\"0.11\"/><rect x=\"26.0\" y=\"8\" width=\"14.3\" height=\"2\" fill=\"var(--warn)\" opacity=\"0.75\"/><rect x=\"344.5\" y=\"8\" width=\"25.5\" height=\"64\" fill=\"var(--warn)\" opacity=\"0.11\"/><rect x=\"344.5\" y=\"8\" width=\"25.5\" height=\"2\" fill=\"var(--warn)\" opacity=\"0.75\"/><rect x=\"105.6\" y=\"8\" width=\"1.5\" height=\"64\" fill=\"var(--warn)\" opacity=\"0.11\"/><rect x=\"105.6\" y=\"8\" width=\"1.5\" height=\"2\" fill=\"var(--warn)\" opacity=\"0.75\"/><line class=\"thr\" x1=\"26\" y1=\"48.0\" x2=\"370\" y2=\"48.0\" stroke=\"var(--warn)\" opacity=\"0.85\"/><line class=\"thr\" x1=\"26\" y1=\"56.0\" x2=\"370\" y2=\"56.0\" stroke=\"var(--ok)\" opacity=\"0.85\"/>",
+    "labels": "<text class=\"thr-l\" x=\"368\" y=\"45.5\" text-anchor=\"end\" fill=\"var(--warn)\">старт 25%</text><text class=\"thr-l\" x=\"368\" y=\"64.5\" text-anchor=\"end\" fill=\"var(--ok)\">a&lt;b 20%</text>"
+   }
+  },
+  {
+   "name": "dry_only_small_geo",
+   "args": [
+    {
+     "W": 300,
+     "H": 112,
+     "PL": 28,
+     "PR": 8,
+     "PT": 8,
+     "PB": 16
+    },
+    1760000000,
+    1760021600,
+    0,
+    5,
+    {
+     "dry": [
+      [
+       1760007200,
+       1760009000
+      ]
+     ]
+    }
+   ],
+   "out": {
+    "under": "<rect x=\"116.0\" y=\"8\" width=\"22.0\" height=\"88\" fill=\"var(--warn)\" opacity=\"0.11\"/><rect x=\"116.0\" y=\"8\" width=\"22.0\" height=\"2\" fill=\"var(--warn)\" opacity=\"0.75\"/>",
+    "labels": ""
+   }
+  },
+  {
+   "name": "no_opts",
+   "args": [
+    {
+     "W": 378,
+     "H": 88,
+     "PL": 26,
+     "PR": 8,
+     "PT": 8,
+     "PB": 16
+    },
+    0,
+    100,
+    10,
+    50,
+    {}
+   ],
+   "out": {
+    "under": "",
+    "labels": ""
+   }
+  }
+ ]
+}

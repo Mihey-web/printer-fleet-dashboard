@@ -16,8 +16,18 @@ REPLY_TIMEOUT = 8.0
 _PENDING_MAX_AGE = 60.0
 # Pin names that are safe to interpolate into G-code (SET_PIN PIN=...).
 _PIN_NAME = re.compile(r"^[A-Za-z0-9_]+$")
+# fw_restart / klippy_restart answer a Klipper notification (notification_actions);
+# printer_commands.send() never reaches them (not in its KLIPPER_ACTIONS).
 _RPC_METHODS = {"pause": "printer.print.pause", "resume": "printer.print.resume",
-                "stop": "printer.print.cancel"}
+                "stop": "printer.print.cancel", "fw_restart": "printer.firmware_restart",
+                "klippy_restart": "printer.restart"}
+# Host watchdog: with no status message for this long, ask Moonraker how klippy is
+# (server.info). Klippy in shutdown stops the status updates; without the watchdog
+# the 30 s staleness guard turned the printer OFFLINE with no reason shown.
+HOST_CHECK_S = 10.0
+# get_data(): telemetry (or a host answer) older than this is stale.
+STALE_S = 30.0
+MSG_KLIPPY_DISCONNECTED = "Klippy отключился от Moonraker"
 
 
 # Words of a pin name that make it a light, by preference (pick_light_pin).
@@ -116,6 +126,10 @@ class KlipperClient:
         # in flight (0 = none), so a second one is not sent meanwhile.
         self._discover_needed = False
         self._discover_ts = 0.0
+        # Last answer from the Moonraker host about klippy (server.info reply or a
+        # notify_klippy_* message): keeps a shut-down printer online in get_data().
+        self.last_host_ts = 0.0
+        self._host_thread = None
 
     def _next_id(self):
         with self._lock:
@@ -174,6 +188,88 @@ class KlipperClient:
         # Подписываемся на статус принтера
         self.subscribe_to_status()
         self._discover()
+        self._start_host_watch()
+
+    # --- klippy host state (notify_klippy_*, the host watchdog) ---------------
+
+    def _start_host_watch(self):
+        """One watchdog thread per client, for its whole life (a reconnect
+        reuses it); it stops with disconnect()."""
+        if self._host_thread is not None and self._host_thread.is_alive():
+            return
+        self._host_thread = threading.Thread(target=self._host_watch_loop, name="klipper-host-%s" % self.label,
+                                             daemon=True)
+        self._host_thread.start()
+
+    def _host_watch_loop(self):
+        while not self._stop_reconnect.wait(HOST_CHECK_S):
+            try:
+                self._check_host()
+            except Exception:
+                logger.warning("[%s] host check failed", self.label, exc_info=True)
+
+    def _check_host(self, now=None):
+        """Ask Moonraker for klippy's state when no status came for HOST_CHECK_S.
+        True when the request went out."""
+        now = time.time() if now is None else now
+        if not self.connected or self.ws is None or now - self.last_message_ts <= HOST_CHECK_S:
+            return False
+        return self._rpc_async("server.info", None, self._on_server_info)
+
+    def _set_host(self, state, message=None, keep_message=False):
+        """Record klippy's state as the host reports it (under the lock)."""
+        with self._lock:
+            self.last_host_ts = time.time()
+            if state is not None:
+                self.data['host_state'] = str(state)
+            if not keep_message:
+                self.data['host_message'] = message
+
+    def _on_server_info(self, result, error):
+        if error is not None or not isinstance(result, dict):
+            return
+        state = str(result.get('klippy_state') or '').lower() or None
+        if not result.get('klippy_connected'):
+            self._set_host(state or 'disconnected', MSG_KLIPPY_DISCONNECTED)
+            return
+        with self._lock:
+            was_ready = str(self.data.get('host_state') or '').lower() == 'ready'
+        # Not ready: the message comes from printer.info; ready: no message.
+        self._set_host(state, None, keep_message=state != 'ready')
+        if state == 'ready':
+            if not was_ready:
+                self._klippy_ready()
+        else:
+            self._rpc_async("printer.info", None, self._on_printer_info)
+
+    def _on_printer_info(self, result, error):
+        if error is not None or not isinstance(result, dict):
+            return
+        message = result.get('state_message')
+        state = str(result.get('state') or '').lower()
+        if state and state != 'ready':
+            self._set_host(state, str(message) if message else None)
+
+    def _klippy_ready(self):
+        """klippy (re)started: subscribe again (Moonraker replaces the connection's
+        subscription, so this is safe) and look the light pin up again."""
+        self.subscribe_to_status()
+        self._discover()
+
+    def _on_klippy_notice(self, method):
+        """notify_klippy_shutdown / _disconnected / _ready. True when handled."""
+        if method == 'notify_klippy_shutdown':
+            self._set_host('shutdown', keep_message=True)
+            # the reason (state_message) is in printer.info
+            self._rpc_async("printer.info", None, self._on_printer_info)
+        elif method == 'notify_klippy_disconnected':
+            self._set_host('disconnected', MSG_KLIPPY_DISCONNECTED)
+        elif method == 'notify_klippy_ready':
+            self._set_host('ready', None)
+            self._klippy_ready()
+        else:
+            return False
+        return True
 
     def subscribe_to_status(self):
         # Subscribe to printer status updates via Moonraker WebSocket
@@ -225,6 +321,8 @@ class KlipperClient:
         try:
             data = json.loads(message)
             if self._route_reply(data):
+                return
+            if isinstance(data, dict) and self._on_klippy_notice(data.get('method')):
                 return
 
             got_status = False
@@ -381,8 +479,9 @@ class KlipperClient:
         self.light_scale = scale if scale > 0 else 1.0
 
     def run_action(self, action, timeout=REPLY_TIMEOUT):
-        """pause / resume / stop / light_on / light_off with Moonraker's reply
-        as the verdict: {"success", "replied", "detail"}."""
+        """pause / resume / stop / light_on / light_off / fw_restart /
+        klippy_restart with Moonraker's reply as the verdict:
+        {"success", "replied", "detail"}."""
         if action in _RPC_METHODS:
             return self._rpc(_RPC_METHODS[action], timeout=timeout)
         if action in ("light_on", "light_off"):
@@ -413,8 +512,10 @@ class KlipperClient:
                         self.data['print_time'] = int(ps['print_duration'])
                     if 'filename' in ps and ps['filename']:
                         self.data['filename'] = ps['filename']
-                    if 'message' in ps and ps['message']:
-                        self.data['message'] = ps['message']
+                    # The print's error text: "" clears it. Not data['message']: that
+                    # was a job-name fallback (safe_job_name), so an error became the name.
+                    if 'message' in ps:
+                        self.data['print_message'] = str(ps['message'] or '')
                     if 'total_duration' in ps:
                         self.data['total_duration'] = float(ps['total_duration'])
                     if 'filament_used' in ps:
@@ -432,8 +533,8 @@ class KlipperClient:
                     ds = status['display_status']
                     if 'progress' in ds and ds['progress'] is not None:
                         self.data['progress'] = int(float(ds['progress']) * 100)
-                    if 'message' in ds and ds['message']:
-                        self.data['message'] = ds['message']
+                    if 'message' in ds:                       # M117 text
+                        self.data['display_message'] = str(ds['message']) if ds['message'] else None
 
                 if 'virtual_sdcard' in status:
                     vs = status['virtual_sdcard']
@@ -491,20 +592,24 @@ class KlipperClient:
 
                 if 'webhooks' in status:
                     wh = status['webhooks']
-                    wh_state = wh.get('state')
                     debug_wh = self.data.setdefault('debug', {})
-                    # klippy (re)started or its MCU came back: look the light pin up again
-                    if str(wh_state).lower() == 'ready' and str(debug_wh.get('webhooks_state')).lower() != 'ready':
-                        self._discover_needed = True
-                    debug_wh['webhooks_state'] = wh_state
-                    # webhooks.state_message is a host-health string, not a print stage.
-                    # When the host is operational its state is "ready" and the message is
-                    # the constant "Printer is ready" (true even mid-print) — surfacing that
-                    # as a stage badge leaves a permanent banner on the card. Only expose the
-                    # message for abnormal states (startup/shutdown/error), where it carries
-                    # an actual diagnostic.
-                    if wh.get('state_message') and str(wh_state).lower() != 'ready':
-                        self.data['stage'] = str(wh['state_message'])
+                    # A status diff carries only what changed: state_message may come alone.
+                    if 'state' in wh:
+                        wh_state = wh.get('state')
+                        # klippy (re)started or its MCU came back: look the light pin up again
+                        if str(wh_state).lower() == 'ready' and str(debug_wh.get('webhooks_state')).lower() != 'ready':
+                            self._discover_needed = True
+                        debug_wh['webhooks_state'] = wh_state
+                        self.data['host_state'] = wh_state
+                    host_ready = str(self.data.get('host_state')).lower() == 'ready'
+                    # webhooks.state_message is a host-health string, not a print stage
+                    # (and no longer the stage, which a return to ready never cleared):
+                    # "Printer is ready" while ready, the diagnostic otherwise
+                    # (startup / shutdown / error) — the notification's text.
+                    if host_ready:
+                        self.data['host_message'] = None
+                    elif 'state_message' in wh:
+                        self.data['host_message'] = str(wh['state_message']) if wh['state_message'] else None
 
                 light_pin = self.light_pin
                 light = status.get('output_pin ' + light_pin) if light_pin else None
@@ -636,13 +741,22 @@ class KlipperClient:
         Returns {} when the socket has gone stale (no parsed message in >30s),
         so a hung connection surfaces as offline instead of replaying the last
         telemetry forever. Mirrors the Creality client's guard.
+
+        Except while the host keeps answering that klippy is not ready
+        (shutdown / error / startup / disconnected): klippy sends no status
+        then, and the printer stays online with the host's state and message
+        (the normalizer turns it into ERROR with the reason). A ready host
+        without status messages is the old hung-socket case: stale.
         """
         with self._lock:
+            now = time.time()
+            host_down = (bool(self.last_host_ts) and now - self.last_host_ts <= STALE_S
+                         and str(self.data.get('host_state') or 'ready').lower() != 'ready')
             # No real telemetry parsed yet — don't serve the pre-seeded defaults
             # as if the printer were reporting (Moonraker up, klippy silent).
-            if not self._got_telemetry:
+            if not self._got_telemetry and not host_down:
                 return {}
-            if self.last_message_ts and time.time() - self.last_message_ts > 30:
+            if self.last_message_ts and now - self.last_message_ts > STALE_S and not host_down:
                 self.connected = False
                 logger.warning("[%s] Нет данных > 30с, принудительный дисконнект", self.label)
                 return {}
