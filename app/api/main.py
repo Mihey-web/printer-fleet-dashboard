@@ -53,6 +53,9 @@ PUBLIC_PREFIXES = ('/api/auth/',)
 # would pass as public and StaticFiles would then resolve it to app/web/app.js
 # — an auth bypass. Public files get an exact route instead (PWA_FILES, LOGIN_FILES).
 PUBLIC_EXACT = ('/api/health', '/favicon.ico') + tuple(PWA_FILES) + tuple(LOGIN_FILES)
+# The languages (app/api/i18n.py): /i18n.js and the translated manifests, exact paths too.
+from app.api import i18n as i18n_api  # noqa: E402
+PUBLIC_EXACT += i18n_api.PUBLIC_PATHS
 
 
 def _resolve_app_version():
@@ -794,6 +797,8 @@ def create_app(store: StateStore) -> FastAPI:
     for public_path, (pwa_file, media_type, cache_control) in {**PWA_FILES, **LOGIN_FILES}.items():
         app.add_api_route(public_path, _pwa_file_endpoint(pwa_file, media_type, cache_control),
                           methods=['GET'], include_in_schema=False)
+
+    i18n_api.register(app, store)
 
     @app.get('/')
     def index(request: Request):

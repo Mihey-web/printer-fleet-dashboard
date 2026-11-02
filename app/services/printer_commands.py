@@ -801,6 +801,11 @@ def load_persisted_capabilities() -> None:
     except Exception:
         logger.debug("load capability failed", exc_info=True)
         return
+    if not isinstance(saved, dict):
+        # Called before the web port is bound: a crash here is a restart loop
+        # with no UI to fix the setting. A malformed value = nothing persisted.
+        logger.warning("printer_capability setting is not an object, ignored")
+        return
     with _cap_lock:
         for pid, val in saved.items():
             if pid not in _capability and isinstance(val, bool):
@@ -1543,9 +1548,20 @@ def _state_check(printer_id: str, prn: Dict[str, Any], action: str,
             return MSG_NO_TELEMETRY
         if view.status.filament_change is not None or view.raw.get("busy"):
             return MSG_CHANGE_RUNNING
+        # a load / unload sent moments ago that the printer does not report yet
+        if _inflight_blocks(printer_id, view.raw):
+            return MSG_INFLIGHT
         return state_refusal(action, view.status.state.value, view.gcode_state)
     if action in PRINT_CONTROL:
-        st = live_status(printer_id, prn)
+        if prn.get("kind") == "bambu" and action == "resume":
+            # A laser / cutter job resumes only on the printer's screen — for a
+            # plain «Продолжить» too, not only the notification's (print_error_check).
+            view = _live_view(printer_id, prn)
+            if view is not None and laser_job(view.raw.get("job_attr")):
+                return MSG_LASER_JOB
+            st = view.status if view is not None else None
+        else:
+            st = live_status(printer_id, prn)
         return state_refusal(action, st.state.value) if st is not None else None
     return None
 
@@ -1607,7 +1623,10 @@ def send(printer_id: str, action: str, params: Optional[Dict[str, Any]] = None) 
             frames = _build_creality(action, params, live[0].device_type or prn.get("model"), live[1])
         except ValueError as e:
             return _refused(str(e))
-    refusal = _state_check(printer_id, prn, action, live)
+    # A heater set to 0 is that heater's cooldown: the same state rules (no
+    # cooling mid-print), or «Нагрев 0» would get round the cooldown refusal.
+    check = "cooldown" if action == "preheat" and 0 in (params.get("nozzle"), params.get("bed")) else action
+    refusal = _state_check(printer_id, prn, check, live)
     if refusal:
         return _refused(refusal)
     mark = None

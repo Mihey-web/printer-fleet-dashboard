@@ -2318,3 +2318,67 @@ def test_main_starts_the_live_refresh():
     import inspect
     import main
     assert "printer_commands.start_live_refresh()" in inspect.getsource(main.main)
+
+
+# --- REVIEW_2026-11 -----------------------------------------------------------------------------
+
+# f6: a laser / cutter job is resumed only on the printer's screen (Bambu Studio's
+# check_resume_condition). The notification's «Продолжить» checked it, a plain
+# /command resume (and «Продолжить всех», which goes through send) did not.
+@pytest.mark.parametrize("job_attr", [0x22, 0x32])
+def test_review_f6_plain_resume_of_a_laser_job_is_refused(live, job_attr):
+    store = live(_report(gcode="PAUSE", job_id="777", job_attr=job_attr))
+    assert printer_commands.send("p1", "resume") == REFUSED(printer_commands.MSG_LASER_JOB)
+    assert store.published == []
+
+
+def test_review_f6_plain_resume_of_a_print_job_still_goes_out(live):
+    store = live(_report(gcode="PAUSE", job_id="777", job_attr=0x12))
+    assert printer_commands.send("p1", "resume") == CONFIRMED
+    assert [p["print"]["command"] for p in store.published] == ["resume"]
+
+
+# f7: «Нагрев» with 0 is a cooldown of that heater: the server refuses a cooldown
+# mid-print (README: "no cooling … mid-print"), so it must refuse this too.
+@pytest.mark.parametrize("params", [{"nozzle": 0}, {"bed": 0}, {"nozzle": 0, "bed": 0}, {"nozzle": 220, "bed": 0}])
+def test_review_f7_bambu_preheat_to_zero_mid_print_is_refused(live, params):
+    store = live(_report(gcode="RUNNING"))
+    assert printer_commands.send("p1", "preheat", params) == REFUSED(STATE_MSG["cooldown"])
+    assert store.published == []
+
+
+def test_review_f7_bambu_preheat_mid_print_and_zero_when_standing_still_go_out(live):
+    store = live(_report(gcode="RUNNING"))
+    assert printer_commands.send("p1", "preheat", {"nozzle": 230}) == CONFIRMED
+    store = live(_report(gcode="IDLE"))
+    assert printer_commands.send("p1", "preheat", {"nozzle": 0, "bed": 0}) == CONFIRMED
+    assert store.published[0]["print"]["param"] == "M104 S0\nM140 S0\n"
+
+
+@pytest.mark.parametrize("params", [{"nozzle": 0}, {"bed": 0}])
+def test_review_f7_creality_preheat_to_zero_mid_print_is_refused(creality, params):
+    store = creality(K1C_PRINTING)
+    assert printer_commands.send("c1", "preheat", params) == REFUSED(STATE_MSG["cooldown"])
+    assert store.calls == []
+
+
+# f8: a malformed printer_capability (settings) killed main() before the web port
+# was bound — systemd restarted it into the same crash, with no UI left to undo it.
+@pytest.mark.parametrize("bad", [["p1"], "yes", True, 5])
+def test_review_f8_malformed_persisted_capability_does_not_crash_the_start(monkeypatch, bad):
+    from app.services import settings_service
+    monkeypatch.setattr(settings_service, "get", lambda key, **k: bad)
+    printer_commands._capability.clear()
+    printer_commands.load_persisted_capabilities()           # raised AttributeError
+    assert printer_commands._capability == {}
+
+
+# f11: the 20 s in-flight mark covers the gap before the printer's first "busy"
+# report of a load / unload; a second load is refused in it, a cooldown (it cuts
+# the nozzle heat the change needs) and an eject were not.
+@pytest.mark.parametrize("action,params", [("cooldown", {}), ("eject", {}), ("preheat", {"nozzle": 0})])
+def test_review_f11_cooldown_and_eject_wait_for_a_sent_filament_change(live, action, params):
+    store = live(_report(snow=0x0000, gcode="IDLE"))
+    assert printer_commands.send("p1", "ams_load", {"ams": 1, "slot": 2})["success"]
+    assert printer_commands.send("p1", action, params) == REFUSED(printer_commands.MSG_INFLIGHT)
+    assert len(store.published) == 1

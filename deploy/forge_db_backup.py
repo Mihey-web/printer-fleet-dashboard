@@ -18,6 +18,7 @@ import argparse
 import datetime
 import json
 import os
+import pathlib
 import re
 import shutil
 import sqlite3
@@ -35,7 +36,9 @@ def log(msg):
 
 def backup_db(src_path, dst_path):
     """Copy one database through the online backup API and check the copy."""
-    src = sqlite3.connect("file:%s?mode=ro" % src_path, uri=True, timeout=60)
+    # as_uri() escapes '#' / '?' / '%': a raw "file:%s" read "/x #1/a.db" as
+    # "/x " + a fragment and backed up a fresh empty file, with exit 0.
+    src = sqlite3.connect(pathlib.Path(src_path).absolute().as_uri() + "?mode=ro", uri=True, timeout=60)
     dst = sqlite3.connect(dst_path)
     try:
         src.backup(dst)

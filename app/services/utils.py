@@ -1,3 +1,4 @@
+import math
 from typing import Any, Dict, Optional
 from app.domain.models import PrinterState
 
@@ -31,10 +32,14 @@ def map_state(value: Optional[str]) -> PrinterState:
 
 
 def as_float(v: Any) -> Optional[float]:
+    # NaN / Infinity (json.loads takes them, 1e999 becomes inf) = no value: one
+    # of them in a status made the whole /api/printers listing a 500
+    # (JSONResponse refuses non-finite floats).
     try:
         if v is None:
             return None
-        return float(v)
+        f = float(v)
+        return f if math.isfinite(f) else None
     except Exception:
         return None
 

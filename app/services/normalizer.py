@@ -1,5 +1,6 @@
 import copy
 import logging
+import math
 from typing import Any, Dict, Optional
 
 from app.collectors.bambu_raw import CANCEL_CODES
@@ -250,8 +251,12 @@ def _build_ams(ams_obj: Any, raw: Optional[Dict[str, Any]] = None, printing: boo
             continue
         slots = []
         for tray in trays:
-            color = getattr(tray, "color", None) or ""
-            mat_type = getattr(tray, "type", None) or ""
+            # The lib copies tray_color / tray_type as they come: a non-string
+            # one raised below and the poll loop took the printer OFFLINE.
+            color = getattr(tray, "color", None)
+            color = color if isinstance(color, str) else ""
+            mat_type = getattr(tray, "type", None)
+            mat_type = mat_type if isinstance(mat_type, str) else ""
             name = getattr(tray, "name", None)
             # "?" = spool loaded, material not set: the 1.0.1 meaning was an
             # empty type (empty only if the colour is empty too) and no name.
@@ -471,7 +476,9 @@ def normalize_bambu(printer_id: str, label: str, result: Any, device_type: Optio
 
     debug = {
         "raw_state": raw_state,
-        "progress_candidates": progress_candidates,
+        # raw values, but a NaN / inf as text: /api/debug/printers is JSON too
+        "progress_candidates": {k: str(v) if isinstance(v, float) and not math.isfinite(v) else v
+                                for k, v in progress_candidates.items()},
         "layer_candidates": layer_candidates,
         "total_layer_candidates": total_layer_candidates,
         "available_print_job_attrs": sorted(name for name in dir(pj) if not name.startswith("_"))[:160],

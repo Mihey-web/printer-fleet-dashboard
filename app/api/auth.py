@@ -2,6 +2,7 @@ from fastapi import APIRouter, Request, Response, HTTPException, Cookie
 from pydantic import BaseModel
 from typing import Optional
 import sqlite3
+import threading
 import time
 import os
 
@@ -32,6 +33,17 @@ TRUSTED_PROXIES: frozenset = frozenset({"127.0.0.1", "::1"})
 _DUMMY_PASSWORD_HASH: str = ""
 
 
+# The per-IP limit counts failures already in the audit log, so the check and
+# the logging of a failure must not interleave: otherwise N parallel requests
+# all see "< 5" and get N password checks. Striped locks (bounded memory, an
+# attacker rotating addresses cannot grow a dict); held for one bcrypt at most.
+_LOGIN_LOCKS = tuple(threading.Lock() for _ in range(64))
+
+
+def _login_lock(source_ip: str) -> threading.Lock:
+    return _LOGIN_LOCKS[hash(source_ip) % len(_LOGIN_LOCKS)]
+
+
 def _dummy_hash() -> str:
     global _DUMMY_PASSWORD_HASH
     if not _DUMMY_PASSWORD_HASH:
@@ -54,9 +66,15 @@ def client_ip(request: Request) -> str:
     """Resolve the real client IP, trusting proxy headers only from a known proxy."""
     direct = request.client.host if request.client else "unknown"
     if direct in TRUSTED_PROXIES:
-        forwarded = request.headers.get("x-real-ip") or request.headers.get("x-forwarded-for")
+        real_ip = (request.headers.get("x-real-ip") or "").strip()
+        if real_ip:
+            return real_ip
+        # X-Forwarded-For: the trusted proxy APPENDS the peer it saw, so only
+        # the last entry is its own; everything to the left came from the client.
+        forwarded = [p.strip() for p in (request.headers.get("x-forwarded-for") or "").split(",")]
+        forwarded = [p for p in forwarded if p]
         if forwarded:
-            return forwarded.split(",")[0].strip()
+            return forwarded[-1]
     return direct
 
 
@@ -274,24 +292,28 @@ def login(body: LoginRequest, request: Request, response: Response):
         audit.log(None, "login_fail", source_ip, user_agent)
         raise HTTPException(status_code=400, detail="Username and password required")
 
-    # Per-IP limit: blocks a single source outright (that's the attacker's OWN
-    # IP, so it self-throttles and can't be used to lock out a victim). Safe to
-    # enforce before verifying the password.
-    if audit.count_failed_attempts(source_ip) >= 5:
-        audit.log(body.username or None, "rate_limit_block", source_ip, user_agent)
-        raise HTTPException(status_code=429, detail="Too many login attempts. Try again later.")
+    # Check, password verify and the failure's log line under one lock per IP
+    # (see _LOGIN_LOCKS): parallel requests cannot all pass the check first.
+    with _login_lock(source_ip):
+        # Per-IP limit: blocks a single source outright (that's the attacker's OWN
+        # IP, so it self-throttles and can't be used to lock out a victim). Safe to
+        # enforce before verifying the password.
+        if audit.count_failed_attempts(source_ip) >= 5:
+            audit.log(body.username or None, "rate_limit_block", source_ip, user_agent)
+            raise HTTPException(status_code=429, detail="Too many login attempts. Try again later.")
 
-    # Always run a bcrypt verify — even when the user doesn't exist — so the
-    # response time doesn't reveal whether a username is valid (timing oracle).
-    user = get_user_by_username(body.username)
-    candidate_hash = user.password_hash if user is not None else _dummy_hash()
-    password_ok = verify_password(body.password, candidate_hash)
+        # Always run a bcrypt verify — even when the user doesn't exist — so the
+        # response time doesn't reveal whether a username is valid (timing oracle).
+        user = get_user_by_username(body.username)
+        candidate_hash = user.password_hash if user is not None else _dummy_hash()
+        password_ok = verify_password(body.password, candidate_hash)
+        if user is None or not password_ok:
+            audit.log(body.username, "login_fail", source_ip, user_agent)
     if user is None or not password_ok:
         # Wrong credentials. The cross-IP per-username lockout is applied ONLY on
         # this failure path — never on a correct password — so a flood of failed
         # attempts for 'admin' throttles guessing but can't lock out the real
         # owner, who supplies the right password and skips this branch entirely.
-        audit.log(body.username, "login_fail", source_ip, user_agent)
         if audit.count_failed_attempts_by_username(body.username) >= 10:
             audit.log(body.username or None, "rate_limit_block", source_ip, user_agent)
             raise HTTPException(status_code=429, detail="Too many login attempts. Try again later.")
@@ -376,6 +398,11 @@ def me(request: Request,
     if result is None:
         raise HTTPException(status_code=401, detail="Invalid or expired token")
     username, role = result
+    # /api/auth/* is public to the middleware, so its watermark check (a
+    # password reset / role change ends the session) is not applied here: do it.
+    payload = decode_token(access_token_cookie, JWT_SECRET) or {}
+    if not token_subject_active(username, payload.get("iat", 0)):
+        raise HTTPException(status_code=401, detail="Invalid or expired token")
     user = get_user_by_username(username)
     if user is None:
         raise HTTPException(status_code=401, detail="User not found")

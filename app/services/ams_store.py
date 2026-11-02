@@ -98,6 +98,13 @@ class AmsStore:
                     except Exception:
                         logger.error("ams_history retention prune failed", exc_info=True)
         except Exception:
+            # No commit came: drop this call's rows, or they stay pending in an
+            # open write transaction (never saved, the prune never runs).
+            try:
+                with self._lock:
+                    self._db.rollback()
+            except Exception:
+                pass
             logger.error("record_ams failed for %s", status.id, exc_info=True)
 
     def query(self, printer_id: str, unit_index: int, fr: float, to: float) -> List[Dict[str, Any]]:

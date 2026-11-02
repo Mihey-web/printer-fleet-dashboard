@@ -1,5 +1,7 @@
 # Kuznitsa — Self-Hosted 3D-Printer Farm Dashboard
 
+📖 **Documentation (English / Русский): https://mihey-web.github.io/printer-fleet-dashboard/**
+
 A lightweight, self-hosted dashboard for monitoring and controlling a mixed fleet
 of 3D printers from one web page. Built for print farms that run more than one
 brand of machine and want a single, always-on status board with history,

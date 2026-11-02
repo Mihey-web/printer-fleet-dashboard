@@ -1,0 +1,19 @@
+{
+ "problems": [],
+ "consoleErrors": [
+  "1280: HTTP 401 http://127.0.0.1:8765/api/auth/refresh",
+  "1280: Failed to load resource: the server responded with a status of 401 (Unauthorized)",
+  "375: HTTP 401 http://127.0.0.1:8765/api/auth/refresh",
+  "375: Failed to load resource: the server responded with a status of 401 (Unauthorized)"
+ ],
+ "perf": [
+  {
+   "width": 1280,
+   "seconds": 30,
+   "batches": 91,
+   "ms": 24.6,
+   "writes": 1549,
+   "maxMs": 8.2
+  }
+ ]
+}

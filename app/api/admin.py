@@ -511,6 +511,16 @@ def _validate_settings(values: dict):
                                     detail="Некорректный прокси-URL (нужно http(s)://[логин:пароль@]хост:порт): "
                                            + mask_proxy(p))
 
+    if "printer_capability" in values:
+        # The probe's verdicts (printer_commands); read before the web port is
+        # bound, so a malformed value must not get in.
+        v = values["printer_capability"]
+        if (not isinstance(v, dict) or len(v) > 500
+                or any(not isinstance(k, str) or not k or len(k) > 64 or not isinstance(b, bool)
+                       for k, b in v.items())):
+            raise HTTPException(status_code=400,
+                                detail="printer_capability: ожидается {id принтера: true|false}")
+
     if "printer_light_disabled" in values:
         v = values["printer_light_disabled"]
         if (not isinstance(v, list) or len(v) > 200

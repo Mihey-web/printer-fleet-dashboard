@@ -243,9 +243,11 @@ class StubBroker:
         self.dropped = []         # monotonic time of each connection refused while down
         self._down = False
         self._sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        if port and os.name != "nt":
+        if os.name != "nt":
             # Rebind despite the closed connections' TIME_WAIT (Windows allows it as is;
-            # its SO_REUSEADDR means something else).
+            # its SO_REUSEADDR means something else). Set on the FIRST broker too:
+            # Linux lets a port be rebound only when every socket still holding it
+            # (the old broker's half-closed connections) has the flag.
             self._sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         self._sock.bind(("127.0.0.1", port))
         self._sock.listen(8)
@@ -257,6 +259,13 @@ class StubBroker:
 
     def close(self) -> None:
         self._closed.set()
+        # shutdown() first: on Linux close() alone does not wake the thread
+        # blocked in accept(), the socket keeps listening and a broker "switched
+        # back on" at the same port gets EADDRINUSE.
+        try:
+            self._sock.shutdown(socket.SHUT_RDWR)
+        except OSError:
+            pass
         try:
             self._sock.close()
         except OSError:
@@ -272,6 +281,12 @@ class StubBroker:
 
     def _drop_connections(self) -> None:
         for c in list(self._conns):
+            # shutdown() first: on Linux close() alone, with the serving thread
+            # blocked in recv(), sends no FIN and the client never sees the drop.
+            try:
+                c.shutdown(socket.SHUT_RDWR)
+            except OSError:
+                pass
             try:
                 c.close()
             except OSError:

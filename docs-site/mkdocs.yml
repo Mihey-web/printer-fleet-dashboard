@@ -1,0 +1,151 @@
+# Kuznitsa documentation site (MkDocs Material + mkdocs-static-i18n).
+# Build locally:   pip install -r requirements.txt && mkdocs serve
+# Strict build:    mkdocs build --strict      (run from this folder, docs-site/)
+site_name: Kuznitsa
+site_description: Self-hosted dashboard for a 3D-printer farm — Bambu Lab, Creality, Klipper/Moonraker, MKS WiFi
+site_url: https://mihey-web.github.io/printer-fleet-dashboard/
+repo_url: https://github.com/mihey-web/printer-fleet-dashboard
+repo_name: mihey-web/printer-fleet-dashboard
+edit_uri: ""
+copyright: Kuznitsa — AGPL-3.0 or commercial license
+
+docs_dir: docs
+site_dir: site
+
+theme:
+  name: material
+  language: en
+  icon:
+    logo: material/printer-3d
+    repo: fontawesome/brands/github
+  features:
+    - navigation.sections
+    - navigation.top
+    - navigation.footer
+    - navigation.indexes
+    - search.suggest
+    - search.highlight
+    - content.code.copy
+    - toc.follow
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: blue grey
+      accent: deep orange
+      toggle:
+        icon: material/weather-night
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: blue grey
+      accent: deep orange
+      toggle:
+        icon: material/weather-sunny
+        name: Switch to light mode
+
+plugins:
+  - search
+  - i18n:
+      docs_structure: folder
+      fallback_to_default: false
+      reconfigure_material: true
+      reconfigure_search: true
+      languages:
+        - locale: en
+          default: true
+          name: English
+          build: true
+          site_name: Kuznitsa — documentation
+        - locale: ru
+          name: Русский
+          build: true
+          site_name: Кузница — документация
+          theme:
+            palette:
+              - media: "(prefers-color-scheme: light)"
+                scheme: default
+                primary: blue grey
+                accent: deep orange
+                toggle:
+                  icon: material/weather-night
+                  name: Тёмная тема
+              - media: "(prefers-color-scheme: dark)"
+                scheme: slate
+                primary: blue grey
+                accent: deep orange
+                toggle:
+                  icon: material/weather-sunny
+                  name: Светлая тема
+          nav_translations:
+            Home: Главная
+            Installation: Установка
+            Overview: Обзор
+            Windows: Windows
+            Linux / Raspberry Pi: Linux / Raspberry Pi
+            Docker: Docker
+            First run: Первый запуск
+            Adding printers: Добавление принтеров
+            Interface: Интерфейс
+            Printers screen: Экран «Принтеры»
+            AMS screen: Экран «AMS»
+            History screen: Экран «История»
+            Admin screen: Экран «Админ»
+            Phone and app (PWA): Телефон и приложение (PWA)
+            Telegram and proxy: Telegram и прокси
+            Users and security: Пользователи и безопасность
+            Settings and environment variables: Настройки и переменные окружения
+            FAQ and troubleshooting: Вопросы и неполадки
+            License: Лицензия
+
+nav:
+  - Home: index.md
+  - Installation:
+      - Overview: install/index.md
+      - Windows: install/windows.md
+      - Linux / Raspberry Pi: install/linux.md
+      - Docker: install/docker.md
+      - First run: install/first-run.md
+  - Adding printers: printers.md
+  - Interface:
+      - Overview: interface/index.md
+      - Printers screen: interface/printers.md
+      - AMS screen: interface/ams.md
+      - History screen: interface/history.md
+      - Admin screen: interface/admin.md
+      - Phone and app (PWA): interface/mobile-pwa.md
+  - Telegram and proxy: telegram.md
+  - Users and security: security.md
+  - Settings and environment variables: configuration.md
+  - FAQ and troubleshooting: faq.md
+  - License: license.md
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - md_in_html
+  - tables
+  - toc:
+      permalink: true
+      # Keep Cyrillic letters in heading anchors (default would give "#_2").
+      slugify: !!python/object/apply:pymdownx.slugs.slugify
+        kwds:
+          case: lower
+  - pymdownx.details
+  - pymdownx.superfences
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.inlinehilite
+  - pymdownx.keys
+  - pymdownx.tabbed:
+      alternate_style: true
+
+extra:
+  social:
+    - icon: fontawesome/brands/github
+      link: https://github.com/mihey-web/printer-fleet-dashboard
+
+validation:
+  omitted_files: warn
+  absolute_links: warn
+  unrecognized_links: warn
+  anchors: warn

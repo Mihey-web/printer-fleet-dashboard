@@ -3,11 +3,54 @@
 All notable changes to this project are documented here.
 The format is loosely based on [Keep a Changelog](https://keepachangelog.com/).
 
-Tagged releases are `1.0.0` and `2.0.0`. The dated entries between them are
-sync points; they match the `Sync to internal v<date>` commits in this
-repository's history.
+Tagged releases are `1.0.0`, `2.0.0` and `2.1.0`. The dated entries between
+them are sync points; they match the `Sync to internal v<date>` commits in
+this repository's history.
 
 ## [Unreleased]
+
+## [2.1.0] — 2026-11-02
+
+The panel speaks English, and the project has a documentation site.
+
+### Added
+- Russian / English switch for the web panel: in the 👤 menu («This browser»)
+  and on the login page, applied at once without a reload and kept per
+  browser. With no choice yet the browser's languages decide: Russian for
+  ru, uk, be, kk, ky, uz, tg, hy, az, English for everything else. Russian
+  stays the source language; English is a dictionary keyed by the Russian
+  text (`app/web/i18n/en.js`, ~1500 strings including the server's command
+  replies and errors), so a third language is one more file. Bambu's HMS and
+  print-error texts are shown in Bambu's own English. Browser
+  notifications, the tab title, the timeline canvas, dates and the
+  installable app's manifest follow the language. The Telegram bot stays in
+  Russian for now.
+- Documentation site (MkDocs Material, English and Russian): install on
+  Linux / Raspberry Pi, Windows and Docker, first run, adding each printer
+  brand, every screen, Telegram and proxy, users and security,
+  configuration, FAQ. Built and published to GitHub Pages by
+  `.github/workflows/docs.yml`.
+
+### Fixed
+- One NaN or Infinity in one printer's telemetry no longer breaks
+  `/api/printers` for the whole farm.
+- An AMS tray whose type or colour is not a string no longer takes the
+  printer offline.
+- «Resume» and «Resume all» refuse a laser or cutter job, which Bambu Studio
+  only lets you continue from the printer's screen.
+- Heating to 0 during a print is refused like «Cool down»; «Cool down»,
+  «Eject» and heating to 0 wait out the ~20 s after an AMS load or unload.
+- Parallel login attempts can no longer exceed the 5-per-IP limit; behind a
+  proxy that only sets `X-Forwarded-For` the address the proxy appended is
+  used, not the one the client wrote.
+- `/api/auth/me` rejects a token issued before a password reset or role
+  change, like every other route.
+- A malformed `printer_capability` setting is refused by the admin API and
+  ignored at start-up instead of crash-looping the service.
+- The nightly database backup works when the path contains `#` (it used to
+  back up an empty file and report success).
+- A failed AMS history insert no longer leaves the transaction open.
+- Tests: the stub MQTT broker shuts its sockets down properly on Linux.
 
 ## [2.0.0] — 2026-11-01
 
