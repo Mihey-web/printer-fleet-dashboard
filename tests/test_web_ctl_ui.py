@@ -1666,6 +1666,6 @@ def test_maintenance_markup_and_styles():
     assert ".pc-maint .bd-link" not in CSS                                    # no «снять» on the plaque
     assert "margin-top:8px" in _rule(".ams-maint")
     # every theme has the --warn steps the hatching and the plaque use
-    for theme in ("dark-classic", "light", "night", "neon", "cosmos"):
+    for theme in ("dark-classic", "light", "night", "cosmos", "amber", "glass"):
         block = re.search(r'html\[data-theme="%s"\] \{(.*?)\n    \}' % theme, CSS, re.S).group(1)
         assert "--warn-5:" in block and "--warn-7:" in block and "--warn-11:" in block and "--warn-soft:" in block, theme

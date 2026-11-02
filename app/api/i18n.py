@@ -9,7 +9,8 @@
 * GET / POST /api/i18n/texts?lang=en — behind the session (the /api gate): the
   fleet's live texts the server takes from Bambu's tables (HMS and print-error
   descriptions, Russian on the card) in the original English of those tables
-  (the vendored ha-bambulab copy, app/vendor/pybambu/hms_error_text), keyed by
+  (the vendored ha-bambulab copy, app/vendor/pybambu/hms_error_text; a code it
+  lacks: Bambu's runtime English table, app/services/hms_catalog), keyed by
   the Russian text the panel shows. POST {"texts": [...]} also looks up the
   strings the client met and could not translate (the journal's reasons): found
   back by their Russian text in the same tables. The client asks when it meets
@@ -112,23 +113,31 @@ def _cached(request, body, media_type):
 
 # ---- the fleet's live texts ---------------------------------------------------------------
 
-def _english(src, code, model):
+def _english(src, code, model, prefix=None):
+    """Bambu's English text of a code: the vendored table, else Bambu's runtime table
+    of the printer's model prefix (app/services/hms_catalog, its lang=en download)."""
     from app.vendor.pybambu.utils import get_HMS_error_text, get_print_error_text
     code = str(code or "").strip()
-    if not code:
+    if not code or src not in ("print_error", "hms"):
         return None
     try:
         if src == "print_error":
             text = get_print_error_text(code, model or "", "en")
-        elif src == "hms":
-            text = get_HMS_error_text(code, model or "", "en")
         else:
-            return None
+            text = get_HMS_error_text(code, model or "", "en")
     except Exception:
         logger.debug("[i18n] no English text for %s %s", src, code, exc_info=True)
-        return None
+        text = None
     text = (text or "").strip()
-    return text if text and text != "unknown" else None
+    if text and text != "unknown":
+        return text
+    try:
+        from app.services import hms_catalog
+        prefix = prefix or hms_catalog.model_prefix(model)
+        return hms_catalog.text(prefix, code, hms_catalog.EN) if prefix else None
+    except Exception:
+        logger.debug("[i18n] catalog English lookup failed", exc_info=True)
+        return None
 
 
 def live_texts(rows, lang):
@@ -138,11 +147,12 @@ def live_texts(rows, lang):
         return out
     for d in rows:
         model = d.get("device_type") or d.get("model")
+        prefix = _prefix(d.get("id"), model)
         for n in d.get("notifications") or []:
             ru = n.get("text")
             if not isinstance(ru, str) or not ru.strip() or ru in out:
                 continue
-            en = _english(n.get("src"), n.get("code"), model)
+            en = _english(n.get("src"), n.get("code"), model, prefix)
             if en:
                 out[ru] = en
     return out
@@ -183,15 +193,23 @@ def _reverse_index():
     return _reverse
 
 
-def _catalog_lookup(text):
-    """The same in Bambu's runtime tables (app/services/hms_catalog, Russian only)."""
+def _prefix(pid, model):
     try:
         from app.services import hms_catalog
-        for _prefix, entry in list(hms_catalog._index.items()):
+        return hms_catalog.prefix_for(str(pid), model) if pid else hms_catalog.model_prefix(model)
+    except Exception:
+        return None
+
+
+def _catalog_lookup(text):
+    """The same in Bambu's runtime tables (app/services/hms_catalog): (src, code, "", prefix)."""
+    try:
+        from app.services import hms_catalog
+        for prefix, entry in list(hms_catalog._index.items()):
             for section, src in (("err", "print_error"), ("hms", "hms")):
                 for code, ru in (entry.get(section) or {}).items():
                     if ru and _key(ru) == text:
-                        return src, code, ""
+                        return src, code, "", prefix
     except Exception:
         logger.debug("[i18n] catalog lookup failed", exc_info=True)
     return None
@@ -214,7 +232,7 @@ def asked_texts(texts, lang):
         for c in dict.fromkeys(cands):
             hit = idx.get(c) or (_catalog_lookup(c) if len(c) > 12 else None)
             if hit:
-                en = _english(hit[0], hit[1], hit[2])
+                en = _english(*hit)
                 if en:
                     out[c] = en
                 break

@@ -73,7 +73,9 @@ def test_every_russian_string_is_covered(extracted):
     assert len(rows) > 1500                     # the extractor did find the panel's texts
     files = {r["file"] for r in rows}
     assert {"app/web/app.js", "app/web/index.html", "app/web/login.html",
-            "app/services/printer_commands.py", "app/services/normalizer.py"} <= files
+            "app/services/printer_commands.py", "app/services/normalizer.py",
+            # the Telegram bot: the summary and its own words (app/services/i18n.py)
+            "main.py", "app/services/telegram_bot_async.py"} <= files
     miss = x.uncovered(rows, dic)
     seen, report = set(), []
     for r in miss:
@@ -320,3 +322,187 @@ def test_asked_texts_find_bambus_english_by_the_russian_text():
     assert i18n_api.asked_texts([ru], "de") == {} and i18n_api.asked_texts("нет", "en") == {}
     # the client sends at most MAX_ASK strings; more are ignored
     assert len(i18n_api.asked_texts([ru] * (i18n_api.MAX_ASK + 50), "en")) == 1
+
+
+# --- phase 2: the bot, Bambu's English from the catalog, app.js's own separators ------------
+# (docs/dev/I18N_PHASE2_REPORT.md)
+
+def _summary_fleet():
+    """A synthetic fleet for the bot's summary: every branch of format_status_text."""
+    from app.domain.models import PrinterKind, PrinterState, PrinterStatus
+    from app.vendor.pybambu.utils import get_HMS_error_text
+    hms = "0500_0100_0003_0004"
+    ru = get_HMS_error_text(hms, "X1C", "ru")
+
+    def st(pid, label, state, **kw):
+        base = dict(id=pid, label=label, kind=PrinterKind.BAMBU, online=True, state=state)
+        base.update(kw)
+        return PrinterStatus(**base)
+
+    return [
+        st("err", "X1C-1", PrinterState.ERROR, device_type="X1C",
+           last_error="HMS_%s: %s [fatal] | Ошибка печати 0300_400C" % (hms, ru),
+           notifications=[{"src": "hms", "code": hms, "text": ru, "severity": "fatal"}]),
+        st("pau", "P1S-2", PrinterState.PAUSED, progress_pct=41.0, job_name="Кронштейн.3mf",
+           eta_seconds=3 * 3600 + 5 * 60, print_time_seconds=40 * 60),
+        st("fin", "A1 <у окна>", PrinterState.FINISHED, job_name="Крышка + Крышка"),
+        st("can", "P2S-1", PrinterState.CANCELLED),
+        st("prn", "H2S-1", PrinterState.PRINTING, progress_pct=87.4, job_name="gear",
+           eta_seconds=30 * 60, print_time_seconds=5 * 3600 + 30 * 60, nozzle_temp=220.0, bed_temp=65.0),
+        st("idl", "Принтер у окна", PrinterState.IDLE, nozzle_temp=25.0),
+        st("off", "K1C", PrinterState.OFFLINE, online=False),
+        st("mnt", "Varan", PrinterState.IDLE),
+    ]
+
+
+@pytest.fixture
+def summary(monkeypatch):
+    import main
+    monkeypatch.setattr(main, "_display_label", lambda pid, fb: fb)
+    monkeypatch.setattr(main, "_in_maintenance", lambda pid: pid == "mnt")
+
+    class Store:
+        def get_all(self):
+            return _summary_fleet()
+
+    return lambda lang=None: main.format_status_text(Store(), lang)
+
+
+def test_bot_summary_in_english_snapshot(summary):
+    from app.vendor.pybambu.utils import get_HMS_error_text
+    en = get_HMS_error_text("0500_0100_0003_0004", "X1C", "en")
+    assert summary("en").split("\n") == [
+        "\U0001F534 <b>X1C-1</b> — error: HMS_0500_0100_0003_0004: %s [fatal] | Print error 0300_400C" % en,
+        "\U0001F7E1 <b>P1S-2</b> — 41% · Кронштейн.3mf",
+        "\u23f13h5m · \u23f340m",
+        "\u2705 <b>A1 &lt;у окна&gt;</b> — finished · Крышка x2",
+        "\u26AA P2S-1 — cancelled",
+        "\U0001F7E2 <b>H2S-1</b> — 87% · gear",
+        "\u23f130m · \u23f35h30m · \U0001F321220/65°C",
+        "\u26AA Принтер у окна · \U0001F32125°C",
+        "\u2B1B K1C — offline",
+        "\U0001F527 <b>Varan</b> — in maintenance",
+    ]
+
+
+def test_bot_summary_in_russian_is_unchanged(summary, monkeypatch):
+    from app.services import settings_service
+    from app.vendor.pybambu.utils import get_HMS_error_text
+    ru = get_HMS_error_text("0500_0100_0003_0004", "X1C", "ru")
+    text = summary("ru")
+    assert text.split("\n") == [
+        "\U0001F534 <b>X1C-1</b> — ошибка: HMS_0500_0100_0003_0004: %s [fatal] | Ошибка печати 0300_400C" % ru,
+        "\U0001F7E1 <b>P1S-2</b> — 41% · Кронштейн.3mf",
+        "\u23f13ч5м · \u23f340м",
+        "\u2705 <b>A1 &lt;у окна&gt;</b> — завершено · Крышка x2",
+        "\u26AA P2S-1 — отменено",
+        "\U0001F7E2 <b>H2S-1</b> — 87% · gear",
+        "\u23f130м · \u23f35ч30м · \U0001F321220/65°C",
+        "\u26AA Принтер у окна · \U0001F32125°C",
+        "\u2B1B K1C — офлайн",
+        "\U0001F527 <b>Varan</b> — на обслуживании",
+    ]
+    # the language comes from the settings when not given: Russian by default
+    assert summary() == text
+    monkeypatch.setattr(settings_service, "peek", lambda key: "en" if key == "telegram_lang" else None)
+    assert summary() == summary("en")
+
+
+def test_every_bot_text_is_looked_up_not_written_in_english():
+    # main.py and the bot write Russian; the English comes from the dictionary only
+    import ast
+    for rel in ("main.py", "app/services/telegram_bot_async.py"):
+        src = (ROOT / rel).read_text(encoding="utf-8")
+        for node in ast.walk(ast.parse(src)):
+            if isinstance(node, ast.Constant) and isinstance(node.value, str):
+                assert node.value not in ("(no data)", "offline", "finished", "cancelled", "in maintenance"), rel
+
+
+def test_catalog_english_for_a_code_the_vendored_table_lacks(monkeypatch):
+    # Bambu's runtime table (hms_catalog, lang=en) gives the English text of a code the
+    # vendored ha-bambulab table does not know; only the model prefix went out to get it
+    from app.services import hms_catalog
+    code8, code16 = "0C00F001", "0C00F00100010001"           # synthetic codes, in no vendored table
+    entry = dict(hms_catalog._EMPTY, err={code8: "Синтетическая пауза каталога"},
+                 hms={code16: "Синтетический HMS каталога"},
+                 err_en={code8: "Synthetic catalog pause"}, hms_en={code16: "Synthetic catalog HMS"})
+    monkeypatch.setattr(hms_catalog, "_index", {"Q7X": entry})
+    monkeypatch.setattr(hms_catalog, "_prefix_by_pid", {"b1": "Q7X"})
+    assert i18n_api._english("print_error", "0C00_F001", "") is None      # no prefix: nothing to ask
+    out = i18n_api.asked_texts(["0C00_F001: Синтетическая пауза каталога", "Синтетический HMS каталога"], "en")
+    assert out == {"Синтетическая пауза каталога": "Synthetic catalog pause",
+                   "Синтетический HMS каталога": "Synthetic catalog HMS"}
+    rows = [{"id": "b1", "device_type": "X1C", "notifications": [
+        {"src": "hms", "code": "0C00_F001_0001_0001", "text": "Синтетический HMS каталога"}]}]
+    assert i18n_api.live_texts(rows, "en") == {"Синтетический HMS каталога": "Synthetic catalog HMS"}
+    # the vendored table still wins where it has the code
+    from app.vendor.pybambu.utils import get_print_error_text
+    assert i18n_api._english("print_error", "0300_400C", "X1C", "Q7X") == get_print_error_text("0300400C", "X1C", "en")
+
+
+# app.js writes «01.11» and «×1,00» itself: the active language's separators (I18N.dateSep /
+# I18N.decimal), the Russian forms without I18N (node tests) and in Russian.
+APP = (WEB / "app.js").read_text(encoding="utf-8")
+
+
+def _app_function(name):
+    m = re.search(r"function %s\([^)]*\) \{" % name, APP)
+    assert m, name
+    i, depth, quote = m.end() - 1, 0, None
+    while True:
+        ch = APP[i]
+        if quote:
+            if ch == "\\":
+                i += 1
+            elif ch == quote:
+                quote = None
+        elif ch in "'\"`":
+            quote = ch
+        elif APP.startswith("//", i):
+            i = APP.index("\n", i)
+            continue
+        elif ch == "{":
+            depth += 1
+        elif ch == "}":
+            depth -= 1
+            if depth == 0:
+                return APP[m.start():i + 1]
+        i += 1
+
+
+SEP_FUNCS = ("adPad", "adClock", "jbPad", "jobClock", "jobNum", "maint2", "maintSinceText", "maintTipText",
+             "nfPad", "nfTs", "nfClock", "nfSinceText", "pad2", "fmtAuditTime")
+
+
+def _seps(lang):
+    """The hand-made dates and numbers of app.js in node, with the real runtime in `lang`
+    (None: no I18N at all, as app.js's own node tests run it)."""
+    lib = "\n".join(_app_function(n) for n in SEP_FUNCS)
+    head = LIB + "I18N.set(%s);\n" % json.dumps(lang) if lang else ""
+    ts = 1792236720          # 2026-10-17 14:32 MSK
+    return _node(head + lib + """
+var ts = %d, now = (ts + 3 * 86400) * 1000;
+console.log(JSON.stringify([adClock(ts, ts + 3 * 86400), jobClock(ts, ts + 3 * 86400), jobNum(1.04, 2),
+  maintSinceText(ts, now), maintSinceText(ts - 400 * 86400, now), maintTipText({since: ts}),
+  nfSinceText(ts), fmtAuditTime(ts)]));""" % ts)
+
+
+def test_app_js_separators_follow_the_language(monkeypatch):
+    monkeypatch.setenv("TZ", "Europe/Moscow")
+    ru = ["17.10 14:32", "17.10 14:32", "1,04", "с 17.10", "с 12.09.2025", "На обслуживании с 17.10.2026 14:32",
+          "с 17.10 14:32", "17.10 14:32"]
+    assert _seps(None) == ru                   # app.js's own node tests: no I18N, the Russian forms
+    assert _seps("ru") == ru                   # the Russian panel: not a character changed
+    assert _seps("en") == ["17/10 14:32", "17/10 14:32", "1.04", "с 17/10", "с 12/09/2025",
+                           "На обслуживании с 17/10/2026 14:32", "с 17/10 14:32", "17/10 14:32"]
+
+
+def test_app_js_builds_no_date_with_a_bare_dot():
+    # every «DD.MM» app.js glues itself asks I18N.dateSep() (a new one would stay Russian in English)
+    bare = re.findall(r"""(?:getDate\(\)\)?(?:\.toString\(\)\.padStart\(2, ?'0'\))?|m\[2\]|slice\(8, 10\)) \+ ["']\.["'] \+""", APP)
+    assert bare == []
+    assert APP.count("I18N.dateSep()") == 10 and APP.count("I18N.decimal()") == 1
+    assert ".replace(\".\", \",\")" not in APP
+    # a live switch draws the screen again (the translator leaves «01.11» alone: no Cyrillic in it)
+    assert 'document.addEventListener("forge-lang", function () { routeApply(routeNow(), true); });' in APP
+    assert 'document.dispatchEvent(new CustomEvent("forge-lang"' in RUNTIME

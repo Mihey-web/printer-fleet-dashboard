@@ -382,6 +382,26 @@ def test_csv_format(boss, ids):
                                                       "Нет связи", "Идёт"}
 
 
+def test_csv_in_the_panels_language(boss, ids):
+    # «⇩ Выгрузить» of the English panel adds lang=en: the column names and the result words
+    # from the panel's dictionary (app/web/i18n/en.js), the data as it is
+    ru = list(csv.reader(io.StringIO(_csv(boss).content.decode("utf-8-sig")), delimiter=";"))
+    en = list(csv.reader(io.StringIO(_csv(boss, lang="en").content.decode("utf-8-sig")), delimiter=";"))
+    assert en[0] == ["Printer", "Model", "Job", "Start", "End", "Plan, min", "Actual, min", "Pauses",
+                     "Paused, min", "Offline, min", "Result", "Code", "Description", "Layers"]
+    assert len(en) == len(ru)
+    words = {"Успешно": "Successful", "Отменено": "Cancelled", "Ошибка": "Error", "Питание": "Power loss",
+             "Остановлено": "Stopped", "Нет связи": "No connection", "Идёт": "Running"}
+    assert set(words) == set(job_queries.RESULT_LABELS.values())
+    for r, e in zip(ru[1:], en[1:]):
+        assert e[10] == words[r[10]]
+        assert e[:10] + e[11:] == r[:10] + r[11:]                     # names, times, codes: unchanged
+    # Russian by default, and for a language without a dictionary
+    for lang in ("ru", "xx", "../en"):
+        assert _csv(boss, lang=lang).content == _csv(boss).content
+    assert boss.get("/api/history/jobs.csv", params=dict(fr=FR, to=TO, lang="x" * 9)).status_code == 422
+
+
 def test_csv_neutralises_formulas(boss, ids):
     rows = list(csv.reader(io.StringIO(_csv(boss).content.decode("utf-8-sig")), delimiter=";"))
     names = [r[2] for r in rows[1:]]

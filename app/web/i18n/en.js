@@ -13,6 +13,9 @@ I18N.register("en", {
   name: "English",
   // dates and times: day before month, 24-hour clock, like the Russian panel
   locale: "en-GB",
+  // what app.js writes by hand: «01.11» -> «01/11» (as en-GB's dates), «×1,00» -> «×1.00»
+  dateSep: "/",
+  decimal: ".",
   // navigator.languages bases that pick this language (anything not Russian-family
   // and not another registered language falls back to English anyway)
   match: ["en"],
@@ -539,7 +542,6 @@ I18N.register("en", {
   "Некорректный блок:": "Invalid unit:",
   "Некорректный прокси-URL (нужно http(s)://[логин:пароль@]хост:порт):": "Invalid proxy URL (expected http(s)://[username:password@]host:port):",
   "Некорректный список блоков": "Invalid unit list",
-  "Неон": "Neon",
   "Несохранённые правки не учитываются — сначала сохраните.": "Unsaved edits aren't used — save first.",
   "Нет блоков AMS 2 Pro / AMS HT.": "No AMS 2 Pro / AMS HT units.",
   "Нет данных": "No data",
@@ -1523,7 +1525,20 @@ I18N.register("en", {
   "💧 н/д": "💧 n/a",
   "🔒 прошивка блокирует сторонние команды": "🔒 firmware blocks third-party commands",
   "🔴 Ошибка принтера": "🔴 Printer error",
-  "🔴 Ошибка:": "🔴 Error:"
+  "🔴 Ошибка:": "🔴 Error:",
+  "Вход принят, но браузер отклонил cookie: откройте панель по HTTPS или задайте COOKIE_SECURE=0 в локальной сети.": "Sign-in accepted, but the browser rejected the cookie: open the panel over HTTPS or set COOKIE_SECURE=0 on a local network.",
+  "Язык бота": "Bot language",
+  "Сводка, уведомления и шаблоны по умолчанию. Свой шаблон бот шлёт как написан.": "Summary, notifications and the default templates. A template of your own is sent as written.",
+  "Нет данных о принтерах": "No printer data",
+  "отменено": "cancelled",
+  "(нет данных)": "(no data)",
+  "Стекло": "Glass",
+  "Янтарь": "Amber",
+  "Фон стекла": "Glass background",
+  "Своё фото…": "Own photo…",
+  "Убрать фото": "Remove photo",
+  "Фото не поместилось в память браузера": "The photo did not fit in the browser's storage",
+  "Браузер не открыл эту картинку — попробуйте JPG или PNG": "The browser could not open this picture — try a JPG or PNG"
 }/*strings:end*/,
 
   // Pieces the coverage test finds that never reach the screen, with the reason.

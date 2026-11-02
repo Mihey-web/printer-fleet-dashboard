@@ -4,9 +4,13 @@ import logging
 import time
 from typing import Callable, Optional, Dict
 
+from app.services import i18n as bot_i18n
 from app.services.proxy_checker import mask_proxy
 
 logger = logging.getLogger(__name__)
+
+# The first message when the status getter has nothing to say.
+NO_DATA = "(нет данных)"
 
 
 class TelegramReporter:
@@ -38,7 +42,7 @@ class TelegramReporter:
         # Per-chat cooldown (timestamp until which edits should be skipped)
         self._cooldowns: Dict[int, float] = {}
 
-        # Lazy import check � do not raise, degrade gracefully
+        # Lazy import check — do not raise, degrade gracefully
         try:
             import aiogram  # noqa: F401
         except Exception as e:
@@ -291,14 +295,16 @@ class TelegramReporter:
         if self._chat_id is not None and not force:
             return True
         content = "" if not self._get_text else self._get_text()
+        # the bot's own words in its language (settings «telegram_lang», app/services/i18n.py)
+        content = content or bot_i18n.t(NO_DATA)
         try:
-            sent = await bot.send_message(chat_id=chat_id, text=content or "(no data)", parse_mode='HTML')
+            sent = await bot.send_message(chat_id=chat_id, text=content, parse_mode='HTML')
         except Exception as e:
             logger.warning("Could not establish Telegram chat %s: %s", chat_id, e)
             return False
         self._chat_id = chat_id
         self._message_id = sent.message_id
-        self._last_text = content or "(no data)"
+        self._last_text = content
         logger.info("Telegram chat established (chat_id=%s), initial message length=%d", chat_id, len(self._last_text))
         if self._periodic_task is None:
             self._periodic_task = asyncio.create_task(self._periodic_update(bot))

@@ -15,10 +15,13 @@
 | Linux / systemd | строка `Environment=ИМЯ=значение` в разделе `[Service]` службы — см. [Linux / Raspberry Pi](install/linux.md#env-vars) |
 | Docker | строка `- ИМЯ=значение` в `environment:` файла `docker-compose.yml` — см. [Docker](install/docker.md#settings) |
 
-!!! info "Про `.env.example`"
-    В репозитории есть `.env.example` с основными переменными и комментариями. Сама программа файл
-    `.env` **не** читает; используйте его как справку или поручите загрузку диспетчеру служб
-    (например, `EnvironmentFile=` в systemd или `env_file:` в Docker Compose).
+!!! info "Файл `.env`"
+    В репозитории есть `.env.example` со всеми переменными и комментариями. Скопируйте его в `.env`
+    рядом с `main.py` и раскомментируйте нужное: `python main.py` читает его при запуске. Формат:
+    `ИМЯ=значение` по одному в строке, `#` начинает комментарий, кавычки не обязательны. Переменная,
+    уже заданная в окружении (`Environment=` в systemd, `environment:` в Docker, `set` / `export`),
+    главнее той же переменной в `.env`. В журнале видно, какие имена взяты из файла (`.env: set …`),
+    значения туда не пишутся.
 
 После изменения переменной перезапустите панель.
 
@@ -32,6 +35,7 @@
 | --- | --- | --- | --- |
 | `WEB_HOST` | `127.0.0.1` | Адрес, на котором слушает панель. `127.0.0.1` — только этот компьютер (за nginx или туннелем). `0.0.0.0` — все сетевые интерфейсы, панель откроется с других устройств. В образе Docker задано `0.0.0.0`. | [config.py:7](https://github.com/mihey-web/printer-fleet-dashboard/blob/313ccaec83e4a3a05e632db1127df39faeed967e/config.py#L7), [main.py:52](https://github.com/mihey-web/printer-fleet-dashboard/blob/313ccaec83e4a3a05e632db1127df39faeed967e/main.py#L52) |
 | `WEB_PORT` | `8000` | Порт. Должен быть целым числом. | [config.py:8](https://github.com/mihey-web/printer-fleet-dashboard/blob/313ccaec83e4a3a05e632db1127df39faeed967e/config.py#L8), [main.py:53](https://github.com/mihey-web/printer-fleet-dashboard/blob/313ccaec83e4a3a05e632db1127df39faeed967e/main.py#L53) |
+| `FORGE_TRUSTED_PROXIES` | `127.0.0.1,::1` | Адреса обратных прокси (nginx, Caddy), чьим заголовкам `X-Real-IP` / `X-Forwarded-For` панель верит: IP или сети через запятую (`172.18.0.1`, `172.16.0.0/12`). Тогда ограничение входа и журнал действий видят настоящие адреса посетителей. Нужна для [Docker за nginx или Caddy на том же компьютере](install/docker.md#behind-nginx-or-caddy). Ошибочная запись пропускается с предупреждением в журнале. | [config.py](https://github.com/mihey-web/printer-fleet-dashboard/blob/main/config.py), [app/api/auth.py](https://github.com/mihey-web/printer-fleet-dashboard/blob/main/app/api/auth.py) |
 | `COOKIE_SECURE` | `1` | `1` — cookie входа передаются только по HTTPS (правильно за HTTPS-прокси). `0`, `false`, `False` или пустое значение — и по обычному HTTP; нужно, если открываете панель по `http://` с другого устройства. В файлах Docker задано `0`. | [config.py:41](https://github.com/mihey-web/printer-fleet-dashboard/blob/313ccaec83e4a3a05e632db1127df39faeed967e/config.py#L41) |
 | `FORGE_JWT_SECRET` | создаётся при первом запуске и хранится в `users.db` | Ключ, которым подписываются сеансы входа. Задайте, чтобы выбрать ключ самостоятельно; при смене ключа выходят все. Сгенерировать: `python -c "import secrets; print(secrets.token_hex(32))"`. | [config.py:34](https://github.com/mihey-web/printer-fleet-dashboard/blob/313ccaec83e4a3a05e632db1127df39faeed967e/config.py#L34), [app/api/main.py:818](https://github.com/mihey-web/printer-fleet-dashboard/blob/313ccaec83e4a3a05e632db1127df39faeed967e/app/api/main.py#L818), [app/api/auth.py:178](https://github.com/mihey-web/printer-fleet-dashboard/blob/313ccaec83e4a3a05e632db1127df39faeed967e/app/api/auth.py#L178) |
 | `FORGE_ADMIN_USERNAME` | `admin` | Логин администратора, создаваемого при первом запуске. Используется, только пока пользователей нет. | [config.py:46](https://github.com/mihey-web/printer-fleet-dashboard/blob/313ccaec83e4a3a05e632db1127df39faeed967e/config.py#L46) |
@@ -48,7 +52,7 @@
 
 ### История и автоматика {#history-automation}
 
-Этих трёх переменных нет в `.env.example`, но код их читает.
+Эти три переменные тоже есть в `.env.example`.
 
 | Переменная | По умолчанию | Что делает | Где читается |
 | --- | --- | --- | --- |

@@ -36,7 +36,7 @@ Settings here apply **only to this browser** on this device, for both roles («�
 | Section | What it does |
 | --- | --- |
 | Your login and **Log out** («Выйти») | |
-| **Appearance** («Оформление») | Colour theme: Ocean («Океан»), Classic («Классика»), Light («Светлая»), Night («Ночь»), Neon («Неон»), Cosmos («Космос»). **Text size** («Масштаб текста») 50–150 %. |
+| **Appearance** («Оформление») | Colour theme: Ocean («Океан»), Classic («Классика»), Light («Светлая»), Night («Ночь»), Cosmos («Космос»), Amber («Янтарь»), Glass («Стекло»). With Glass on, **Own photo…** («Своё фото…») puts any picture under the glass, kept in this browser only (**Remove photo** brings the built-in one back). **Text size** («Масштаб текста») 50–150 %. |
 | **Browser notifications** («Уведомления браузера») | **Pop-up notifications** («Всплывающие уведомления») with ticks for finish («завершение»), error («ошибка») and pause («пауза»). Off by default; the browser asks for permission. |
 | **App** («Приложение») | **Install** («Установить») — appears only when the browser offers to install the dashboard as an app. See [Phone and app](mobile-pwa.md). |
 | **Version** («Версия») | The running version. |

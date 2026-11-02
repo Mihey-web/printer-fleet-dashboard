@@ -154,6 +154,7 @@
             btn.classList.remove("active");
           }
         });
+        glassPhotoSync();
         // Redraw timeline canvas if visible
         STATE_COLORS = getStateColors();
         var canvas = document.getElementById("timeline-canvas");
@@ -166,6 +167,11 @@
         try { localStorage.removeItem("forge-ops-show-errors"); } catch (e) {}
         var stored = null;
         try { stored = localStorage.getItem(THEME_STORAGE_KEY); } catch (e) {}
+        // «Неон» is gone: whoever kept it moves to «Янтарь», silently (theme.js does the same first)
+        if (stored === "neon") {
+          stored = "amber";
+          try { localStorage.setItem(THEME_STORAGE_KEY, stored); } catch (e) {}
+        }
         if (stored !== null) {
           applyTheme(stored);
           return;
@@ -176,9 +182,61 @@
           applyTheme("light");
         }
       }
+      // «Стекло» is light or dark as the system is: when the system switches, the canvas
+      // colours (the timeline, the charts) are read again
+      try {
+        var schemeMq = window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)");
+        if (schemeMq && schemeMq.addEventListener) schemeMq.addEventListener("change", function () {
+          if (document.documentElement.getAttribute("data-theme") === "glass") applyTheme("glass");
+        });
+      } catch (e) {}
       function setTheme(value) {
         applyTheme(value);
         try { localStorage.setItem(THEME_STORAGE_KEY, value || ""); } catch (e) {}
+      }
+      // «Своё фото» under «Стекло»: made smaller here (the long side 1920 px, a JPEG, about
+      // 0.3–0.6 MB), kept in this browser only (forge-ops-glass-photo); theme.js shows it.
+      // The row is there in «Стекло» only: the other themes are opaque, a photo would not show.
+      const GLASS_PHOTO_KEY = "forge-ops-glass-photo";
+      function glassPhotoSync() {
+        var row = document.getElementById("glassPhotoRow");
+        if (!row) return;
+        row.hidden = document.documentElement.getAttribute("data-theme") !== "glass";
+        var has = false;
+        try { has = !!localStorage.getItem(GLASS_PHOTO_KEY); } catch (e) {}
+        document.getElementById("glassPhotoClear").hidden = !has;
+      }
+      function glassPhotoEncode(img, side, quality) {
+        var k = Math.min(1, side / Math.max(img.naturalWidth, img.naturalHeight));
+        var c = document.createElement("canvas");
+        c.width = Math.max(1, Math.round(img.naturalWidth * k));
+        c.height = Math.max(1, Math.round(img.naturalHeight * k));
+        c.getContext("2d").drawImage(img, 0, 0, c.width, c.height);
+        return c.toDataURL("image/jpeg", quality);
+      }
+      function glassPhotoPick(file) {
+        if (!file) return;
+        var url = URL.createObjectURL(file), img = new Image();
+        img.onload = function () {
+          URL.revokeObjectURL(url);
+          // the browser keeps about 5 MB for the whole panel: a smaller copy if the first does not fit
+          var saved = [[1920, 0.82], [1280, 0.72]].some(function (s) {
+            try { localStorage.setItem(GLASS_PHOTO_KEY, glassPhotoEncode(img, s[0], s[1])); return true; } catch (e) { return false; }
+          });
+          if (!saved) { showToast("Фото не поместилось в память браузера", false); return; }
+          if (typeof applyGlassPhoto === "function") applyGlassPhoto();
+          glassPhotoSync();
+        };
+        img.onerror = function () {
+          URL.revokeObjectURL(url);
+          showToast("Браузер не открыл эту картинку — попробуйте JPG или PNG", false);
+        };
+        img.src = url;
+      }
+      function glassPhotoClear() {
+        try { localStorage.removeItem(GLASS_PHOTO_KEY); } catch (e) {}
+        if (typeof applyGlassPhoto === "function") applyGlassPhoto();
+        glassPhotoSync();
       }
       const prevPrinterStates = {};
       var STATE_COLORS = getStateColors();
@@ -1021,7 +1079,7 @@
           ? ' pc-editable" data-edit="fan" data-part="' + (part || 0) + '" data-aux="' + (f.aux || 0) + '" data-chamber="' + (f.chamber || 0)
             + '" data-fans="' + keys.join(",")
           : '';
-        return '<span class="pc-chip' + edit + '" data-tip="' + (tipParts.join(" · ") || "Вентилятор") + '" style="color:hsl(' + Math.round(120 + main * 0.8) + ',70%,55%)">' + icon("wind") + main + '%</span>';
+        return '<span class="pc-chip' + edit + '" data-tip="' + (tipParts.join(" · ") || "Вентилятор") + '" style="color:hsl(calc(var(--fan-h, 120) + ' + main + ' * var(--fan-k, 0.8)),70%,var(--fan-l))">' + icon("wind") + main + '%</span>';
       }
       // Print speed, the feed rate % the printer reports (Bambu's speed modifier,
       // Creality's curFeedratePct): ↓ below 100, ⚡ above, 🚀 above 124. Its popover
@@ -1449,13 +1507,13 @@
       }
       // time left as the AMS cards show it ("7:05", "40 мин"), unbreakable
       function adLeft(min) { return amsFmtMin(min).replace(/ /g, "\u00a0"); }
-      // "HH:MM" on the same local day as nowTs, else "DD.MM HH:MM" (browser time)
+      // "HH:MM" on the same local day as nowTs, else "DD.MM HH:MM" (browser time; "DD/MM" in English)
       function adClock(ts, nowTs) {
         if (ts == null || !isFinite(ts)) return "—";
         var d = new Date(ts * 1000), n = new Date((nowTs == null ? ts : nowTs) * 1000);
         var hm = adPad(d.getHours()) + ":" + adPad(d.getMinutes());
         if (d.getFullYear() === n.getFullYear() && d.getMonth() === n.getMonth() && d.getDate() === n.getDate()) return hm;
-        return adPad(d.getDate()) + "." + adPad(d.getMonth() + 1) + " " + hm;
+        return adPad(d.getDate()) + (typeof I18N === "object" ? I18N.dateSep() : ".") + adPad(d.getMonth() + 1) + " " + hm;
       }
       function adNum(v) { return v == null || !isFinite(v) ? "—" : String(Math.round(Number(v))); }
       // A unit's automation status for the card line and the table:
@@ -1897,11 +1955,13 @@
         var d = new Date(ts * 1000), n = new Date((nowTs == null ? ts : nowTs) * 1000);
         var hm = jbPad(d.getHours()) + ":" + jbPad(d.getMinutes());
         if (d.getFullYear() === n.getFullYear() && d.getMonth() === n.getMonth() && d.getDate() === n.getDate()) return hm;
-        return jbPad(d.getDate()) + "." + jbPad(d.getMonth() + 1) + " " + hm;
+        return jbPad(d.getDate()) + (typeof I18N === "object" ? I18N.dateSep() : ".") + jbPad(d.getMonth() + 1) + " " + hm;
       }
       // 1.04 -> "1,04" (Russian decimal comma), "—" without a value
       function jobNum(v, digits) {
-        return v == null || v === "" || !isFinite(v) ? "—" : Number(v).toFixed(digits).replace(".", ",");
+        // the decimal sign of the panel's language (app/web/i18n.js): "1,04" in Russian, "1.04" in English
+        return v == null || v === "" || !isFinite(v) ? "—"
+          : Number(v).toFixed(digits).replace(".", typeof I18N === "object" ? I18N.decimal() : ",");
       }
       // A running print by the printer's live status (when there is one):
       // "open" | "open_paused" | "open_offline"; a closed one: its result.
@@ -2208,7 +2268,7 @@
         return '<div class="jobs-days">' + days.map(function (d, i) {
           var jobs = Number(d.jobs) || 0, ok = Math.min(jobs, Number(d.finished) || 0);
           var m = /^\d{4}-(\d{2})-(\d{2})$/.exec(String(d.day || ""));
-          var label = m ? m[2] + "." + m[1] : safeText(d.day, "");
+          var label = m ? m[2] + (typeof I18N === "object" ? I18N.dateSep() : ".") + m[1] : safeText(d.day, "");
           return '<div class="jobs-day" data-tip="' + label + ": " + jobs + (jobs ? ", успешно " + ok : "") + '">' +
             '<span class="jobs-day-bar"><i class="jobs-day-other" style="height:' + ((jobs - ok) / max * 100).toFixed(1) + '%"></i>' +
             '<i class="jobs-day-ok" style="height:' + (ok / max * 100).toFixed(1) + '%"></i></span>' +
@@ -2688,7 +2748,7 @@
       function histPeriodText(f) {
         f = histFilterFrom(f);
         if (f.period !== "custom") return histPeriodOf(f.period).label;
-        function dm(day) { return day.slice(8, 10) + "." + day.slice(5, 7); }
+        function dm(day) { return day.slice(8, 10) + (typeof I18N === "object" ? I18N.dateSep() : ".") + day.slice(5, 7); }
         return f.from === f.to ? dm(f.from) : dm(f.from) + "–" + dm(f.to);
       }
       // The loaders' text: «Считаем за 7 дн…» (plain text)
@@ -3072,15 +3132,17 @@
         if (d.getFullYear() === n.getFullYear() && d.getMonth() === n.getMonth() && d.getDate() === n.getDate()) {
           return "с " + maint2(d.getHours()) + ":" + maint2(d.getMinutes());
         }
-        return "с " + maint2(d.getDate()) + "." + maint2(d.getMonth() + 1) + (d.getFullYear() === n.getFullYear() ? "" : "." + d.getFullYear());
+        var ds = (typeof I18N === "object" ? I18N.dateSep() : ".");
+        return "с " + maint2(d.getDate()) + ds + maint2(d.getMonth() + 1) + (d.getFullYear() === n.getFullYear() ? "" : ds + d.getFullYear());
       }
       // The whole story in plain text (the plaque's tooltip, the admin table's badge):
       // «На обслуживании с 18.10.2026 14:32 · поставил admin · меняю хотенд».
       function maintTipText(m) {
         if (!m) return "";
         var d = new Date(Number(m.since) * 1000);
-        var t = "На обслуживании" + (m.since != null && isFinite(d.getTime()) ? " с " + maint2(d.getDate()) + "." + maint2(d.getMonth() + 1)
-          + "." + d.getFullYear() + " " + maint2(d.getHours()) + ":" + maint2(d.getMinutes()) : "");
+        var ds = (typeof I18N === "object" ? I18N.dateSep() : ".");
+        var t = "На обслуживании" + (m.since != null && isFinite(d.getTime()) ? " с " + maint2(d.getDate()) + ds + maint2(d.getMonth() + 1)
+          + ds + d.getFullYear() + " " + maint2(d.getHours()) + ":" + maint2(d.getMinutes()) : "");
         if (m.by) t += " · поставил " + m.by;
         if (m.note) t += " · " + m.note;
         return t;
@@ -3811,7 +3873,7 @@
       // "с 17.10 18:27" (local time), "" without a time.
       function nfSinceText(ts) {
         var d = nfTs(ts);
-        return d ? "с " + nfPad(d.getDate()) + "." + nfPad(d.getMonth() + 1) + " " + nfClock(ts) : "";
+        return d ? "с " + nfPad(d.getDate()) + (typeof I18N === "object" ? I18N.dateSep() : ".") + nfPad(d.getMonth() + 1) + " " + nfClock(ts) : "";
       }
       function nfModel(p) {
         return String(p.device_type || p.kind || "").toUpperCase();
@@ -6647,6 +6709,9 @@
       document.getElementById("brandBtn").addEventListener("click", () => { setActiveView("fleet"); window.scrollTo(0, 0); });
       // The router starts once the whole IIFE has run (appjs-iife-var-hoisting-trap).
       Promise.resolve().then(routeStart);
+      // Another language (app/web/i18n.js): the screen is drawn again, so its hand-made dates
+      // and numbers («01.11», «×1,00») follow the language (the translator leaves them alone).
+      document.addEventListener("forge-lang", function () { routeApply(routeNow(), true); });
       loadPersistedFilters();
       loadSortPrefs();
       renderFilters();
@@ -6667,6 +6732,13 @@
           setTheme(btn.getAttribute("data-theme") || "");
         });
       });
+      var glassPhotoInput = document.getElementById("glassPhotoInput");
+      document.getElementById("glassPhotoPick").addEventListener("click", function () { glassPhotoInput.click(); });
+      glassPhotoInput.addEventListener("change", function () {
+        glassPhotoPick(glassPhotoInput.files && glassPhotoInput.files[0]);
+        glassPhotoInput.value = "";
+      });
+      document.getElementById("glassPhotoClear").addEventListener("click", glassPhotoClear);
       notificationsEnabledToggle.addEventListener("change", function () {
         updateNotificationSetting("enabled", notificationsEnabledToggle.checked);
       });
@@ -7015,7 +7087,7 @@
           var td = new Date(tt * 1000);
           var tl;
           if (showDate) {
-            tl = td.getDate().toString().padStart(2,'0') + '.' + (td.getMonth()+1).toString().padStart(2,'0') + ' ' +
+            tl = td.getDate().toString().padStart(2,'0') + (typeof I18N === 'object' ? I18N.dateSep() : '.') + (td.getMonth()+1).toString().padStart(2,'0') + ' ' +
                  td.getHours().toString().padStart(2,'0') + ':' + td.getMinutes().toString().padStart(2,'0');
           } else {
             tl = td.getHours().toString().padStart(2,'0') + ':' + td.getMinutes().toString().padStart(2,'0');
@@ -7903,6 +7975,9 @@
           var now = Date.now() / 1000;
           var url = historySub === "actions" ? actsCsvUrl(acts.filter, histWindow(histFilter, now), histFilter.printer)
             : jobsCsvUrl(jobsQueryFilter(now), now);
+          // the column names in the panel's language (app/web/i18n.js); none in Russian
+          var lang = typeof I18N === "object" ? I18N.lang() : "ru";
+          if (lang !== "ru") url += "&lang=" + encodeURIComponent(lang);
           // a plain navigation cannot refresh an expired access cookie: refresh it first
           apiFetch("/api/auth/me").then(function () { window.location.href = url; }, function () {});
         });
@@ -8288,7 +8363,7 @@
       function amsTipTime(t, hours) {
         var d = new Date(t * 1000);
         var s = pad2(d.getHours()) + ':' + pad2(d.getMinutes());
-        return (hours != null ? hours : amsHours) > 24 ? pad2(d.getDate()) + '.' + pad2(d.getMonth() + 1) + ' ' + s : s;
+        return (hours != null ? hours : amsHours) > 24 ? pad2(d.getDate()) + (typeof I18N === 'object' ? I18N.dateSep() : '.') + pad2(d.getMonth() + 1) + ' ' + s : s;
       }
       // Ховер по графику: вертикальная линия, маркер ближайшей точки и тултип «время · значение».
       // The temperature chart passes opts: geo (as amsChart), hours (amsTipTime), tip(best)
@@ -9179,7 +9254,7 @@
 
       function fmtAuditTime(ts) {
         var d = new Date(ts * 1000);
-        return pad2(d.getDate()) + '.' + pad2(d.getMonth() + 1) + ' ' + pad2(d.getHours()) + ':' + pad2(d.getMinutes());
+        return pad2(d.getDate()) + (typeof I18N === 'object' ? I18N.dateSep() : '.') + pad2(d.getMonth() + 1) + ' ' + pad2(d.getHours()) + ':' + pad2(d.getMinutes());
       }
 
       function uaDevice(ua) {
@@ -9781,6 +9856,7 @@
         srvEl('tgNotifyFinishRepeat').checked = !!values.telegram_notify_on_finish_repeat;
         srvEl('tgNotifyError').checked = !!values.telegram_notify_on_error;
         srvEl('tgNotifyPaused').checked = !!values.telegram_notify_on_paused;
+        if (srvEl('tgLang')) srvEl('tgLang').value = values.telegram_lang || 'ru';
         ['Finish', 'Error', 'Paused'].forEach(function (k) {
           var tpl = srvEl('tgTpl' + k);
           if (tpl) tpl.classList.toggle('tpl-dim', !srvEl('tgNotify' + k).checked);
@@ -9873,6 +9949,9 @@
           srvDebounced('interval', function () {
             return { telegram_update_interval: srvParseInt(el, 'Интервал обновления') };
           }, 'tgSavedFlash', 'tgError');
+        });
+        if (srvEl('tgLang')) srvEl('tgLang').addEventListener('change', function () {
+          saveServerSettings({ telegram_lang: this.value }, 'tgSavedFlash', 'tgError').catch(function () {});
         });
         srvEl('tgNotifyFinishRepeat').addEventListener('change', function () {
           saveServerSettings({ telegram_notify_on_finish_repeat: this.checked }, 'tgSavedFlash', 'tgError').catch(function () {});

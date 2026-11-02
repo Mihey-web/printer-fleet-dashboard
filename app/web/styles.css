@@ -1,18 +1,18 @@
     :root {
       /* === Radix 12-step scales === */
-      /* Neutral: slate dark */
-      --gray-1: #0f172a;
-      --gray-2: #1e293b;
-      --gray-3: #263548;
-      --gray-4: #2d3f52;
-      --gray-5: #33475c;
-      --gray-6: #3b5066;
-      --gray-7: #475e77;
-      --gray-8: #5b7590;
-      --gray-9: #6b8aa5;
-      --gray-10: #8ba7be;
-      --gray-11: #b8c9d9;
-      --gray-12: #e2eaf3;
+      /* Neutral: a deep sea slate (blue-teal) */
+      --gray-1: #061723;
+      --gray-2: #0b2231;
+      --gray-3: #11293a;
+      --gray-4: #163245;
+      --gray-5: #1b3b50;
+      --gray-6: #22465d;
+      --gray-7: #3f6178;
+      --gray-8: #557891;
+      --gray-9: #6c8fa7;
+      --gray-10: #8eacc0;
+      --gray-11: #b7cddb;
+      --gray-12: #e3f0f6;
       /* ok/finished: jade (teal) */
       --ok-1: #0d1a1a;
       --ok-2: #122626;
@@ -35,9 +35,9 @@
       --info-6: #265c8f;
       --info-7: #2e6ea8;
       --info-8: #2e80c4;
-      --info-9: #60a5fa;
-      --info-10: #70b5ff;
-      --info-11: #93cbff;
+      --info-9: #4cc2ff;
+      --info-10: #66ccff;
+      --info-11: #96dcff;
       --info-12: #c8e4ff;
       /* warn/paused: amber */
       --warn-1: #1a140d;
@@ -67,15 +67,15 @@
       --danger-12: #fecaca;
       /* Aliases */
       --bg: var(--gray-1);
-      --bg-elev: #263548;
-      --bg-panel: #1e293bcc;
-      --bg-panel-2: #1a2636e6;
-      --bg-soft: rgba(255, 255, 255, 0.04);
-      --line: rgba(255, 255, 255, 0.08);
-      --line-strong: rgba(255, 255, 255, 0.14);
-      --text: #e2eaf3;
-      --text-dim: #b8c9d9;
-      --text-muted: #8ba7be;
+      --bg-elev: #0e2a3b;
+      --bg-panel: #113246;
+      --bg-panel-2: #0d2939;
+      --bg-soft: rgba(2, 14, 24, 0.40);
+      --line: rgba(150, 220, 255, 0.08);
+      --line-strong: rgba(150, 220, 255, 0.15);
+      --text: #e3f0f6;
+      --text-dim: #b7cddb;
+      --text-muted: #94b2c6;
       --ok: var(--ok-9);
       --ok-soft: var(--ok-3);
       --warn: var(--warn-9);
@@ -91,16 +91,16 @@
       --toggle-active-bg: var(--ok-9);
       --toggle-active-border: var(--ok-8);
       --tab-active-text: #0a1a1a;
-      --shadow-xl: 0 30px 80px rgba(0, 0, 0, 0.42);
-      --shadow-lg: 0 18px 40px rgba(0, 0, 0, 0.32);
+      --shadow-xl: inset 0 1px 0 rgba(170, 235, 255, 0.07), 0 1px 2px rgba(0, 8, 16, 0.40), 0 8px 18px rgba(0, 8, 16, 0.32), 0 22px 44px rgba(0, 8, 16, 0.34);
+      --shadow-lg: inset 0 1px 0 rgba(170, 235, 255, 0.07), 0 1px 2px rgba(0, 8, 16, 0.40), 0 10px 26px rgba(0, 8, 16, 0.38);
       --grid-dot: rgba(255, 255, 255, 0.025);
       --radius-xl: 28px;
       --radius-lg: 20px;
       --radius-md: 14px;
       --radius-sm: 10px;
       /* === Timeline canvas colors === */
-      --tl-bg-top: #0a1420;
-      --tl-bg-bottom: #081018;
+      --tl-bg-top: #0b2433;
+      --tl-bg-bottom: #081c29;
       --tl-zebra: rgba(30, 50, 70, 0.4);
       --tl-grid-major: rgba(60, 80, 100, 0.3);
       --tl-grid-minor: rgba(40, 55, 70, 0.15);
@@ -125,14 +125,14 @@
       --ok-bg-grad-end: rgba(45, 212, 191, 0.03);
       --ok-border-strong: rgba(45, 212, 191, 0.22);
       --ok-shadow-strong: rgba(45, 212, 191, 0.10);
-      --info-grad-start: #1a4870;
-      --info-grad-mid: #60a5fa;
-      --info-grad-end: #93cbff;
-      --info-border: rgba(96, 165, 250, 0.22);
-      --info-glow: rgba(96, 165, 250, 0.38);
-      --info-bg-grad-start: rgba(96, 165, 250, 0.06);
-      --info-bg-grad-end: rgba(96, 165, 250, 0.02);
-      --info-border-strong: rgba(96, 165, 250, 0.16);
+      --info-grad-start: #155a80;
+      --info-grad-mid: #4cc2ff;
+      --info-grad-end: #96dcff;
+      --info-border: rgba(76, 194, 255, 0.24);
+      --info-glow: rgba(76, 194, 255, 0.38);
+      --info-bg-grad-start: rgba(76, 194, 255, 0.05);
+      --info-bg-grad-end: rgba(76, 194, 255, 0.0);
+      --info-border-strong: transparent;
       --warn-grad-start: #6b501a;
       --warn-grad-mid: #fbbf24;
       --warn-grad-end: #fddf6e;
@@ -155,136 +155,150 @@
       --danger-pulse-border-start: rgba(248, 113, 113, 0.22);
       --danger-pulse-border-mid: rgba(248, 113, 113, 0.40);
       --offline-border: rgba(148, 163, 184, 0.12);
-      --offline-bg-start: rgba(15, 23, 42, 0.85);
-      --offline-bg-end: rgba(12, 18, 34, 0.90);
-      --overlay-bg: rgba(8, 14, 22, 0.92);
-      --btn-primary: #60a5fa;
+      --offline-bg-start: #0a2130;
+      --offline-bg-end: #091d2a;
+      --overlay-bg: rgba(3, 14, 22, 0.92);
+      --btn-primary: #4cc2ff;
       --btn-primary-text: #ffffff;
       --temp-nozzle-grad: linear-gradient(90deg, #1a6b5e 0%, var(--ok) 42%, var(--warn) 100%);
-      --temp-bed-grad: linear-gradient(90deg, #1a4870 0%, var(--info) 45%, #93cbff 100%);
-      --shadow-hover: 0 28px 56px rgba(0, 0, 0, 0.38);
-      --shadow-card: 0 12px 32px rgba(0, 0, 0, 0.48);
+      --temp-bed-grad: linear-gradient(90deg, #155a80 0%, var(--info) 45%, #96dcff 100%);
+      --shadow-hover: inset 0 1px 0 rgba(170, 235, 255, 0.09), 0 2px 4px rgba(0, 8, 16, 0.40), 0 14px 28px rgba(0, 8, 16, 0.36), 0 32px 60px rgba(0, 8, 16, 0.40);
+      --shadow-card: 0 8px 18px rgba(0, 8, 16, 0.32), 0 22px 44px rgba(0, 8, 16, 0.34);
       --shadow-pulse: 0 0 0 0 rgba(45, 212, 191, 0.4);
       --shadow-pulse-start: 0 0 0 0 rgba(45, 212, 191, 0.35);
       --shadow-pulse-end: 0 0 0 10px rgba(45, 212, 191, 0);
       --shadow-live: 0 0 14px rgba(45, 212, 191, 0.40);
     }
     html[data-theme="dark-classic"] {
-      /* Radix scales: GitHub Dark gray, grass, blue, amber, red */
-      --gray-1: #0d1117; --gray-2: #161b22; --gray-3: #1c2128; --gray-4: #21262d; --gray-5: #282e36; --gray-6: #30363d; --gray-7: #3d444d; --gray-8: #585f69; --gray-9: #656c76; --gray-10: #737a84; --gray-11: #8b949e; --gray-12: #e6edf3;
-      --ok-1: #0d1a12; --ok-2: #12261a; --ok-3: #1a3826; --ok-4: #1a4730; --ok-5: #1e5638; --ok-6: #266642; --ok-7: #2e7a4e; --ok-8: #2e9158; --ok-9: #3fb950; --ok-10: #48c95a; --ok-11: #6edb7e; --ok-12: #b0f0b8;
-      --info-1: #0d1a2e; --info-2: #112540; --info-3: #1a3352; --info-4: #1a4066; --info-5: #1e4d7a; --info-6: #265c8f; --info-7: #2e6ea8; --info-8: #2e80c4; --info-9: #58a6ff; --info-10: #68b6ff; --info-11: #8bcbff; --info-12: #c0e4ff;
-      --warn-1: #1a140d; --warn-2: #261e12; --warn-3: #382a1a; --warn-4: #47341a; --warn-5: #56401e; --warn-6: #664d26; --warn-7: #7a5c2e; --warn-8: #916e2e; --warn-9: #d29922; --warn-10: #e0aa30; --warn-11: #e8c04e; --warn-12: #f0e0a0;
-      --danger-1: #190d0d; --danger-2: #241212; --danger-3: #361a1a; --danger-4: #441a1a; --danger-5: #521e1e; --danger-6: #602626; --danger-7: #722e2e; --danger-8: #862e2e; --danger-9: #f85149; --danger-10: #fc655e; --danger-11: #fd8a85; --danger-12: #fec0bd;
+      /* «Классика»: a neutral graphite, as a dark IDE (VS Code's Dark Modern greys). Flat and
+         strict: solid surfaces, 1 px borders, 4 px corners, no gradients, no shadows, no glows.
+         A printer's state is a gutter bar along the card's left edge, as an editor marks a line.
+         The one accent is the IDE's blue on what is selected. The rest is the «Классика» block
+         at the end. */
+      --gray-1: #181818; --gray-2: #1f1f1f; --gray-3: #262626; --gray-4: #2b2b2b; --gray-5: #313131; --gray-6: #3c3c3c; --gray-7: #5a5a5a; --gray-8: #6e6e6e; --gray-9: #858585; --gray-10: #9d9d9d; --gray-11: #b4b4b4; --gray-12: #e0e0e0;
+      --ok-1: #161c16; --ok-2: #1a231a; --ok-3: #20301f; --ok-4: #263b25; --ok-5: #2d472b; --ok-6: #355533; --ok-7: #42693f; --ok-8: #55864f; --ok-9: #89d185; --ok-10: #98d894; --ok-11: #afe2ab; --ok-12: #d6f0d4;
+      --info-1: #151b22; --info-2: #17212c; --info-3: #1b2d3e; --info-4: #1e3850; --info-5: #224563; --info-6: #275379; --info-7: #2e6698; --info-8: #3a80bd; --info-9: #4daafc; --info-10: #62b4fc; --info-11: #8cc8fd; --info-12: #c9e4fe;
+      --warn-1: #1e1a12; --warn-2: #262013; --warn-3: #332a14; --warn-4: #403415; --warn-5: #4d3e16; --warn-6: #5c4a17; --warn-7: #745c18; --warn-8: #94761a; --warn-9: #d7b01f; --warn-10: #dfbc3e; --warn-11: #e8cb63; --warn-12: #f4e6b0;
+      --danger-1: #1f1616; --danger-2: #291919; --danger-3: #3a1d1d; --danger-4: #482121; --danger-5: #572525; --danger-6: #682a2a; --danger-7: #813232; --danger-8: #a33d3d; --danger-9: #f4645f; --danger-10: #f57772; --danger-11: #f79a96; --danger-12: #fbd0ce;
       --finished-1: var(--ok-1); --finished-2: var(--ok-2); --finished-3: var(--ok-3); --finished-4: var(--ok-4); --finished-5: var(--ok-5); --finished-6: var(--ok-6); --finished-7: var(--ok-7); --finished-8: var(--ok-8); --finished-9: var(--ok-9); --finished-10: var(--ok-10); --finished-11: var(--ok-11); --finished-12: var(--ok-12);
-      --bg: #0d1117;
-      --bg-elev: #1c2128;
-      --bg-panel: rgba(22, 27, 34, 0.88);
-      --bg-panel-2: rgba(18, 22, 28, 0.92);
-      --bg-soft: rgba(255, 255, 255, 0.04);
-      --line: rgba(255, 255, 255, 0.08);
-      --line-strong: rgba(255, 255, 255, 0.14);
-      --text: #e6edf3;
-      --text-dim: #8b949e;
-      --text-muted: #656c76;
-      --steel: #8b949e;
-      --ok: #3fb950;
-      --ok-soft: rgba(63, 185, 80, 0.15);
-      --warn: #d29922;
-      --warn-soft: rgba(210, 153, 34, 0.15);
-      --danger: #f85149;
-      --danger-soft: rgba(248, 81, 73, 0.15);
-      --info: #58a6ff;
-      --info-soft: rgba(88, 166, 255, 0.15);
-      --steel-soft: rgba(255, 255, 255, 0.08);
-      --steel-border: rgba(255, 255, 255, 0.12);
-      --shadow-xl: 0 30px 80px rgba(0, 0, 0, 0.55);
-      --shadow-lg: 0 18px 40px rgba(0, 0, 0, 0.42);
-      --grid-dot: rgba(255, 255, 255, 0.02);
-      --finished: #3fb950;
-      --tab-active-text: #0d1117;
-      --toggle-active-bg: rgba(63, 185, 80, 0.50);
-      --toggle-active-border: rgba(63, 185, 80, 0.70);
+      --bg: #181818;
+      --bg-elev: #1f1f1f;
+      --bg-panel: #1f1f1f;
+      --bg-panel-2: #1f1f1f;
+      --bg-soft: #262626;
+      --line: #2b2b2b;
+      --line-strong: #3c3c3c;
+      --text: #d4d4d4;
+      --text-dim: #a6a6a6;
+      --text-muted: #939393;
+      --steel: #a6a6a6;
+      --ok: #89d185;
+      --ok-soft: rgba(137, 209, 133, 0.12);
+      --warn: #d7b01f;
+      --warn-soft: rgba(215, 176, 31, 0.12);
+      --danger: #f4645f;
+      --danger-soft: rgba(244, 100, 95, 0.13);
+      --info: #4daafc;
+      --info-soft: rgba(77, 170, 252, 0.13);
+      --steel-soft: #262626;
+      --steel-border: #3c3c3c;
+      --shadow-xl: none;
+      --shadow-lg: none;
+      --grid-dot: rgba(255, 255, 255, 0);
+      --finished: #89d185;
+      --tab-active-text: #141414;
+      --toggle-active-bg: #0078d4;
+      --toggle-active-border: #2b8be0;
+      --radius-xl: 4px;
+      --radius-lg: 4px;
+      --radius-md: 4px;
+      --radius-sm: 3px;
       /* === Timeline canvas colors === */
-      --tl-bg-top: #0d1117;
-      --tl-bg-bottom: #090c10;
-      --tl-zebra: rgba(30, 30, 30, 0.4);
-      --tl-grid-major: rgba(60, 60, 60, 0.3);
-      --tl-grid-minor: rgba(40, 40, 40, 0.15);
-      --tl-axis-line: #3d444d;
-      --tl-axis-text: #8b949e;
-      --tl-tick-major: #585f69;
-      --tl-tick-minor: #282e36;
-      --tl-label-text: #8b949e;
-      --tl-label-dot: rgba(255, 255, 255, 0.3);
-      --tl-bar-shadow: rgba(0, 0, 0, 0.3);
-      --tl-bar-highlight: rgba(255, 255, 255, 0.08);
-      --tl-now-line: rgba(248, 81, 73, 0.5);
-      --tl-now-text: #f85149;
-      /* Gradients and specific colors */
-      --ok-grad-start: #1a6b30;
-      --ok-grad-mid: #3fb950;
-      --ok-grad-end: #6edb7e;
-      --ok-border: rgba(63, 185, 80, 0.22);
-      --ok-shadow: rgba(63, 185, 80, 0.25);
-      --ok-glow: rgba(63, 185, 80, 0.35);
-      --ok-bg-grad-start: rgba(63, 185, 80, 0.08);
-      --ok-bg-grad-end: rgba(63, 185, 80, 0.03);
-      --ok-border-strong: rgba(63, 185, 80, 0.22);
-      --ok-shadow-strong: rgba(63, 185, 80, 0.10);
-      --info-grad-start: #1a4870;
-      --info-grad-mid: #58a6ff;
-      --info-grad-end: #8bcbff;
-      --info-border: rgba(88, 166, 255, 0.22);
-      --info-glow: rgba(88, 166, 255, 0.38);
-      --info-bg-grad-start: rgba(88, 166, 255, 0.06);
-      --info-bg-grad-end: rgba(88, 166, 255, 0.02);
-      --info-border-strong: rgba(88, 166, 255, 0.16);
-      --warn-grad-start: #6b501a;
-      --warn-grad-mid: #d29922;
-      --warn-grad-end: #e8c04e;
-      --warn-border: rgba(210, 153, 34, 0.22);
-      --warn-bg-grad-start: rgba(210, 153, 34, 0.08);
-      --warn-bg-grad-end: rgba(210, 153, 34, 0.03);
-      --warn-border-strong: rgba(210, 153, 34, 0.20);
-      --warn-shadow: rgba(210, 153, 34, 0.10);
-      --danger-grad-start: #6b2626;
-      --danger-grad-mid: #f85149;
-      --danger-grad-end: #fd8a85;
-      --danger-border: rgba(248, 81, 73, 0.22);
-      --danger-glow: rgba(248, 81, 73, 0.38);
-      --danger-bg-grad-start: rgba(248, 81, 73, 0.10);
-      --danger-bg-grad-end: rgba(248, 81, 73, 0.04);
-      --danger-border-strong: rgba(248, 81, 73, 0.28);
-      --danger-shadow-strong: rgba(248, 81, 73, 0.12);
-      --danger-pulse-start: rgba(248, 81, 73, 0.10);
-      --danger-pulse-mid: rgba(248, 81, 73, 0.25);
-      --danger-pulse-border-start: rgba(248, 81, 73, 0.22);
-      --danger-pulse-border-mid: rgba(248, 81, 73, 0.40);
-      --offline-border: rgba(139, 148, 158, 0.12);
-      --offline-bg-start: rgba(13, 17, 23, 0.85);
-      --offline-bg-end: rgba(10, 14, 18, 0.90);
-      --overlay-bg: rgba(10, 14, 18, 0.92);
-      --btn-primary: #58a6ff;
+      --tl-bg-top: #1f1f1f;
+      --tl-bg-bottom: #1f1f1f;
+      --tl-zebra: rgba(255, 255, 255, 0.02);
+      --tl-grid-major: rgba(255, 255, 255, 0.08);
+      --tl-grid-minor: rgba(255, 255, 255, 0.035);
+      --tl-axis-line: #3c3c3c;
+      --tl-axis-text: #939393;
+      --tl-tick-major: #5a5a5a;
+      --tl-tick-minor: #2b2b2b;
+      --tl-label-text: #a6a6a6;
+      --tl-label-dot: rgba(255, 255, 255, 0.25);
+      --tl-bar-shadow: rgba(0, 0, 0, 0);
+      --tl-bar-highlight: rgba(255, 255, 255, 0);
+      --tl-now-line: rgba(244, 100, 95, 0.6);
+      --tl-now-text: #f4645f;
+      /* Gradients and specific colors: flat (a gradient's ends are the same colour) */
+      --ok-grad-start: #89d185;
+      --ok-grad-mid: #89d185;
+      --ok-grad-end: #89d185;
+      --ok-border: rgba(137, 209, 133, 0.35);
+      --ok-shadow: rgba(0, 0, 0, 0);
+      --ok-glow: rgba(0, 0, 0, 0);
+      --ok-bg-grad-start: #1f1f1f;
+      --ok-bg-grad-end: #1f1f1f;
+      --ok-border-strong: #2b2b2b;
+      --ok-shadow-strong: rgba(0, 0, 0, 0);
+      --info-grad-start: #0078d4;
+      --info-grad-mid: #0078d4;
+      --info-grad-end: #0078d4;
+      --info-border: rgba(77, 170, 252, 0.35);
+      --info-glow: rgba(0, 0, 0, 0);
+      --info-bg-grad-start: #1f1f1f;
+      --info-bg-grad-end: #1f1f1f;
+      --info-border-strong: #2b2b2b;
+      --warn-grad-start: #d7b01f;
+      --warn-grad-mid: #d7b01f;
+      --warn-grad-end: #d7b01f;
+      --warn-border: rgba(215, 176, 31, 0.35);
+      --warn-bg-grad-start: #1f1f1f;
+      --warn-bg-grad-end: #1f1f1f;
+      --warn-border-strong: #2b2b2b;
+      --warn-shadow: rgba(0, 0, 0, 0);
+      --danger-grad-start: #f4645f;
+      --danger-grad-mid: #f4645f;
+      --danger-grad-end: #f4645f;
+      --danger-border: rgba(244, 100, 95, 0.38);
+      --danger-glow: rgba(0, 0, 0, 0);
+      --danger-bg-grad-start: #1f1f1f;
+      --danger-bg-grad-end: #1f1f1f;
+      --danger-border-strong: #2b2b2b;
+      --danger-shadow-strong: rgba(0, 0, 0, 0);
+      --danger-pulse-start: rgba(244, 100, 95, 0.10);
+      --danger-pulse-mid: rgba(244, 100, 95, 0.20);
+      --danger-pulse-border-start: rgba(244, 100, 95, 0.30);
+      --danger-pulse-border-mid: rgba(244, 100, 95, 0.50);
+      --offline-border: #2b2b2b;
+      --offline-bg-start: #1c1c1c;
+      --offline-bg-end: #1c1c1c;
+      --overlay-bg: #181818;
+      --btn-primary: #0078d4;
       --btn-primary-text: #ffffff;
-      --temp-nozzle-grad: linear-gradient(90deg, #1a6b30 0%, var(--ok) 42%, var(--warn) 100%);
-      --temp-bed-grad: linear-gradient(90deg, #1a4870 0%, var(--info) 45%, #8bcbff 100%);
-      --shadow-hover: 0 28px 56px rgba(0, 0, 0, 0.42);
-      --shadow-card: 0 12px 32px rgba(0, 0, 0, 0.52);
-      --shadow-pulse: 0 0 0 0 rgba(63, 185, 80, 0.4);
-      --shadow-pulse-start: 0 0 0 0 rgba(63, 185, 80, 0.35);
-      --shadow-pulse-end: 0 0 0 10px rgba(63, 185, 80, 0);
-      --shadow-live: 0 0 14px rgba(63, 185, 80, 0.40);
+      --temp-nozzle-grad: linear-gradient(90deg, var(--ok) 0%, var(--warn) 100%);
+      --temp-bed-grad: linear-gradient(90deg, #0078d4 0%, var(--info) 100%);
+      --shadow-hover: none;
+      --shadow-card: none;
+      --shadow-pulse: 0 0 0 0 rgba(0, 0, 0, 0);
+      --shadow-pulse-start: 0 0 0 0 rgba(0, 0, 0, 0);
+      --shadow-pulse-end: 0 0 0 0 rgba(0, 0, 0, 0);
+      --shadow-live: none;
+      /* the card's chips: a hot nozzle, the Wi-Fi signal, the fan's lightness */
+      --chip-hot: #ce9178;
+      --wifi-good: #89d185;
+      --wifi-ok: #d7b01f;
+      --wifi-weak: #f4645f;
+      --fan-l: 62%;
     }
     html[data-theme="light"] {
       /* Gray (GitHub light) */
       --gray-1: #f6f8fa; --gray-2: #ffffff; --gray-3: #f0f2f5; --gray-4: #e8eaed;
-      --gray-5: #e0e3e8; --gray-6: #d5d8de; --gray-7: #c8ccd4; --gray-8: #b0b6c0;
+      --gray-5: #e0e3e8; --gray-6: #d5d8de; --gray-7: #a8b0ba; --gray-8: #9aa2ad;
       --gray-9: #848d99; --gray-10: #78818d; --gray-11: #656d76; --gray-12: #1f2328;
       /* Ok/grass (GitHub green light) */
       --ok-1: #effaf0; --ok-2: #dff5e0; --ok-3: #c8edcb; --ok-4: #a8e0ae;
       --ok-5: #80d088; --ok-6: #56be60; --ok-7: #3ba84a; --ok-8: #2e9a3e;
-      --ok-9: #2da44e; --ok-10: #26943e; --ok-11: #1a7a32; --ok-12: #0d3a18;
+      --ok-9: #1f883d; --ok-10: #26943e; --ok-11: #1a7a32; --ok-12: #0d3a18;
       /* Info/blue (GitHub blue light) */
       --info-1: #eaf4ff; --info-2: #d5e8ff; --info-3: #b8d8ff; --info-4: #8ac0ff;
       --info-5: #58a0ff; --info-6: #3080f0; --info-7: #1a6de0; --info-8: #105ad0;
@@ -292,7 +306,7 @@
       /* Warn/amber (GitHub yellow light) */
       --warn-1: #fdf6e0; --warn-2: #faeaae; --warn-3: #f5d878; --warn-4: #edc050;
       --warn-5: #e0a830; --warn-6: #d09020; --warn-7: #c08018; --warn-8: #b07010;
-      --warn-9: #bf8700; --warn-10: #a07000; --warn-11: #806000; --warn-12: #403000;
+      --warn-9: #8a5d00; --warn-10: #a07000; --warn-11: #7d4e00; --warn-12: #403000;
       /* Danger/red (GitHub red light) */
       --danger-1: #fdece8; --danger-2: #fbd8d0; --danger-3: #f8b8aa; --danger-4: #f49080;
       --danger-5: #ee6858; --danger-6: #e04838; --danger-7: #d03428; --danger-8: #c0281e;
@@ -308,12 +322,12 @@
       --line: rgba(0, 0, 0, 0.08);
       --line-strong: rgba(0, 0, 0, 0.14);
       --text: #1f2328;
-      --text-dim: #656d76;
-      --text-muted: #848d99;
+      --text-dim: #4f5761;
+      --text-muted: #656d76;
       --steel: #656d76;
-      --ok: #2da44e;
+      --ok: #1a7f37;
       --ok-soft: rgba(45, 164, 78, 0.18);
-      --warn: #bf8700;
+      --warn: #8a5d00;
       --warn-soft: rgba(191, 135, 0, 0.18);
       --danger: #cf222e;
       --danger-soft: rgba(207, 34, 46, 0.18);
@@ -321,9 +335,9 @@
       --info-soft: rgba(9, 105, 218, 0.18);
       --steel-soft: rgba(0, 0, 0, 0.06);
       --steel-border: rgba(0, 0, 0, 0.10);
-      --finished: #2da44e;
+      --finished: #1a7f37;
       --tab-active-text: #1f2328;
-      --toggle-active-bg: #2da44e;
+      --toggle-active-bg: #1f883d;
       --toggle-active-border: #1a7a32;
       --shadow-xl: 0 30px 80px rgba(0, 0, 0, 0.12);
       --shadow-lg: 0 18px 40px rgba(0, 0, 0, 0.08);
@@ -335,7 +349,7 @@
       --tl-grid-major: rgba(0,0,0,0.10);
       --tl-grid-minor: rgba(0,0,0,0.04);
       --tl-axis-line: #b0b6c0;
-      --tl-axis-text: #656d76;
+      --tl-axis-text: #59636e;
       --tl-tick-major: #b0b6c0;
       --tl-tick-minor: #d5d8de;
       --tl-label-text: #1f2328;
@@ -346,7 +360,7 @@
       --tl-now-text: #cf222e;
       /* Gradients */
       --ok-grad-start: #1a7a32;
-      --ok-grad-mid: #2da44e;
+      --ok-grad-mid: #1f883d;
       --ok-grad-end: #56be60;
       --ok-border: rgba(45, 164, 78, 0.30);
       --ok-shadow: rgba(45, 164, 78, 0.20);
@@ -398,327 +412,614 @@
       --shadow-pulse-start: 0 0 0 0 rgba(45, 164, 78, 0.35);
       --shadow-pulse-end: 0 0 0 10px rgba(45, 164, 78, 0);
       --shadow-live: 0 0 14px rgba(45, 164, 78, 0.40);
+      /* the card's chips: a hot nozzle, the Wi-Fi signal, the fan's lightness (dark enough for white) */
+      --chip-hot: #bc4c00;
+      --wifi-good: #1a7f37;
+      --wifi-ok: #8a5d00;
+      --wifi-weak: #cf222e;
+      --fan-l: 36%;
     }
     html[data-theme="night"] {
-      /* Vercel Dark palette */
-      --gray-1: #000000; --gray-2: #111111; --gray-3: #1a1a1a; --gray-4: #222222; --gray-5: #2a2a2a; --gray-6: #333333; --gray-7: #404040; --gray-8: #555555; --gray-9: #666666; --gray-10: #777777; --gray-11: #888888; --gray-12: #eeeeee;
-      --ok-1: #0d1a1a; --ok-2: #122626; --ok-3: #1a3838; --ok-4: #1a4747; --ok-5: #1e5656; --ok-6: #266666; --ok-7: #2e7a7a; --ok-8: #2e9191; --ok-9: #50e3c2; --ok-10: #5eecd0; --ok-11: #80f0dc; --ok-12: #b8f5ea;
-      --info-1: #0d1a2e; --info-2: #112540; --info-3: #1a3352; --info-4: #1a4066; --info-5: #1e4d7a; --info-6: #265c8f; --info-7: #2e6ea8; --info-8: #2e80c4; --info-9: #3291ff; --info-10: #40a0ff; --info-11: #60b5ff; --info-12: #a0d4ff;
-      --warn-1: #1a140d; --warn-2: #261e12; --warn-3: #382a1a; --warn-4: #47341a; --warn-5: #56401e; --warn-6: #664d26; --warn-7: #7a5c2e; --warn-8: #916e2e; --warn-9: #f5a623; --warn-10: #f8b840; --warn-11: #facc60; --warn-12: #fce8a0;
-      --danger-1: #190d0d; --danger-2: #241212; --danger-3: #361a1a; --danger-4: #441a1a; --danger-5: #521e1e; --danger-6: #602626; --danger-7: #722e2e; --danger-8: #862e2e; --danger-9: #ff3333; --danger-10: #ff5050; --danger-11: #ff7777; --danger-12: #ffbbbb;
+      /* «Ночь»: a true OLED black. Minimalism: the cards are black on black, drawn by a hairline;
+         no shadows, no glows, no fills; the colours muted (the screen is dark, the eye adapted).
+         A printer's state is told by the hairline of its card and its badge's outline, nothing
+         louder. The rest is the «Ночь» block at the end. */
+      --gray-1: #000000; --gray-2: #0a0a0a; --gray-3: #141414; --gray-4: #1a1a1a; --gray-5: #212121; --gray-6: #2a2a2a; --gray-7: #4a4a4a; --gray-8: #5c5c5c; --gray-9: #737373; --gray-10: #8a8a8a; --gray-11: #a3a3a3; --gray-12: #e8e8e8;
+      --ok-1: #000000; --ok-2: #06110d; --ok-3: #0b1a15; --ok-4: #10241d; --ok-5: #163026; --ok-6: #1d3d31; --ok-7: #2a5546; --ok-8: #3a7461; --ok-9: #74c7a6; --ok-10: #86cfb2; --ok-11: #9fd9c2; --ok-12: #cdeee1;
+      --info-1: #000000; --info-2: #070d16; --info-3: #0d1522; --info-4: #121d2f; --info-5: #18273d; --info-6: #20324d; --info-7: #2e4669; --info-8: #42618f; --info-9: #8aaedb; --info-10: #9bbae1; --info-11: #b1c9e8; --info-12: #d8e4f4;
+      --warn-1: #000000; --warn-2: #120e06; --warn-3: #1c160a; --warn-4: #261d0e; --warn-5: #312613; --warn-6: #3d3018; --warn-7: #574522; --warn-8: #7a6030; --warn-9: #d6b26a; --warn-10: #dcbd7e; --warn-11: #e4cb98; --warn-12: #f2e5cb;
+      --danger-1: #000000; --danger-2: #140808; --danger-3: #1f0d0c; --danger-4: #2a1210; --danger-5: #361714; --danger-6: #441e1a; --danger-7: #612b25; --danger-8: #8a3d34; --danger-9: #e7867b; --danger-10: #eb978d; --danger-11: #f0aba3; --danger-12: #f8d6d2;
       --finished-1: var(--ok-1); --finished-2: var(--ok-2); --finished-3: var(--ok-3); --finished-4: var(--ok-4); --finished-5: var(--ok-5); --finished-6: var(--ok-6); --finished-7: var(--ok-7); --finished-8: var(--ok-8); --finished-9: var(--ok-9); --finished-10: var(--ok-10); --finished-11: var(--ok-11); --finished-12: var(--ok-12);
       --bg: #000000;
-      --bg-elev: #1a1a1a;
-      --bg-panel: rgba(17, 17, 17, 0.85);
-      --bg-panel-2: rgba(12, 12, 12, 0.90);
-      --bg-soft: rgba(255, 255, 255, 0.04);
-      --line: rgba(255, 255, 255, 0.08);
-      --line-strong: rgba(255, 255, 255, 0.14);
-      --text: #eeeeee;
-      --text-dim: #888888;
-      --text-muted: #666666;
-      --steel: #888888;
-      --ok: #50e3c2;
-      --ok-soft: rgba(80, 227, 194, 0.15);
-      --warn: #f5a623;
-      --warn-soft: rgba(245, 166, 35, 0.15);
-      --danger: #ff3333;
-      --danger-soft: rgba(255, 51, 51, 0.15);
-      --info: #3291ff;
-      --info-soft: rgba(50, 145, 255, 0.15);
-      --steel-soft: rgba(255, 255, 255, 0.06);
-      --steel-border: rgba(255, 255, 255, 0.10);
-      --shadow-xl: 0 30px 80px rgba(0, 0, 0, 0.60);
-      --shadow-lg: 0 18px 40px rgba(0, 0, 0, 0.50);
-      --finished: #50e3c2;
+      --bg-elev: #000000;
+      --bg-panel: #000000;
+      --bg-panel-2: #000000;
+      --bg-soft: rgba(255, 255, 255, 0.035);
+      --line: rgba(255, 255, 255, 0.11);
+      --line-strong: rgba(255, 255, 255, 0.17);
+      --text: #e8e8e8;
+      --text-dim: #a8a8a8;
+      --text-muted: #8c8c8c;
+      --steel: #a8a8a8;
+      --ok: #74c7a6;
+      --ok-soft: rgba(116, 199, 166, 0.08);
+      --warn: #d6b26a;
+      --warn-soft: rgba(214, 178, 106, 0.08);
+      --danger: #e7867b;
+      --danger-soft: rgba(231, 134, 123, 0.09);
+      --info: #8aaedb;
+      --info-soft: rgba(138, 174, 219, 0.08);
+      --steel-soft: rgba(255, 255, 255, 0.04);
+      --steel-border: rgba(255, 255, 255, 0.14);
+      --shadow-xl: none;
+      --shadow-lg: none;
+      --finished: #74c7a6;
       --tab-active-text: #000000;
-      --toggle-active-bg: rgba(80, 227, 194, 0.50);
-      --toggle-active-border: rgba(80, 227, 194, 0.70);
-      --grid-dot: rgba(255, 255, 255, 0.02);
+      --toggle-active-bg: #5d9e85;
+      --toggle-active-border: #74c7a6;
+      --grid-dot: rgba(255, 255, 255, 0);
+      --radius-xl: 10px;
       /* === Timeline canvas colors === */
       --tl-bg-top: #000000;
-      --tl-bg-bottom: #050505;
-      --tl-zebra: rgba(20,20,20,0.3);
-      --tl-grid-major: rgba(50,50,50,0.2);
-      --tl-grid-minor: rgba(30,30,30,0.1);
-      --tl-axis-line: #404040;
-      --tl-axis-text: #666666;
-      --tl-tick-major: #555555;
-      --tl-tick-minor: #222222;
-      --tl-label-text: #888888;
-      --tl-label-dot: rgba(255,255,255,0.15);
-      --tl-bar-shadow: rgba(0,0,0,0.35);
-      --tl-bar-highlight: rgba(255,255,255,0.06);
-      --tl-now-line: rgba(255,51,51,0.4);
-      --tl-now-text: #ff7777;
-      /* Gradients and specific colors */
-      --ok-grad-start: #1a6b5e;
-      --ok-grad-mid: #50e3c2;
-      --ok-grad-end: #80f0dc;
-      --ok-border: rgba(80, 227, 194, 0.22);
-      --ok-shadow: rgba(80, 227, 194, 0.25);
-      --ok-glow: rgba(80, 227, 194, 0.35);
-      --ok-bg-grad-start: rgba(80, 227, 194, 0.08);
-      --ok-bg-grad-end: rgba(80, 227, 194, 0.03);
-      --ok-border-strong: rgba(80, 227, 194, 0.22);
-      --ok-shadow-strong: rgba(80, 227, 194, 0.10);
-      --info-grad-start: #1a4870;
-      --info-grad-mid: #3291ff;
-      --info-grad-end: #60b5ff;
-      --info-border: rgba(50, 145, 255, 0.22);
-      --info-glow: rgba(50, 145, 255, 0.38);
-      --info-bg-grad-start: rgba(50, 145, 255, 0.06);
-      --info-bg-grad-end: rgba(50, 145, 255, 0.02);
-      --info-border-strong: rgba(50, 145, 255, 0.16);
-      --warn-grad-start: #6b501a;
-      --warn-grad-mid: #f5a623;
-      --warn-grad-end: #facc60;
-      --warn-border: rgba(245, 166, 35, 0.22);
-      --warn-bg-grad-start: rgba(245, 166, 35, 0.08);
-      --warn-bg-grad-end: rgba(245, 166, 35, 0.03);
-      --warn-border-strong: rgba(245, 166, 35, 0.20);
-      --warn-shadow: rgba(245, 166, 35, 0.10);
-      --danger-grad-start: #6b2626;
-      --danger-grad-mid: #ff3333;
-      --danger-grad-end: #ff7777;
-      --danger-border: rgba(255, 51, 51, 0.22);
-      --danger-glow: rgba(255, 51, 51, 0.38);
-      --danger-bg-grad-start: rgba(255, 51, 51, 0.10);
-      --danger-bg-grad-end: rgba(255, 51, 51, 0.04);
-      --danger-border-strong: rgba(255, 51, 51, 0.28);
-      --danger-shadow-strong: rgba(255, 51, 51, 0.12);
-      --danger-pulse-start: rgba(255, 51, 51, 0.10);
-      --danger-pulse-mid: rgba(255, 51, 51, 0.25);
-      --danger-pulse-border-start: rgba(255, 51, 51, 0.22);
-      --danger-pulse-border-mid: rgba(255, 51, 51, 0.40);
-      --offline-border: rgba(255, 255, 255, 0.08);
-      --offline-bg-start: rgba(0, 0, 0, 0.85);
-      --offline-bg-end: rgba(0, 0, 0, 0.90);
-      --overlay-bg: rgba(0, 0, 0, 0.92);
-      --btn-primary: #3291ff;
+      --tl-bg-bottom: #000000;
+      --tl-zebra: rgba(255, 255, 255, 0.02);
+      --tl-grid-major: rgba(255, 255, 255, 0.08);
+      --tl-grid-minor: rgba(255, 255, 255, 0.035);
+      --tl-axis-line: #333333;
+      --tl-axis-text: #8c8c8c;
+      --tl-tick-major: #4a4a4a;
+      --tl-tick-minor: #1f1f1f;
+      --tl-label-text: #a8a8a8;
+      --tl-label-dot: rgba(255, 255, 255, 0.15);
+      --tl-bar-shadow: rgba(0, 0, 0, 0);
+      --tl-bar-highlight: rgba(255, 255, 255, 0);
+      --tl-now-line: rgba(231, 134, 123, 0.45);
+      --tl-now-text: #e7867b;
+      /* Gradients and specific colors: no fills, no glows */
+      --ok-grad-start: #3a7461;
+      --ok-grad-mid: #74c7a6;
+      --ok-grad-end: #74c7a6;
+      --ok-border: rgba(116, 199, 166, 0.40);
+      --ok-shadow: rgba(116, 199, 166, 0);
+      --ok-glow: rgba(116, 199, 166, 0);
+      --ok-bg-grad-start: rgba(0, 0, 0, 0);
+      --ok-bg-grad-end: rgba(0, 0, 0, 0);
+      --ok-border-strong: rgba(116, 199, 166, 0.45);
+      --ok-shadow-strong: rgba(116, 199, 166, 0);
+      --info-grad-start: #42618f;
+      --info-grad-mid: #8aaedb;
+      --info-grad-end: #8aaedb;
+      --info-border: rgba(138, 174, 219, 0.40);
+      --info-glow: rgba(138, 174, 219, 0);
+      --info-bg-grad-start: rgba(0, 0, 0, 0);
+      --info-bg-grad-end: rgba(0, 0, 0, 0);
+      --info-border-strong: rgba(255, 255, 255, 0.11);
+      --warn-grad-start: #7a6030;
+      --warn-grad-mid: #d6b26a;
+      --warn-grad-end: #d6b26a;
+      --warn-border: rgba(214, 178, 106, 0.40);
+      --warn-bg-grad-start: rgba(0, 0, 0, 0);
+      --warn-bg-grad-end: rgba(0, 0, 0, 0);
+      --warn-border-strong: rgba(214, 178, 106, 0.45);
+      --warn-shadow: rgba(214, 178, 106, 0);
+      --danger-grad-start: #8a3d34;
+      --danger-grad-mid: #e7867b;
+      --danger-grad-end: #e7867b;
+      --danger-border: rgba(231, 134, 123, 0.42);
+      --danger-glow: rgba(231, 134, 123, 0);
+      --danger-bg-grad-start: rgba(0, 0, 0, 0);
+      --danger-bg-grad-end: rgba(0, 0, 0, 0);
+      --danger-border-strong: rgba(231, 134, 123, 0.50);
+      --danger-shadow-strong: rgba(231, 134, 123, 0);
+      --danger-pulse-start: rgba(231, 134, 123, 0.08);
+      --danger-pulse-mid: rgba(231, 134, 123, 0.16);
+      --danger-pulse-border-start: rgba(231, 134, 123, 0.30);
+      --danger-pulse-border-mid: rgba(231, 134, 123, 0.50);
+      --offline-border: rgba(255, 255, 255, 0.07);
+      --offline-bg-start: #000000;
+      --offline-bg-end: #000000;
+      --overlay-bg: #000000;
+      --btn-primary: #8aaedb;
       --btn-primary-text: #000000;
-      --temp-nozzle-grad: linear-gradient(90deg, #1a6b5e 0%, var(--ok) 42%, var(--warn) 100%);
-      --temp-bed-grad: linear-gradient(90deg, #1a4870 0%, var(--info) 45%, #60b5ff 100%);
-      --shadow-hover: 0 28px 56px rgba(0, 0, 0, 0.50);
-      --shadow-card: 0 12px 32px rgba(0, 0, 0, 0.60);
-      --shadow-pulse: 0 0 0 0 rgba(80, 227, 194, 0.4);
-      --shadow-pulse-start: 0 0 0 0 rgba(80, 227, 194, 0.35);
-      --shadow-pulse-end: 0 0 0 10px rgba(80, 227, 194, 0);
-      --shadow-live: 0 0 14px rgba(80, 227, 194, 0.40);
-    }
-    html[data-theme="neon"] {
-      /* Neon Rainbow: mauve, neon green, neon pink, gold, orange-red */
-      --gray-1: #0a0a1a; --gray-2: #111128; --gray-3: #1a1a38; --gray-4: #222248; --gray-5: #2a2a52; --gray-6: #333360; --gray-7: #404070; --gray-8: #555588; --gray-9: #666698; --gray-10: #7777aa; --gray-11: #8888bb; --gray-12: #ddddf0;
-      --ok-1: #0d1a12; --ok-2: #0d261a; --ok-3: #0d3826; --ok-4: #0d4730; --ok-5: #0d5638; --ok-6: #0d6642; --ok-7: #0d7a4e; --ok-8: #0d9158; --ok-9: #00ff88; --ok-10: #20ff98; --ok-11: #50ffb0; --ok-12: #a0ffd0;
-      --info-1: #1a0d14; --info-2: #261220; --info-3: #381a30; --info-4: #471a3e; --info-5: #561e4c; --info-6: #66265c; --info-7: #7a2e70; --info-8: #912e88; --info-9: #ff1493; --info-10: #ff30a0; --info-11: #ff60b8; --info-12: #ffb0d8;
-      --warn-1: #1a140d; --warn-2: #261e12; --warn-3: #382a1a; --warn-4: #47341a; --warn-5: #56401e; --warn-6: #664d26; --warn-7: #7a5c2e; --warn-8: #916e2e; --warn-9: #ffd700; --warn-10: #ffe040; --warn-11: #ffe870; --warn-12: #fff0b0;
-      --danger-1: #1a0d0d; --danger-2: #261212; --danger-3: #381a1a; --danger-4: #471a1a; --danger-5: #561e1e; --danger-6: #662626; --danger-7: #7a2e2e; --danger-8: #912e2e; --danger-9: #ff4500; --danger-10: #ff5820; --danger-11: #ff8050; --danger-12: #ffc0a0;
-      --finished-1: var(--ok-1); --finished-2: var(--ok-2); --finished-3: var(--ok-3); --finished-4: var(--ok-4); --finished-5: var(--ok-5); --finished-6: var(--ok-6); --finished-7: var(--ok-7); --finished-8: var(--ok-8); --finished-9: var(--ok-9); --finished-10: var(--ok-10); --finished-11: var(--ok-11); --finished-12: var(--ok-12);
-      --bg: #0a0a1a;
-      --bg-elev: #1a1a38;
-      --bg-panel: rgba(17, 17, 40, 0.85);
-      --bg-panel-2: rgba(12, 12, 30, 0.90);
-      --bg-soft: rgba(255, 255, 255, 0.06);
-      --line: rgba(255, 255, 255, 0.12);
-      --line-strong: rgba(255, 255, 255, 0.20);
-      --text: #ddddf0;
-      --text-dim: #8888bb;
-      --text-muted: #666698;
-      --steel: #8888bb;
-      --ok: #00ff88;
-      --ok-soft: rgba(0, 255, 136, 0.20);
-      --warn: #ffd700;
-      --warn-soft: rgba(255, 215, 0, 0.20);
-      --danger: #ff4500;
-      --danger-soft: rgba(255, 69, 0, 0.20);
-      --info: #ff1493;
-      --info-soft: rgba(255, 20, 147, 0.20);
-      --steel-soft: rgba(255, 255, 255, 0.10);
-      --steel-border: rgba(136, 136, 187, 0.20);
-      --finished: #00ff88;
-      --tab-active-text: #0a0a1a;
-      --toggle-active-bg: #00ff88;
-      --toggle-active-border: #0d7a4e;
-      --shadow-xl: 0 30px 80px rgba(0, 0, 0, 0.65);
-      --shadow-lg: 0 18px 40px rgba(0, 0, 0, 0.55);
-      --grid-dot: rgba(255, 255, 255, 0.03);
-      /* === Timeline canvas colors === */
-      --tl-bg-top: #0a0a1a;
-      --tl-bg-bottom: #070710;
-      --tl-zebra: rgba(20,20,50,0.4);
-      --tl-grid-major: rgba(60,60,100,0.3);
-      --tl-grid-minor: rgba(40,40,70,0.15);
-      --tl-axis-line: #555580;
-      --tl-axis-text: #7777aa;
-      --tl-tick-major: #666698;
-      --tl-tick-minor: #333360;
-      --tl-label-text: #aaaad8;
-      --tl-label-dot: rgba(255,255,255,0.30);
-      --tl-bar-shadow: rgba(0,0,0,0.35);
-      --tl-bar-highlight: rgba(255,255,255,0.08);
-      --tl-now-line: rgba(255,69,0,0.5);
-      --tl-now-text: #ff8050;
-      /* Gradients (neon style) */
-      --ok-grad-start: #0d6b3e;
-      --ok-grad-mid: #00ff88;
-      --ok-grad-end: #50ffb0;
-      --ok-border: rgba(0, 255, 136, 0.30);
-      --ok-shadow: rgba(0, 255, 136, 0.30);
-      --ok-glow: rgba(0, 255, 136, 0.45);
-      --ok-bg-grad-start: rgba(0, 255, 136, 0.12);
-      --ok-bg-grad-end: rgba(0, 255, 136, 0.04);
-      --ok-border-strong: rgba(0, 255, 136, 0.30);
-      --ok-shadow-strong: rgba(0, 255, 136, 0.15);
-      --info-grad-start: #6b2060;
-      --info-grad-mid: #ff1493;
-      --info-grad-end: #ff60b8;
-      --info-border: rgba(255, 20, 147, 0.30);
-      --info-glow: rgba(255, 20, 147, 0.45);
-      --info-bg-grad-start: rgba(255, 20, 147, 0.12);
-      --info-bg-grad-end: rgba(255, 20, 147, 0.04);
-      --info-border-strong: rgba(255, 20, 147, 0.30);
-      --warn-grad-start: #6b5a00;
-      --warn-grad-mid: #ffd700;
-      --warn-grad-end: #ffe870;
-      --warn-border: rgba(255, 215, 0, 0.30);
-      --warn-bg-grad-start: rgba(255, 215, 0, 0.12);
-      --warn-bg-grad-end: rgba(255, 215, 0, 0.04);
-      --warn-border-strong: rgba(255, 215, 0, 0.30);
-      --warn-shadow: rgba(255, 215, 0, 0.12);
-      --danger-grad-start: #6b2600;
-      --danger-grad-mid: #ff4500;
-      --danger-grad-end: #ff8050;
-      --danger-border: rgba(255, 69, 0, 0.30);
-      --danger-glow: rgba(255, 69, 0, 0.45);
-      --danger-bg-grad-start: rgba(255, 69, 0, 0.12);
-      --danger-bg-grad-end: rgba(255, 69, 0, 0.04);
-      --danger-border-strong: rgba(255, 69, 0, 0.30);
-      --danger-shadow-strong: rgba(255, 69, 0, 0.15);
-      --danger-pulse-start: rgba(255, 69, 0, 0.12);
-      --danger-pulse-mid: rgba(255, 69, 0, 0.30);
-      --danger-pulse-border-start: rgba(255, 69, 0, 0.25);
-      --danger-pulse-border-mid: rgba(255, 69, 0, 0.45);
-      --offline-border: rgba(136, 136, 187, 0.15);
-      --offline-bg-start: rgba(10, 10, 26, 0.85);
-      --offline-bg-end: rgba(8, 8, 20, 0.90);
-      --overlay-bg: rgba(5, 5, 16, 0.92);
-      --btn-primary: #ff1493;
-      --btn-primary-text: #0a0a1a;
-      --temp-nozzle-grad: linear-gradient(90deg, #0d6b3e 0%, var(--ok) 42%, var(--warn) 100%);
-      --temp-bed-grad: linear-gradient(90deg, #6b2060 0%, var(--info) 45%, #ff60b8 100%);
-      --shadow-hover: 0 28px 56px rgba(0, 0, 0, 0.55);
-      --shadow-card: 0 12px 32px rgba(0, 0, 0, 0.65);
-      --shadow-pulse: 0 0 0 0 rgba(0, 255, 136, 0.5);
-      --shadow-pulse-start: 0 0 0 0 rgba(0, 255, 136, 0.45);
-      --shadow-pulse-end: 0 0 0 10px rgba(0, 255, 136, 0);
-      --shadow-live: 0 0 14px rgba(0, 255, 136, 0.50);
+      --temp-nozzle-grad: linear-gradient(90deg, #3a7461 0%, var(--ok) 42%, var(--warn) 100%);
+      --temp-bed-grad: linear-gradient(90deg, #42618f 0%, var(--info) 100%);
+      --shadow-hover: none;
+      --shadow-card: none;
+      --shadow-pulse: 0 0 0 0 rgba(116, 199, 166, 0);
+      --shadow-pulse-start: 0 0 0 0 rgba(116, 199, 166, 0);
+      --shadow-pulse-end: 0 0 0 0 rgba(116, 199, 166, 0);
+      --shadow-live: none;
+      /* the card's chips: a hot nozzle, the Wi-Fi signal, the fan's lightness */
+      --chip-hot: #e0a07a;
+      --wifi-good: #74c7a6;
+      --wifi-ok: #d6b26a;
+      --wifi-weak: #e7867b;
+      --fan-l: 64%;
     }
     html[data-theme="cosmos"] {
-      /* Космос: void-навигационная палитра HUD (стиль meshbrain/botnet) */
-      --gray-1: #04070c; --gray-2: #0b1119; --gray-3: #131c27; --gray-4: #1a2634; --gray-5: #213040; --gray-6: #29394b; --gray-7: #33465c; --gray-8: #465e77; --gray-9: #63788c; --gray-10: #7d92a5; --gray-11: #9db1c4; --gray-12: #e9f4fb;
-      --ok-1: #0a1a12; --ok-2: #0f261a; --ok-3: #143826; --ok-4: #174730; --ok-5: #1a5639; --ok-6: #1f6644; --ok-7: #257a51; --ok-8: #2b915f; --ok-9: #3ad684; --ok-10: #4fdf93; --ok-11: #7dedb2; --ok-12: #b8f5d4;
-      --info-1: #0a1a20; --info-2: #0e2530; --info-3: #143342; --info-4: #184050; --info-5: #1d4d60; --info-6: #235c72; --info-7: #2b6a80; --info-8: #338097; --info-9: #5fd9f5; --info-10: #74e1fa; --info-11: #8ee9ff; --info-12: #c4f4ff;
-      --warn-1: #1a150a; --warn-2: #261e0f; --warn-3: #382c15; --warn-4: #473818; --warn-5: #56441c; --warn-6: #665222; --warn-7: #7a6229; --warn-8: #917330; --warn-9: #ffc233; --warn-10: #ffcd50; --warn-11: #ffd970; --warn-12: #ffecb3;
-      --danger-1: #1a0c0e; --danger-2: #261114; --danger-3: #38191d; --danger-4: #471d23; --danger-5: #562228; --danger-6: #662930; --danger-7: #7a313a; --danger-8: #913a44; --danger-9: #ff4d5e; --danger-10: #ff6472; --danger-11: #ff8a94; --danger-12: #ffc2c8;
+      /* «Космос»: the real night sky, black with the Milky Way (night-sky.jpg, one fixed layer,
+         painted once, still; the owner's picture, «Стекло» shows it too). The boards are dense
+         and dark, nearly black, a thin cold line of starlight on the top edge; the states
+         glow softly. Starlight blue is the theme's light (printing, the selection), the other
+         states keep their own hues; no violet anywhere (the owner asked so, 02.11).
+         The rest is the «Космос» block at the end. */
+      --gray-1: #04060a; --gray-2: #0b0f16; --gray-3: #121823; --gray-4: #18202d; --gray-5: #1e2836; --gray-6: #263241; --gray-7: #44505f; --gray-8: #566273; --gray-9: #6b7787; --gray-10: #8590a0; --gray-11: #aab4c2; --gray-12: #eef3f8;
+      --ok-1: #0b1a1b; --ok-2: #0f2425; --ok-3: #143132; --ok-4: #183d3c; --ok-5: #1d4a47; --ok-6: #235853; --ok-7: #2b6b62; --ok-8: #348575; --ok-9: #6ee7b7; --ok-10: #82ecc4; --ok-11: #a2f2d4; --ok-12: #d2f9ea;
+      --info-1: #07101b; --info-2: #0a1726; --info-3: #0e2036; --info-4: #122a47; --info-5: #163558; --info-6: #1b416c; --info-7: #224f85; --info-8: #2b62a6; --info-9: #8cc8ff; --info-10: #a0d2ff; --info-11: #bfe0ff; --info-12: #e3f2ff;
+      --warn-1: #1a160d; --warn-2: #251f10; --warn-3: #342a14; --warn-4: #413518; --warn-5: #4f401c; --warn-6: #5f4c21; --warn-7: #775f28; --warn-8: #977930; --warn-9: #fcd36a; --warn-10: #fddb84; --warn-11: #fee39f; --warn-12: #fff2cf;
+      --danger-1: #1c0b0a; --danger-2: #27100e; --danger-3: #371513; --danger-4: #451a17; --danger-5: #541f1b; --danger-6: #652520; --danger-7: #7c2d27; --danger-8: #9e3a32; --danger-9: #ff7a6b; --danger-10: #ff8d80; --danger-11: #ffaba1; --danger-12: #ffd9d4;
       --finished-1: var(--ok-1); --finished-2: var(--ok-2); --finished-3: var(--ok-3); --finished-4: var(--ok-4); --finished-5: var(--ok-5); --finished-6: var(--ok-6); --finished-7: var(--ok-7); --finished-8: var(--ok-8); --finished-9: var(--ok-9); --finished-10: var(--ok-10); --finished-11: var(--ok-11); --finished-12: var(--ok-12);
-      --bg: #04070c;
-      --bg-elev: #131c27;
-      --bg-panel: rgba(9, 15, 23, 0.92);
-      --bg-panel-2: rgba(6, 11, 17, 0.94);
-      --bg-soft: rgba(255, 255, 255, 0.03);
-      --line: rgba(122, 180, 210, 0.10);
-      --line-strong: rgba(122, 180, 210, 0.18);
-      --text: #e9f4fb;
-      --text-dim: #9db1c4;
-      --text-muted: #63788c;
-      --steel: #9db1c4;
-      --ok: #3ad684;
-      --ok-soft: rgba(58, 214, 132, 0.13);
-      --warn: #ffc233;
-      --warn-soft: rgba(255, 194, 51, 0.13);
-      --danger: #ff4d5e;
-      --danger-soft: rgba(255, 77, 94, 0.13);
-      --info: #5fd9f5;
-      --info-soft: rgba(95, 217, 245, 0.12);
-      --steel-soft: rgba(255, 255, 255, 0.06);
-      --steel-border: rgba(157, 177, 196, 0.18);
-      --shadow-xl: 0 30px 80px rgba(0, 0, 0, 0.60);
-      --shadow-lg: 0 18px 40px rgba(0, 0, 0, 0.50);
-      --grid-dot: rgba(140, 200, 230, 0.03);
-      --finished: #3ad684;
-      --tab-active-text: #03212b;
-      --toggle-active-bg: rgba(58, 214, 132, 0.50);
-      --toggle-active-border: rgba(58, 214, 132, 0.70);
+      --bg: #04060a;
+      --bg-elev: #0c1119;
+      --bg-panel: rgba(10, 14, 22, 0.88);
+      --bg-panel-2: rgba(8, 11, 18, 0.90);
+      --bg-soft: rgba(200, 220, 255, 0.05);
+      --line: rgba(170, 200, 255, 0.15);
+      --line-strong: rgba(170, 200, 255, 0.26);
+      --text: #eef3f8;
+      --text-dim: #c3ccd8;
+      --text-muted: #9ba6b5;
+      --steel: #aab4c2;
+      --ok: #6ee7b7;
+      --ok-soft: rgba(110, 231, 183, 0.12);
+      --warn: #fcd36a;
+      --warn-soft: rgba(252, 211, 106, 0.12);
+      --danger: #ff7a6b;
+      --danger-soft: rgba(255, 122, 107, 0.13);
+      --info: #8cc8ff;
+      --info-soft: rgba(170, 200, 255, 0.15);
+      --steel-soft: rgba(200, 220, 255, 0.06);
+      --steel-border: rgba(170, 200, 255, 0.20);
+      --shadow-xl: 0 12px 34px rgba(0, 0, 0, 0.55), 0 0 28px rgba(120, 180, 255, 0.10);
+      --shadow-lg: 0 10px 26px rgba(0, 0, 0, 0.50);
+      --grid-dot: rgba(255, 255, 255, 0);
+      --finished: #6ee7b7;
+      --tab-active-text: #04101e;
+      --toggle-active-bg: #3d8fe0;
+      --toggle-active-border: #8cc8ff;
+      --radius-xl: 20px;
       /* === Timeline canvas colors === */
-      --tl-bg-top: #04070c;
-      --tl-bg-bottom: #030509;
-      --tl-zebra: rgba(19, 28, 39, 0.4);
-      --tl-grid-major: rgba(51, 70, 92, 0.3);
-      --tl-grid-minor: rgba(35, 48, 64, 0.15);
-      --tl-axis-line: #33465c;
-      --tl-axis-text: #63788c;
-      --tl-tick-major: #465e77;
-      --tl-tick-minor: #213040;
-      --tl-label-text: #9db1c4;
-      --tl-label-dot: rgba(255, 255, 255, 0.3);
+      --tl-bg-top: rgba(12, 17, 25, 0.50);
+      --tl-bg-bottom: rgba(8, 11, 18, 0.50);
+      --tl-zebra: rgba(170, 200, 255, 0.035);
+      --tl-grid-major: rgba(170, 200, 255, 0.12);
+      --tl-grid-minor: rgba(170, 200, 255, 0.05);
+      --tl-axis-line: #44505f;
+      --tl-axis-text: #9ba6b5;
+      --tl-tick-major: #566273;
+      --tl-tick-minor: #1e2836;
+      --tl-label-text: #c3ccd8;
+      --tl-label-dot: rgba(255, 255, 255, 0.35);
+      --tl-bar-shadow: rgba(0, 0, 0, 0.40);
+      --tl-bar-highlight: rgba(255, 255, 255, 0.10);
+      --tl-now-line: rgba(255, 122, 107, 0.55);
+      --tl-now-text: #ffaba1;
+      /* Gradients and specific colors: soft glows */
+      --ok-grad-start: #2b6b62;
+      --ok-grad-mid: #6ee7b7;
+      --ok-grad-end: #a2f2d4;
+      --ok-border: rgba(110, 231, 183, 0.30);
+      --ok-shadow: rgba(110, 231, 183, 0.28);
+      --ok-glow: rgba(110, 231, 183, 0.45);
+      --ok-bg-grad-start: rgba(110, 231, 183, 0.10);
+      --ok-bg-grad-end: rgba(110, 231, 183, 0.03);
+      --ok-border-strong: rgba(110, 231, 183, 0.34);
+      --ok-shadow-strong: rgba(110, 231, 183, 0.18);
+      --info-grad-start: #224f85;
+      --info-grad-mid: #3d8fe0;
+      --info-grad-end: #bfe0ff;
+      --info-border: rgba(170, 200, 255, 0.34);
+      --info-glow: rgba(140, 200, 255, 0.50);
+      --info-bg-grad-start: rgba(140, 200, 255, 0.10);
+      --info-bg-grad-end: rgba(140, 200, 255, 0.03);
+      --info-border-strong: rgba(170, 200, 255, 0.26);
+      --warn-grad-start: #775f28;
+      --warn-grad-mid: #fcd36a;
+      --warn-grad-end: #fee39f;
+      --warn-border: rgba(252, 211, 106, 0.30);
+      --warn-bg-grad-start: rgba(252, 211, 106, 0.10);
+      --warn-bg-grad-end: rgba(252, 211, 106, 0.03);
+      --warn-border-strong: rgba(252, 211, 106, 0.32);
+      --warn-shadow: rgba(252, 211, 106, 0.16);
+      --danger-grad-start: #7c2d27;
+      --danger-grad-mid: #ff7a6b;
+      --danger-grad-end: #ffaba1;
+      --danger-border: rgba(255, 122, 107, 0.32);
+      --danger-glow: rgba(255, 122, 107, 0.48);
+      --danger-bg-grad-start: rgba(255, 122, 107, 0.13);
+      --danger-bg-grad-end: rgba(255, 122, 107, 0.04);
+      --danger-border-strong: rgba(255, 122, 107, 0.40);
+      --danger-shadow-strong: rgba(255, 122, 107, 0.20);
+      --danger-pulse-start: rgba(255, 122, 107, 0.10);
+      --danger-pulse-mid: rgba(255, 122, 107, 0.25);
+      --danger-pulse-border-start: rgba(255, 122, 107, 0.22);
+      --danger-pulse-border-mid: rgba(255, 122, 107, 0.40);
+      --offline-border: rgba(170, 200, 255, 0.10);
+      --offline-bg-start: rgba(8, 11, 18, 0.86);
+      --offline-bg-end: rgba(6, 8, 14, 0.88);
+      --overlay-bg: rgba(2, 4, 8, 0.86);
+      --btn-primary: #3d8fe0;
+      --btn-primary-text: #ffffff;
+      --temp-nozzle-grad: linear-gradient(90deg, #2b6b62 0%, var(--ok) 42%, var(--warn) 100%);
+      --temp-bed-grad: linear-gradient(90deg, #224f85 0%, var(--info) 55%, #bfe0ff 100%);
+      --shadow-hover: 0 18px 44px rgba(0, 0, 0, 0.60), 0 0 36px rgba(120, 180, 255, 0.16);
+      --shadow-card: 0 12px 34px rgba(0, 0, 0, 0.55);
+      --shadow-pulse: 0 0 0 0 rgba(110, 231, 183, 0.4);
+      --shadow-pulse-start: 0 0 0 0 rgba(110, 231, 183, 0.35);
+      --shadow-pulse-end: 0 0 0 10px rgba(110, 231, 183, 0);
+      --shadow-live: 0 0 14px rgba(110, 231, 183, 0.45);
+      /* the card's chips: a hot nozzle, the Wi-Fi signal, the fan's lightness */
+      --chip-hot: #ffb08a;
+      --wifi-good: #6ee7b7;
+      --wifi-ok: #fcd36a;
+      --wifi-weak: #ff7a6b;
+      --fan-l: 68%;
+    }
+    html[data-theme="amber"] {
+      /* «Янтарь»: a warm dark for the workshop at night, in the spirit of Night Shift / f.lux:
+         next to no blue light. A warm charcoal-brown, cream text, honey and amber accents; the
+         states stay apart inside the warm range by hue and lightness: printing honey, paused a
+         pale straw, finished sage, the error a warm red, a pause with an error tangerine.
+         The surfaces are solid warm boards with a thin warm edge (the «Янтарь» block at the end). */
+      --gray-1: #14100c; --gray-2: #1c1611; --gray-3: #261e17; --gray-4: #2e251c; --gray-5: #382d22; --gray-6: #44372a; --gray-7: #66533e; --gray-8: #7a654d; --gray-9: #94806a; --gray-10: #ab977e; --gray-11: #c7b395; --gray-12: #f3e6cf;
+      --ok-1: #15170c; --ok-2: #1b2010; --ok-3: #252d16; --ok-4: #2d381a; --ok-5: #36431f; --ok-6: #415126; --ok-7: #50632e; --ok-8: #647b39; --ok-9: #a3c96f; --ok-10: #b0d27e; --ok-11: #c4de9c; --ok-12: #e2efcb;
+      --info-1: #1a130a; --info-2: #22190c; --info-3: #33240f; --info-4: #402d12; --info-5: #4d3615; --info-6: #5e4219; --info-7: #75521e; --info-8: #946825; --info-9: #f2ae4b; --info-10: #f5ba63; --info-11: #f8cc86; --info-12: #fce6c2;
+      --warn-1: #19170c; --warn-2: #211e10; --warn-3: #302b16; --warn-4: #3c361b; --warn-5: #4a4220; --warn-6: #5a5027; --warn-7: #73672f; --warn-8: #8f8139; --warn-9: #eadb7f; --warn-10: #efe293; --warn-11: #f3e9aa; --warn-12: #faf4d6;
+      --danger-1: #1c0f0c; --danger-2: #261410; --danger-3: #381c15; --danger-4: #45211a; --danger-5: #53271e; --danger-6: #642e24; --danger-7: #7c382b; --danger-8: #9a4433; --danger-9: #ff6a52; --danger-10: #ff7d68; --danger-11: #ff9d8b; --danger-12: #ffd0c6;
+      --finished-1: var(--ok-1); --finished-2: var(--ok-2); --finished-3: var(--ok-3); --finished-4: var(--ok-4); --finished-5: var(--ok-5); --finished-6: var(--ok-6); --finished-7: var(--ok-7); --finished-8: var(--ok-8); --finished-9: var(--ok-9); --finished-10: var(--ok-10); --finished-11: var(--ok-11); --finished-12: var(--ok-12);
+      --bg: #14100c;
+      --bg-elev: #211a13;
+      --bg-panel: #1d1712;
+      --bg-panel-2: #1a140f;
+      --bg-soft: rgba(255, 214, 160, 0.05);
+      --line: rgba(255, 210, 150, 0.09);
+      --line-strong: rgba(255, 210, 150, 0.16);
+      --text: #f3e6cf;
+      --text-dim: #d4c09f;
+      --text-muted: #b29d7f;
+      --steel: #c7b395;
+      --ok: #a3c96f;
+      --ok-soft: rgba(163, 201, 111, 0.13);
+      --warn: #eadb7f;
+      --warn-soft: rgba(234, 219, 127, 0.12);
+      --danger: #ff6a52;
+      --danger-soft: rgba(255, 106, 82, 0.14);
+      --info: #f2ae4b;
+      --info-soft: rgba(242, 174, 75, 0.14);
+      --steel-soft: rgba(255, 214, 160, 0.06);
+      --steel-border: rgba(255, 210, 150, 0.14);
+      --finished: #a3c96f;
+      --tab-active-text: #1c1206;
+      --toggle-active-bg: #d9932f;
+      --toggle-active-border: #f2ae4b;
+      --shadow-xl: 0 1px 0 rgba(255, 220, 170, 0.04) inset, 0 10px 26px rgba(0, 0, 0, 0.42);
+      --shadow-lg: 0 8px 20px rgba(0, 0, 0, 0.38);
+      --grid-dot: rgba(255, 210, 150, 0);
+      --radius-xl: 14px;
+      /* === Timeline canvas colors === */
+      --tl-bg-top: #1a140f;
+      --tl-bg-bottom: #15100c;
+      --tl-zebra: rgba(255, 210, 150, 0.025);
+      --tl-grid-major: rgba(255, 210, 150, 0.09);
+      --tl-grid-minor: rgba(255, 210, 150, 0.04);
+      --tl-axis-line: #5a4936;
+      --tl-axis-text: #b29d7f;
+      --tl-tick-major: #6f5c46;
+      --tl-tick-minor: #382d22;
+      --tl-label-text: #d4c09f;
+      --tl-label-dot: rgba(255, 230, 190, 0.30);
       --tl-bar-shadow: rgba(0, 0, 0, 0.35);
-      --tl-bar-highlight: rgba(255, 255, 255, 0.07);
-      --tl-now-line: rgba(255, 77, 94, 0.5);
-      --tl-now-text: #ff8a94;
+      --tl-bar-highlight: rgba(255, 230, 190, 0.08);
+      --tl-now-line: rgba(255, 106, 82, 0.5);
+      --tl-now-text: #ff9d8b;
       /* Gradients and specific colors */
-      --ok-grad-start: #17694a;
-      --ok-grad-mid: #3ad684;
-      --ok-grad-end: #7dedb2;
-      --ok-border: rgba(58, 214, 132, 0.22);
-      --ok-shadow: rgba(58, 214, 132, 0.25);
-      --ok-glow: rgba(58, 214, 132, 0.35);
-      --ok-bg-grad-start: rgba(58, 214, 132, 0.08);
-      --ok-bg-grad-end: rgba(58, 214, 132, 0.03);
-      --ok-border-strong: rgba(58, 214, 132, 0.22);
-      --ok-shadow-strong: rgba(58, 214, 132, 0.10);
-      --info-grad-start: #1d4d60;
-      --info-grad-mid: #5fd9f5;
-      --info-grad-end: #8ee9ff;
-      --info-border: rgba(95, 217, 245, 0.22);
-      --info-glow: rgba(95, 217, 245, 0.38);
-      --info-bg-grad-start: rgba(95, 217, 245, 0.06);
-      --info-bg-grad-end: rgba(95, 217, 245, 0.02);
-      --info-border-strong: rgba(95, 217, 245, 0.16);
-      --warn-grad-start: #6b5a1a;
-      --warn-grad-mid: #ffc233;
-      --warn-grad-end: #ffd970;
-      --warn-border: rgba(255, 194, 51, 0.22);
-      --warn-bg-grad-start: rgba(255, 194, 51, 0.08);
-      --warn-bg-grad-end: rgba(255, 194, 51, 0.03);
-      --warn-border-strong: rgba(255, 194, 51, 0.20);
-      --warn-shadow: rgba(255, 194, 51, 0.10);
-      --danger-grad-start: #6b232a;
-      --danger-grad-mid: #ff4d5e;
-      --danger-grad-end: #ff8a94;
-      --danger-border: rgba(255, 77, 94, 0.22);
-      --danger-glow: rgba(255, 77, 94, 0.38);
-      --danger-bg-grad-start: rgba(255, 77, 94, 0.10);
-      --danger-bg-grad-end: rgba(255, 77, 94, 0.04);
-      --danger-border-strong: rgba(255, 77, 94, 0.28);
-      --danger-shadow-strong: rgba(255, 77, 94, 0.12);
-      --danger-pulse-start: rgba(255, 77, 94, 0.10);
-      --danger-pulse-mid: rgba(255, 77, 94, 0.25);
-      --danger-pulse-border-start: rgba(255, 77, 94, 0.22);
-      --danger-pulse-border-mid: rgba(255, 77, 94, 0.40);
-      --offline-border: rgba(157, 177, 196, 0.12);
-      --offline-bg-start: rgba(4, 7, 12, 0.85);
-      --offline-bg-end: rgba(3, 5, 9, 0.90);
-      --overlay-bg: rgba(3, 6, 10, 0.92);
-      --btn-primary: #5fd9f5;
-      --btn-primary-text: #03212b;
-      --temp-nozzle-grad: linear-gradient(90deg, #17694a 0%, var(--ok) 42%, var(--warn) 100%);
-      --temp-bed-grad: linear-gradient(90deg, #1d4d60 0%, var(--info) 45%, #8ee9ff 100%);
-      --shadow-hover: 0 28px 56px rgba(0, 0, 0, 0.50);
-      --shadow-card: 0 12px 32px rgba(0, 0, 0, 0.60);
-      --shadow-pulse: 0 0 0 0 rgba(58, 214, 132, 0.4);
-      --shadow-pulse-start: 0 0 0 0 rgba(58, 214, 132, 0.35);
-      --shadow-pulse-end: 0 0 0 10px rgba(58, 214, 132, 0);
-      --shadow-live: 0 0 14px rgba(58, 214, 132, 0.40);
+      --ok-grad-start: #50632e;
+      --ok-grad-mid: #a3c96f;
+      --ok-grad-end: #c4de9c;
+      --ok-border: rgba(163, 201, 111, 0.26);
+      --ok-shadow: rgba(163, 201, 111, 0.16);
+      --ok-glow: rgba(163, 201, 111, 0.26);
+      --ok-bg-grad-start: rgba(163, 201, 111, 0.07);
+      --ok-bg-grad-end: rgba(163, 201, 111, 0.02);
+      --ok-border-strong: rgba(163, 201, 111, 0.28);
+      --ok-shadow-strong: rgba(163, 201, 111, 0.06);
+      --info-grad-start: #946825;
+      --info-grad-mid: #f2ae4b;
+      --info-grad-end: #f8cc86;
+      --info-border: rgba(242, 174, 75, 0.28);
+      --info-glow: rgba(242, 174, 75, 0.30);
+      --info-bg-grad-start: rgba(242, 174, 75, 0.05);
+      --info-bg-grad-end: rgba(242, 174, 75, 0.015);
+      --info-border-strong: rgba(242, 174, 75, 0.20);
+      --warn-grad-start: #8f8139;
+      --warn-grad-mid: #eadb7f;
+      --warn-grad-end: #f3e9aa;
+      --warn-border: rgba(234, 219, 127, 0.28);
+      --warn-bg-grad-start: rgba(234, 219, 127, 0.07);
+      --warn-bg-grad-end: rgba(234, 219, 127, 0.02);
+      --warn-border-strong: rgba(234, 219, 127, 0.28);
+      --warn-shadow: rgba(234, 219, 127, 0.06);
+      --danger-grad-start: #7c382b;
+      --danger-grad-mid: #ff6a52;
+      --danger-grad-end: #ff9d8b;
+      --danger-border: rgba(255, 106, 82, 0.28);
+      --danger-glow: rgba(255, 106, 82, 0.30);
+      --danger-bg-grad-start: rgba(255, 106, 82, 0.09);
+      --danger-bg-grad-end: rgba(255, 106, 82, 0.03);
+      --danger-border-strong: rgba(255, 106, 82, 0.34);
+      --danger-shadow-strong: rgba(255, 106, 82, 0.08);
+      --danger-pulse-start: rgba(255, 106, 82, 0.10);
+      --danger-pulse-mid: rgba(255, 106, 82, 0.25);
+      --danger-pulse-border-start: rgba(255, 106, 82, 0.22);
+      --danger-pulse-border-mid: rgba(255, 106, 82, 0.40);
+      --offline-border: rgba(255, 210, 150, 0.07);
+      --offline-bg-start: #17120e;
+      --offline-bg-end: #15110d;
+      --overlay-bg: rgba(12, 9, 6, 0.92);
+      --btn-primary: #f2ae4b;
+      --btn-primary-text: #1c1206;
+      --temp-nozzle-grad: linear-gradient(90deg, #7c382b 0%, var(--info) 50%, var(--danger) 100%);
+      --temp-bed-grad: linear-gradient(90deg, #75521e 0%, var(--info) 50%, #f8cc86 100%);
+      --shadow-hover: 0 1px 0 rgba(255, 220, 170, 0.05) inset, 0 16px 34px rgba(0, 0, 0, 0.48);
+      --shadow-card: 0 10px 26px rgba(0, 0, 0, 0.42);
+      --shadow-pulse: 0 0 0 0 rgba(163, 201, 111, 0.4);
+      --shadow-pulse-start: 0 0 0 0 rgba(163, 201, 111, 0.35);
+      --shadow-pulse-end: 0 0 0 10px rgba(163, 201, 111, 0);
+      --shadow-live: 0 0 10px rgba(163, 201, 111, 0.30);
+      /* the card's chips: a hot nozzle, the Wi-Fi signal, the fan's lightness (the fan's hue
+         runs from sage at a stop to honey at full speed, not green to cyan) */
+      --chip-hot: #ff9566;
+      --wifi-good: #a3c96f;
+      --wifi-ok: #eadb7f;
+      --wifi-weak: #ff6a52;
+      --fan-l: 70%; --fan-h: 95; --fan-k: -0.6;
+    }
+    html[data-theme="glass"] {
+      /* «Стекло»: Liquid Glass as in iOS 26. The glass itself has no colour: a clear pane with a
+         bright edge in the dark (this block), white frost in the light (the prefers-color-scheme:
+         light block right below); what makes it glass is the picture under it (--glass-wall, a
+         fixed layer painted once): the night sky with the Milky Way in the dark (night-sky.jpg,
+         the owner's choice, 02.11), soft blue, sea-green and warm light in the light; or a photo
+         of this browser's own (👤 → «Своё фото», theme.js). Text is the system's
+         black or white, the lower steps the same with less opacity; colour belongs to the
+         states (the system green, yellow, orange, red) and the tint, the system blue, to what
+         is selected and the links. Printing is the label colour itself (--st-printing).
+         The blur goes only where something with detail passes under a surface (the header,
+         the bottom bar, popovers, sheets, dialogs); a card is a clear pane with a light rim.
+         The rest is the «Стекло» block at the end. */
+      color-scheme: dark;
+      --gray-1: #0c0b10; --gray-2: #1c1c1e; --gray-3: rgba(255, 255, 255, 0.08); --gray-4: rgba(255, 255, 255, 0.11); --gray-5: rgba(255, 255, 255, 0.15); --gray-6: rgba(255, 255, 255, 0.20); --gray-7: #5a5a5f; --gray-8: #6e6e73; --gray-9: #7c7c80; --gray-10: #8e8e93; --gray-11: #a1a1a6; --gray-12: #f5f5f7;
+      --ok-1: rgba(48, 209, 88, 0.05); --ok-2: rgba(48, 209, 88, 0.08); --ok-3: rgba(48, 209, 88, 0.16); --ok-4: rgba(48, 209, 88, 0.21); --ok-5: rgba(48, 209, 88, 0.28); --ok-6: rgba(48, 209, 88, 0.36); --ok-7: rgba(48, 209, 88, 0.48); --ok-8: rgba(48, 209, 88, 0.64); --ok-9: #4ade70; --ok-10: #5ee27f; --ok-11: #6be38a; --ok-12: #c3f3cf;
+      --info-1: rgba(64, 156, 255, 0.05); --info-2: rgba(64, 156, 255, 0.08); --info-3: rgba(64, 156, 255, 0.16); --info-4: rgba(64, 156, 255, 0.21); --info-5: rgba(64, 156, 255, 0.28); --info-6: rgba(64, 156, 255, 0.36); --info-7: rgba(64, 156, 255, 0.48); --info-8: rgba(64, 156, 255, 0.64); --info-9: #74baff; --info-10: #84c2ff; --info-11: #8cc4ff; --info-12: #d2e7ff;
+      --warn-1: rgba(255, 214, 10, 0.05); --warn-2: rgba(255, 214, 10, 0.08); --warn-3: rgba(255, 214, 10, 0.15); --warn-4: rgba(255, 214, 10, 0.20); --warn-5: rgba(255, 214, 10, 0.26); --warn-6: rgba(255, 214, 10, 0.33); --warn-7: rgba(255, 214, 10, 0.45); --warn-8: rgba(255, 214, 10, 0.60); --warn-9: #ffd60a; --warn-10: #ffdc33; --warn-11: #ffe266; --warn-12: #fff3bf;
+      --danger-1: rgba(255, 105, 97, 0.05); --danger-2: rgba(255, 105, 97, 0.08); --danger-3: rgba(255, 105, 97, 0.17); --danger-4: rgba(255, 105, 97, 0.22); --danger-5: rgba(255, 105, 97, 0.29); --danger-6: rgba(255, 105, 97, 0.37); --danger-7: rgba(255, 105, 97, 0.50); --danger-8: rgba(255, 105, 97, 0.66); --danger-9: #ff9e98; --danger-10: #ffa8a3; --danger-11: #ff9c96; --danger-12: #ffd5d2;
+      --finished-1: var(--ok-1); --finished-2: var(--ok-2); --finished-3: var(--ok-3); --finished-4: var(--ok-4); --finished-5: var(--ok-5); --finished-6: var(--ok-6); --finished-7: var(--ok-7); --finished-8: var(--ok-8); --finished-9: var(--ok-9); --finished-10: var(--ok-10); --finished-11: var(--ok-11); --finished-12: var(--ok-12);
+      --glass-font: -apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro", system-ui, "Segoe UI", Roboto, sans-serif;
+      /* the wallpaper in the dark: the night sky (a public file, the login page shows it too) */
+      --glass-base: #000000; --glass-veil: rgba(0, 0, 0, 0.30);
+      --glass-wall: url("/night-sky.jpg");
+      /* the glass: a clear pane (cards), a pane that blurs (bars, popovers), its dense fallback */
+      --glass-card: rgba(255, 255, 255, 0.025);
+      --glass-card-2: rgba(255, 255, 255, 0.01);
+      --glass-bar: rgba(28, 28, 30, 0.50);
+      --glass-surface: rgba(30, 30, 33, 0.62);
+      --glass-dense: rgba(30, 30, 33, 0.96);
+      --glass-blur: blur(26px) saturate(180%);
+      --glass-pane-blur: blur(1.5px) saturate(150%) brightness(1.12);
+      --glass-well: rgba(255, 255, 255, 0.08);
+      --glass-chip: rgba(255, 255, 255, 0.12);
+      --glass-chip-line: rgba(255, 255, 255, 0.18);
+      --glass-sel: rgba(255, 255, 255, 0.16);
+      --glass-blue: #74baff;
+      --glass-ink: #ffffff;
+      /* the light on the glass: a bright rim, light at the top left, fading down, and a soft shadow */
+      --glass-rim: linear-gradient(135deg, rgba(255, 255, 255, 0.85), rgba(255, 255, 255, 0.22) 22%, rgba(255, 255, 255, 0.05) 50%, rgba(255, 255, 255, 0.20) 78%, rgba(255, 255, 255, 0.70));
+      --glass-light: inset 0 1px 0 rgba(255, 255, 255, 0.14);
+      --glass-shadow: 0 1px 2px rgba(0, 0, 0, 0.18), 0 10px 30px rgba(0, 0, 0, 0.26);
+      --glass-drop-light: inset 1px 1px 0 rgba(255, 255, 255, 0.30), inset -1px -1px 0 rgba(255, 255, 255, 0.12), 0 1px 3px rgba(0, 0, 0, 0.18);
+      --st-printing: #f5f5f7;
+      --st-printing-ink: #1c1c1e;
+      /* the charts (the timeline, the stats bar): printing a soft label colour, idle fainter, so
+         a day of printing does not glare; hex: the timeline lightens them */
+      --chart-printing: #c7c7cc;
+      --chart-idle: #545458;
+      /* the card's chips: a hot nozzle, the Wi-Fi signal, the fan's lightness */
+      --chip-hot: #ff9f0a; --wifi-good: #4ade70; --wifi-ok: #ffd60a; --wifi-weak: #ff9e98; --fan-l: 66%;
+      --bg: #1c1c1e;
+      --bg-elev: #1c1c1e;
+      --bg-panel: rgba(28, 28, 30, 0.48);
+      --bg-panel-2: rgba(28, 28, 30, 0.48);
+      --bg-soft: rgba(255, 255, 255, 0.08);
+      --line: rgba(255, 255, 255, 0.12);
+      --line-strong: rgba(255, 255, 255, 0.20);
+      --text: #ffffff;
+      --text-dim: rgba(235, 235, 245, 0.78);
+      --text-muted: rgba(235, 235, 245, 0.76);
+      --steel: #a1a1a6;
+      --ok: #4ade70;
+      --ok-soft: rgba(48, 209, 88, 0.16);
+      --warn: #ffd60a;
+      --warn-soft: rgba(255, 214, 10, 0.15);
+      --danger: #ff9e98;
+      --danger-soft: rgba(255, 105, 97, 0.17);
+      --info: #74baff;
+      --info-soft: rgba(64, 156, 255, 0.16);
+      --steel-soft: rgba(255, 255, 255, 0.08);
+      --steel-border: rgba(255, 255, 255, 0.16);
+      --finished: #4ade70;
+      --tab-active-text: #1c1c1e;
+      --toggle-active-bg: #30d158;
+      --toggle-active-border: rgba(255, 255, 255, 0.30);
+      --shadow-xl: 0 1px 2px rgba(0, 0, 0, 0.18), 0 10px 30px rgba(0, 0, 0, 0.26);
+      --shadow-lg: 0 1px 2px rgba(0, 0, 0, 0.16), 0 8px 22px rgba(0, 0, 0, 0.22);
+      --grid-dot: rgba(255, 255, 255, 0);
+      --radius-xl: 26px;
+      /* === Timeline canvas colors === */
+      --tl-bg-top: rgba(255, 255, 255, 0.04);
+      --tl-bg-bottom: rgba(255, 255, 255, 0.02);
+      --tl-zebra: rgba(255, 255, 255, 0.03);
+      --tl-grid-major: rgba(255, 255, 255, 0.12);
+      --tl-grid-minor: rgba(255, 255, 255, 0.05);
+      --tl-axis-line: rgba(255, 255, 255, 0.26);
+      --tl-axis-text: rgba(235, 235, 245, 0.70);
+      --tl-tick-major: rgba(255, 255, 255, 0.32);
+      --tl-tick-minor: rgba(255, 255, 255, 0.12);
+      --tl-label-text: rgba(235, 235, 245, 0.78);
+      --tl-label-dot: rgba(255, 255, 255, 0.35);
+      --tl-bar-shadow: rgba(0, 0, 0, 0.25);
+      --tl-bar-highlight: rgba(255, 255, 255, 0.16);
+      --tl-now-line: rgba(255, 105, 97, 0.60);
+      --tl-now-text: #ff9c96;
+      /* Gradients and specific colors */
+      --ok-grad-start: #30d158;
+      --ok-grad-mid: #30d158;
+      --ok-grad-end: #6be38a;
+      --ok-border: rgba(48, 209, 88, 0.34);
+      --ok-shadow: rgba(48, 209, 88, 0.20);
+      --ok-glow: rgba(48, 209, 88, 0.30);
+      --ok-bg-grad-start: rgba(48, 209, 88, 0.10);
+      --ok-bg-grad-end: rgba(48, 209, 88, 0.03);
+      --ok-border-strong: rgba(48, 209, 88, 0.40);
+      --ok-shadow-strong: rgba(48, 209, 88, 0.12);
+      --info-grad-start: #e5e5ea;
+      --info-grad-mid: #f5f5f7;
+      --info-grad-end: #ffffff;
+      --info-border: rgba(255, 255, 255, 0.26);
+      --info-glow: rgba(255, 255, 255, 0.22);
+      --info-bg-grad-start: rgba(255, 255, 255, 0);
+      --info-bg-grad-end: rgba(255, 255, 255, 0);
+      --info-border-strong: rgba(255, 255, 255, 0);
+      --warn-grad-start: #ffd60a;
+      --warn-grad-mid: #ffd60a;
+      --warn-grad-end: #ffe266;
+      --warn-border: rgba(255, 214, 10, 0.36);
+      --warn-bg-grad-start: rgba(255, 214, 10, 0.10);
+      --warn-bg-grad-end: rgba(255, 214, 10, 0.03);
+      --warn-border-strong: rgba(255, 214, 10, 0.40);
+      --warn-shadow: rgba(255, 214, 10, 0.10);
+      --danger-grad-start: #ff453a;
+      --danger-grad-mid: #ff6961;
+      --danger-grad-end: #ff9c96;
+      --danger-border: rgba(255, 105, 97, 0.38);
+      --danger-glow: rgba(255, 105, 97, 0.32);
+      --danger-bg-grad-start: rgba(255, 105, 97, 0.14);
+      --danger-bg-grad-end: rgba(255, 105, 97, 0.05);
+      --danger-border-strong: rgba(255, 105, 97, 0.46);
+      --danger-shadow-strong: rgba(255, 105, 97, 0.14);
+      --danger-pulse-start: rgba(255, 105, 97, 0.10);
+      --danger-pulse-mid: rgba(255, 105, 97, 0.25);
+      --danger-pulse-border-start: rgba(255, 105, 97, 0.22);
+      --danger-pulse-border-mid: rgba(255, 105, 97, 0.40);
+      --offline-border: rgba(255, 255, 255, 0.08);
+      --offline-bg-start: rgba(28, 28, 30, 0.30);
+      --offline-bg-end: rgba(28, 28, 30, 0.30);
+      --overlay-bg: rgba(0, 0, 0, 0.30);
+      --btn-primary: #0a84ff;
+      --btn-primary-text: #ffffff;
+      --temp-nozzle-grad: linear-gradient(90deg, #30d158 0%, #ffd60a 55%, #ff9f0a 100%);
+      --temp-bed-grad: linear-gradient(90deg, #8e8e93 0%, #f5f5f7 100%);
+      --shadow-hover: 0 2px 4px rgba(0, 0, 0, 0.20), 0 16px 40px rgba(0, 0, 0, 0.30);
+      --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.18), 0 10px 30px rgba(0, 0, 0, 0.26);
+      --shadow-pulse: 0 0 0 0 rgba(48, 209, 88, 0.4);
+      --shadow-pulse-start: 0 0 0 0 rgba(48, 209, 88, 0.35);
+      --shadow-pulse-end: 0 0 0 10px rgba(48, 209, 88, 0);
+      --shadow-live: 0 0 10px rgba(48, 209, 88, 0.40);
+    }
+    @media (prefers-color-scheme: light) {
+      /* «Стекло» in the light: white frost over the bright wallpaper, black text */
+      html[data-theme="glass"] {
+        color-scheme: light;
+        --gray-1: #f2f2f7; --gray-2: #ffffff; --gray-3: rgba(255, 255, 255, 0.45); --gray-4: rgba(255, 255, 255, 0.55); --gray-5: rgba(255, 255, 255, 0.65); --gray-6: rgba(0, 0, 0, 0.12); --gray-7: #aeaeb2; --gray-8: #8e8e93; --gray-9: #7c7c80; --gray-10: #6e6e73; --gray-11: #6e6e73; --gray-12: #1c1c1e;
+        --ok-1: rgba(36, 138, 61, 0.05); --ok-2: rgba(36, 138, 61, 0.08); --ok-3: rgba(52, 199, 89, 0.20); --ok-4: rgba(52, 199, 89, 0.25); --ok-5: rgba(52, 199, 89, 0.32); --ok-6: rgba(52, 199, 89, 0.40); --ok-7: rgba(52, 199, 89, 0.55); --ok-8: rgba(52, 199, 89, 0.72); --ok-9: #0f5f26; --ok-10: #0d5622; --ok-11: #0b4d1e; --ok-12: #0d3a19;
+        --info-1: rgba(0, 122, 255, 0.05); --info-2: rgba(0, 122, 255, 0.08); --info-3: rgba(0, 122, 255, 0.14); --info-4: rgba(0, 122, 255, 0.19); --info-5: rgba(0, 122, 255, 0.26); --info-6: rgba(0, 122, 255, 0.34); --info-7: rgba(0, 122, 255, 0.46); --info-8: rgba(0, 122, 255, 0.62); --info-9: #0040b8; --info-10: #003ba8; --info-11: #003699; --info-12: #002a66;
+        --warn-1: rgba(255, 204, 0, 0.06); --warn-2: rgba(255, 204, 0, 0.10); --warn-3: rgba(255, 204, 0, 0.24); --warn-4: rgba(255, 204, 0, 0.30); --warn-5: rgba(255, 204, 0, 0.38); --warn-6: rgba(255, 204, 0, 0.46); --warn-7: rgba(214, 160, 0, 0.62); --warn-8: rgba(190, 140, 0, 0.78); --warn-9: #5e4100; --warn-10: #573c00; --warn-11: #503700; --warn-12: #3d2a00;
+        --danger-1: rgba(215, 0, 21, 0.05); --danger-2: rgba(215, 0, 21, 0.08); --danger-3: rgba(255, 59, 48, 0.16); --danger-4: rgba(255, 59, 48, 0.21); --danger-5: rgba(255, 59, 48, 0.28); --danger-6: rgba(255, 59, 48, 0.36); --danger-7: rgba(255, 59, 48, 0.50); --danger-8: rgba(255, 59, 48, 0.66); --danger-9: #a30014; --danger-10: #990013; --danger-11: #8f0012; --danger-12: #5c000c;
+        --glass-base: #dfe7fb; --glass-veil: rgba(255, 255, 255, 0.24);
+        --glass-wall: radial-gradient(ellipse 46vmax 36vmax at 88% 6%, rgba(90, 165, 255, 0.60), transparent 70%), radial-gradient(ellipse 40vmax 34vmax at 4% 30%, rgba(130, 140, 255, 0.42), transparent 70%), radial-gradient(ellipse 34vmax 26vmax at 52% 48%, rgba(120, 190, 255, 0.30), transparent 70%), radial-gradient(ellipse 48vmax 30vmax at 86% 96%, rgba(40, 210, 200, 0.45), transparent 70%), radial-gradient(ellipse 30vmax 22vmax at 14% 98%, rgba(255, 180, 90, 0.45), transparent 70%), linear-gradient(160deg, #eaf1ff 0%, #dfe7fb 50%, #d6e0f6 100%);
+        --glass-card: rgba(255, 255, 255, 0.16);
+        --glass-card-2: rgba(255, 255, 255, 0.30);
+        --glass-bar: rgba(255, 255, 255, 0.52);
+        --glass-surface: rgba(255, 255, 255, 0.66);
+        --glass-dense: rgba(250, 250, 252, 0.97);
+        --glass-well: rgba(255, 255, 255, 0.42);
+        --glass-chip: rgba(255, 255, 255, 0.42);
+        --glass-chip-line: rgba(255, 255, 255, 0.70);
+        --glass-sel: rgba(255, 255, 255, 0.80);
+        --glass-blue: #0040b8;
+        --glass-rim: linear-gradient(135deg, rgba(255, 255, 255, 1), rgba(255, 255, 255, 0.55) 24%, rgba(255, 255, 255, 0.15) 50%, rgba(255, 255, 255, 0.35) 76%, rgba(255, 255, 255, 0.95));
+        --glass-light: inset 0 1px 0 rgba(255, 255, 255, 0.70);
+        --glass-shadow: 0 1px 2px rgba(0, 0, 0, 0.08), 0 10px 30px rgba(0, 0, 0, 0.12);
+        --glass-drop-light: inset 1px 1px 0 rgba(255, 255, 255, 0.95), inset -1px -1px 0 rgba(255, 255, 255, 0.55), 0 1px 3px rgba(0, 0, 0, 0.10);
+        --st-printing: #1c1c1e;
+        --st-printing-ink: #ffffff;
+        --chart-printing: #48484a;
+        --chart-idle: #c7c7cc;
+        /* the charts take the system's bright state colours (the text ones are darkened for AA) */
+        --chart-ok: #34c759;
+        --chart-warn: #ffcc00;
+        --chart-danger: #ff3b30;
+        --chip-hot: #8f2a00; --wifi-good: #0f5f26; --wifi-ok: #5e4100; --wifi-weak: #a30014; --fan-l: 26%;
+        --bg: #f2f2f7;
+        --bg-elev: #f2f2f7;
+        --bg-panel: rgba(255, 255, 255, 0.45);
+        --bg-panel-2: rgba(255, 255, 255, 0.45);
+        --bg-soft: rgba(255, 255, 255, 0.45);
+        --line: rgba(0, 0, 0, 0.08);
+        --line-strong: rgba(0, 0, 0, 0.14);
+        --text: #000000;
+        --text-dim: rgba(0, 0, 0, 0.72);
+        --text-muted: rgba(0, 0, 0, 0.66);
+        --steel: #6e6e73;
+        --ok: #0f5f26;
+        --ok-soft: rgba(52, 199, 89, 0.20);
+        --warn: #5e4100;
+        --warn-soft: rgba(255, 204, 0, 0.24);
+        --danger: #a30014;
+        --danger-soft: rgba(255, 59, 48, 0.16);
+        --info: #0040b8;
+        --info-soft: rgba(0, 122, 255, 0.14);
+        --steel-soft: rgba(255, 255, 255, 0.45);
+        --steel-border: rgba(0, 0, 0, 0.10);
+        --finished: #0f5f26;
+        --tab-active-text: #000000;
+        --toggle-active-bg: #34c759;
+        --toggle-active-border: rgba(0, 0, 0, 0.06);
+        --shadow-xl: 0 1px 2px rgba(0, 0, 0, 0.08), 0 10px 30px rgba(0, 0, 0, 0.12);
+        --shadow-lg: 0 1px 2px rgba(0, 0, 0, 0.08), 0 8px 22px rgba(0, 0, 0, 0.10);
+        --tl-bg-top: rgba(255, 255, 255, 0.30);
+        --tl-bg-bottom: rgba(255, 255, 255, 0.20);
+        --tl-zebra: rgba(255, 255, 255, 0.20);
+        --tl-grid-major: rgba(0, 0, 0, 0.10);
+        --tl-grid-minor: rgba(0, 0, 0, 0.04);
+        --tl-axis-line: rgba(0, 0, 0, 0.24);
+        --tl-axis-text: rgba(0, 0, 0, 0.66);
+        --tl-tick-major: rgba(0, 0, 0, 0.30);
+        --tl-tick-minor: rgba(0, 0, 0, 0.10);
+        --tl-label-text: rgba(0, 0, 0, 0.78);
+        --tl-label-dot: rgba(255, 255, 255, 0.70);
+        --tl-bar-shadow: rgba(0, 0, 0, 0.10);
+        --tl-bar-highlight: rgba(255, 255, 255, 0.40);
+        --tl-now-line: rgba(196, 0, 26, 0.50);
+        --tl-now-text: #a30014;
+        --ok-grad-start: #34c759; --ok-grad-mid: #34c759; --ok-grad-end: #30d158;
+        --ok-border: rgba(31, 122, 55, 0.30); --ok-shadow: rgba(52, 199, 89, 0.20); --ok-glow: rgba(52, 199, 89, 0.30);
+        --ok-bg-grad-start: rgba(52, 199, 89, 0.12); --ok-bg-grad-end: rgba(52, 199, 89, 0.04); --ok-border-strong: rgba(31, 122, 55, 0.34); --ok-shadow-strong: rgba(52, 199, 89, 0.14);
+        --info-grad-start: #1c1c1e; --info-grad-mid: #1c1c1e; --info-grad-end: #3a3a3c;
+        --info-border: rgba(0, 0, 0, 0.18); --info-glow: rgba(0, 0, 0, 0.10);
+        --warn-grad-start: #ffcc00; --warn-grad-mid: #ffcc00; --warn-grad-end: #ffd60a;
+        --warn-border: rgba(125, 87, 0, 0.30); --warn-bg-grad-start: rgba(255, 204, 0, 0.16); --warn-bg-grad-end: rgba(255, 204, 0, 0.05); --warn-border-strong: rgba(125, 87, 0, 0.32); --warn-shadow: rgba(255, 204, 0, 0.14);
+        --danger-grad-start: #ff3b30; --danger-grad-mid: #ff3b30; --danger-grad-end: #ff6961;
+        --danger-border: rgba(196, 0, 26, 0.30); --danger-glow: rgba(255, 59, 48, 0.28); --danger-bg-grad-start: rgba(255, 59, 48, 0.14); --danger-bg-grad-end: rgba(255, 59, 48, 0.05);
+        --danger-border-strong: rgba(196, 0, 26, 0.36); --danger-shadow-strong: rgba(255, 59, 48, 0.14);
+        --offline-border: rgba(255, 255, 255, 0.40); --offline-bg-start: rgba(255, 255, 255, 0.24); --offline-bg-end: rgba(255, 255, 255, 0.24);
+        --overlay-bg: rgba(255, 255, 255, 0.35);
+        --btn-primary: #007aff;
+        --btn-primary-text: #ffffff;
+        --temp-nozzle-grad: linear-gradient(90deg, #34c759 0%, #ffcc00 55%, #ff9500 100%);
+        --temp-bed-grad: linear-gradient(90deg, #aeaeb2 0%, #1c1c1e 100%);
+        --shadow-hover: 0 2px 4px rgba(0, 0, 0, 0.10), 0 16px 40px rgba(0, 0, 0, 0.16);
+        --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.08), 0 10px 30px rgba(0, 0, 0, 0.12);
+      }
     }
     * {
       box-sizing: border-box;
@@ -739,6 +1040,14 @@
       overflow-x: hidden;
       position: relative;
     }
+    /* «Светлая»: an even paper, one faint cool light at the top (the green and amber pools
+       mixed into a muddy pastel on white) */
+    html[data-theme="light"] body {
+      background: radial-gradient(ellipse 80% 50% at 50% -10%, rgba(9, 105, 218, 0.06), transparent 70%), var(--bg);
+    }
+    /* no full-screen noise blend layer: invisible on white at 6 %, and the last theme that drew
+       it — it cost half of every scroll frame (31 → 17 ms, «Принтеры», 1280 px, perf.js) */
+    html[data-theme="light"] body::after { display: none; }
     body::before {
       content: "";
       position: fixed;
@@ -911,7 +1220,9 @@
       border: 1px solid var(--line);
       border-radius: var(--radius-xl);
       box-shadow: var(--shadow-xl);
-      backdrop-filter: blur(16px);
+      /* no backdrop-filter: under a panel or a card lies the page's smooth light, a blur of it
+         shows nothing (a pixel diff of «Принтеры», 1280 px, every theme: ≤ 42 px of 1.15 M
+         differ by more than 8 levels) and cost a pass per card on every scroll frame */
       position: relative;
       overflow: hidden;
     }
@@ -1320,9 +1631,10 @@
       font-family: "IBM Plex Mono", monospace;
       flex: 0 0 auto;
     }
-    .pc-wifi-good { color: #4ade80; }
-    .pc-wifi-ok { color: #facc15; }
-    .pc-wifi-weak { color: #f87171; }
+    /* the signal's three colours: the theme's own (--wifi-*, :root has «Океан»'s) */
+    .pc-wifi-good { color: var(--wifi-good); }
+    .pc-wifi-ok { color: var(--wifi-ok); }
+    .pc-wifi-weak { color: var(--wifi-weak); }
     .pc-ic {
       width: 15px;
       height: 15px;
@@ -1557,7 +1869,7 @@
     .pc-tip.show { opacity: 1; }
     /* CSS-тултип для полос сводки. Лог событий — плавающим .pc-tip (app.js,
        initChipTooltips): ::after внутри .event-desc с overflow: hidden обрезался. */
-    .pc-chip.pc-hot { color: #fb9a5f; }
+    .pc-chip.pc-hot { color: var(--chip-hot); }
     /* card indicators that need attention (door open, SD card) */
     .pc-chip.pc-warn { color: var(--warn-11); border-color: var(--warn-border); }
     .pc-chip.pc-heating {
@@ -1621,7 +1933,7 @@
     .pc-ams-temp .pc-ic { width: 13px; height: 13px; }
     .pc-ams.pc-ams-drying {
       /* subtle hint only — a faint amber border, no glow */
-      border-color: rgba(251, 191, 36, 0.45);
+      border-color: color-mix(in srgb, var(--warn) 45%, transparent);
     }
     .pc-speed-slow { color: var(--info); }
     .pc-speed-fast { color: var(--warn); }
@@ -1855,12 +2167,28 @@
       box-shadow: 0 0 0 2px var(--ok);
     }
     /* Каждая кнопка — мини-превью своей темы, цвета зашиты намеренно */
-    .theme-seg-btn[data-theme=""] { background: linear-gradient(160deg, #1e293b, #0f172a); color: #6eeed9; }
-    .theme-seg-btn[data-theme="dark-classic"] { background: linear-gradient(160deg, #1c2128, #0d1117); color: #6edb7e; }
+    .theme-seg-btn[data-theme=""] { background: radial-gradient(ellipse 90% 70% at 50% -20%, rgba(45, 212, 191, 0.30), transparent 70%), linear-gradient(180deg, #0f3a50, #061723); color: #6eeed9; border-radius: 16px; box-shadow: 0 6px 14px rgba(0, 8, 16, 0.45); }
+    .theme-seg-btn[data-theme="dark-classic"] { background: #1f1f1f; color: #d4d4d4; border-color: #3c3c3c; border-radius: 4px; box-shadow: inset 3px 0 0 #0078d4; }
     .theme-seg-btn[data-theme="light"] { background: linear-gradient(160deg, #ffffff, #e8eaed); color: #0969da; border-color: #c8ccd4; }
-    .theme-seg-btn[data-theme="night"] { background: linear-gradient(160deg, #1a1a1a, #000000); color: #50e3c2; }
-    .theme-seg-btn[data-theme="neon"] { background: linear-gradient(160deg, #1a1a38, #0a0a1a); color: #ff60b8; }
-    .theme-seg-btn[data-theme="cosmos"] { background: linear-gradient(160deg, #131c27, #04070c); color: #5fd9f5; }
+    .theme-seg-btn[data-theme="night"] { background: #000000; color: #e8e8e8; border-color: rgba(255, 255, 255, 0.17); }
+    .theme-seg-btn[data-theme="cosmos"] {
+      background: radial-gradient(1px 1px at 22% 30%, #ffffff, transparent 60%), radial-gradient(1px 1px at 74% 64%, rgba(255, 255, 255, 0.8), transparent 60%),
+        radial-gradient(1px 1px at 58% 22%, rgba(255, 255, 255, 0.7), transparent 60%), radial-gradient(ellipse 70% 30% at 40% 70%, rgba(180, 200, 220, 0.22), transparent 70%),
+        linear-gradient(160deg, #0b0f16, #04060a);
+      color: #bfe0ff; border-color: rgba(170, 200, 255, 0.24); box-shadow: inset 0 1px 0 rgba(190, 220, 255, 0.30);
+    }
+    .theme-seg-btn[data-theme="amber"] { background: linear-gradient(160deg, #2a2017, #14100c); color: #f2ae4b; border-color: rgba(255, 210, 150, 0.16); }
+    .theme-seg-btn[data-theme="glass"] {
+      background: linear-gradient(180deg, rgba(255, 255, 255, 0.50), rgba(255, 255, 255, 0.22)),
+        radial-gradient(1px 1px at 20% 30%, #ffffff, transparent 60%), radial-gradient(1px 1px at 70% 62%, rgba(255, 255, 255, 0.85), transparent 60%),
+        radial-gradient(1px 1px at 52% 24%, rgba(255, 255, 255, 0.7), transparent 60%), radial-gradient(ellipse 60% 40% at 40% 70%, rgba(170, 185, 200, 0.35), transparent 70%),
+        linear-gradient(160deg, #15171b, #000000);
+      color: #ffffff; text-shadow: 0 1px 2px rgba(0, 0, 0, 0.35); border-color: rgba(255, 255, 255, 0.60); border-radius: 999px;
+      box-shadow: inset 1px 1px 0 rgba(255, 255, 255, 0.85), inset -1px -1px 0 rgba(255, 255, 255, 0.40);
+    }
+    .theme-seg-btn[data-theme="glass"].active { border-color: transparent; box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.85), 0 0 0 2px var(--ok); }
+    /* seven themes in three columns: the last one alone takes the whole row, the grid stays even */
+    .theme-grid > .theme-seg-btn:last-child:nth-child(3n + 1) { grid-column: 1 / -1; }
     .sdd-foot {
       display: flex;
       align-items: center;
@@ -2395,7 +2723,7 @@
     .proxy-st.ok { color: var(--ok); }
     .proxy-st.ok .d { background: var(--ok); box-shadow: 0 0 7px var(--ok-shadow); }
     .proxy-st.err { color: var(--danger); }
-    .proxy-st.err .d { background: var(--danger); box-shadow: 0 0 7px rgba(248, 113, 113, 0.5); }
+    .proxy-st.err .d { background: var(--danger); box-shadow: 0 0 7px color-mix(in srgb, var(--danger) 50%, transparent); }
     .proxy-url { word-break: break-all; }
 
     .proxy-add-row { display: flex; gap: 10px; margin-top: 14px; flex-wrap: wrap; align-items: center; }
@@ -2476,13 +2804,13 @@
     .pc-ctl[aria-disabled="true"] { opacity: 0.32; cursor: default; }
     .pc-ctl[aria-disabled="true"]:hover { border-color: var(--line); color: var(--text-dim); }
     .pc-ctl.lit {
-      color: var(--warn); border-color: rgba(251, 191, 36, 0.5);
+      color: var(--warn); border-color: color-mix(in srgb, var(--warn) 50%, transparent);
       background-color: var(--bg-elev); background-image: linear-gradient(var(--warn-soft), var(--warn-soft));
-      box-shadow: 0 0 12px rgba(251, 191, 36, 0.16);
+      box-shadow: 0 0 12px color-mix(in srgb, var(--warn) 16%, transparent);
     }
-    .pc-ctl.lit .pc-ic { fill: rgba(251, 191, 36, 0.28); }
+    .pc-ctl.lit .pc-ic { fill: color-mix(in srgb, var(--warn) 28%, transparent); }
     .pc-ctl.lit:hover:not([aria-disabled="true"]) { color: var(--warn-11); border-color: var(--warn); }
-    .pc-ctl.danger { color: rgba(248, 113, 113, 0.8); }
+    .pc-ctl.danger { color: color-mix(in srgb, var(--danger) 80%, transparent); }
     .pc-ctl.danger:hover:not([aria-disabled="true"]) { color: var(--danger); border-color: var(--danger); }
     .pc-ctl.open {
       color: var(--text); border-color: var(--info);
@@ -2814,7 +3142,7 @@
     /* the farm's commands (admins): «Свет: вкл · выкл», «Пауза всех…», «Продолжить N» */
     .fleet-bulk { position: relative; display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; min-height: 32px; }
     .fb-light-lbl { display: inline-flex; align-items: center; gap: 5px; font-size: 0.74rem; color: var(--text-dim); white-space: nowrap; }
-    .fb-light-lbl .pc-ic { width: 15px; height: 15px; color: var(--warn); fill: rgba(251, 191, 36, 0.22); }
+    .fb-light-lbl .pc-ic { width: 15px; height: 15px; color: var(--warn); fill: color-mix(in srgb, var(--warn) 22%, transparent); }
     .fb-btn {
       position: relative; display: inline-flex; align-items: center; gap: 6px; height: 32px; padding: 0 12px;
       border-radius: 10px; border: 1px solid var(--line-strong); background: var(--bg-soft); color: var(--text);
@@ -2823,7 +3151,7 @@
     }
     .fb-btn .pc-ic { width: 15px; height: 15px; }
     .fb-btn:hover:not([aria-disabled="true"]) { border-color: var(--info); }
-    .fb-btn.pause { color: var(--warn-11); border-color: rgba(251, 191, 36, 0.35); }
+    .fb-btn.pause { color: var(--warn-11); border-color: color-mix(in srgb, var(--warn) 35%, transparent); }
     .fb-btn.pause:hover:not([aria-disabled="true"]) { border-color: var(--warn); color: var(--warn-12); }
     .fb-btn[aria-disabled="true"] { opacity: 0.4; cursor: default; }
     .fb-btn.is-wait { pointer-events: none; }
@@ -3045,7 +3373,7 @@
     }
     .fw-badge.fw-avail {
       color: var(--warn);
-      border: 1px solid rgba(251, 191, 36, 0.35);
+      border: 1px solid color-mix(in srgb, var(--warn) 35%, transparent);
     }
     .fw-badge.fw-lock {
       color: var(--text-muted);
@@ -3057,12 +3385,21 @@
       --sev-pause: #fb923c; --sev-pause-text: #fdba74;
       --sev-pause-soft: rgba(251, 146, 60, 0.16); --sev-pause-border: rgba(251, 146, 60, 0.45);
       --sev-fatal-ink: #2a0606;
+      /* the card's chips: a hot nozzle, the Wi-Fi signal, the fan's lightness (app.js fanChip) */
+      --chip-hot: #fb9a5f; --wifi-good: #3de0cc; --wifi-ok: #facc15; --wifi-weak: #f87171; --fan-l: 55%;
+      --warn-5: #5c4517;
+      --warn-6: #6e5420;
+      --warn-7: #8a6a24;
     }
-    html[data-theme="dark-classic"] { --sev-pause: #f0883e; --sev-pause-text: #ffa657; --sev-pause-soft: rgba(240, 136, 62, 0.16); --sev-pause-border: rgba(240, 136, 62, 0.45); }
+    html[data-theme="dark-classic"] { --sev-pause: #e2904a; --sev-pause-text: #eaa86e; --sev-pause-soft: rgba(226, 144, 74, 0.13); --sev-pause-border: rgba(226, 144, 74, 0.45); }
     html[data-theme="light"] { --sev-pause: #c2410c; --sev-pause-text: #9a3412; --sev-pause-soft: rgba(194, 65, 12, 0.12); --sev-pause-border: rgba(194, 65, 12, 0.40); --sev-fatal-ink: #ffffff; }
-    html[data-theme="night"] { --sev-pause: #f97316; --sev-pause-text: #fdba74; --sev-pause-soft: rgba(249, 115, 22, 0.16); --sev-pause-border: rgba(249, 115, 22, 0.45); }
-    html[data-theme="neon"] { --sev-pause: #ff8c42; --sev-pause-text: #ffb27a; --sev-pause-soft: rgba(255, 140, 66, 0.16); --sev-pause-border: rgba(255, 140, 66, 0.45); }
-    html[data-theme="cosmos"] { --sev-pause: #ff9d5c; --sev-pause-text: #ffc093; --sev-pause-soft: rgba(255, 157, 92, 0.15); --sev-pause-border: rgba(255, 157, 92, 0.42); }
+    html[data-theme="night"] { --sev-pause: #e39a5e; --sev-pause-text: #ebb48a; --sev-pause-soft: rgba(227, 154, 94, 0.08); --sev-pause-border: rgba(227, 154, 94, 0.45); }
+    html[data-theme="cosmos"] { --sev-pause: #ffa36b; --sev-pause-text: #ffc199; --sev-pause-soft: rgba(255, 163, 107, 0.14); --sev-pause-border: rgba(255, 163, 107, 0.42); }
+    html[data-theme="amber"] { --sev-pause: #ff8c42; --sev-pause-text: #ffaa70; --sev-pause-soft: rgba(255, 140, 66, 0.15); --sev-pause-border: rgba(255, 140, 66, 0.42); }
+    html[data-theme="glass"] { --sev-pause: #ff9f0a; --sev-pause-text: #ffb340; --sev-pause-soft: rgba(255, 159, 10, 0.16); --sev-pause-border: rgba(255, 159, 10, 0.46); }
+    @media (prefers-color-scheme: light) {
+      html[data-theme="glass"] { --sev-pause: #e06a00; --sev-pause-text: #8f2a00; --sev-pause-soft: rgba(255, 149, 0, 0.18); --sev-pause-border: rgba(201, 52, 0, 0.40); --sev-fatal-ink: #ffffff; }
+    }
     /* the floating tooltip shows over every popover, sheet, panel and dialog too (one data-tip
        binding for the page, plan step 14) */
     .pc-tip { z-index: 700; }
@@ -3394,6 +3731,8 @@
     .ams-slot { flex:1; height:6px; border-radius:4px; background:var(--gray-5); }
     .ams-slot.empty { background:repeating-linear-gradient(45deg,var(--gray-4),var(--gray-4) 4px,var(--gray-3) 4px,var(--gray-3) 8px); }
     .ams-slot.active { outline:2px solid var(--info); outline-offset:1px; }
+    /* «Светлая»: a white or pale spool would vanish on the white card */
+    html[data-theme="light"] .ams-slot:not(.empty) { box-shadow: inset 0 0 0 1px rgba(31, 35, 40, 0.14); }
     .ams-dry { margin-top:11px; display:flex; align-items:center; gap:9px;
       background:var(--warn-soft); border:1px solid var(--warn-7); border-radius:10px; padding:8px 11px; }
     .ams-dry .rem { margin-left:auto; font-weight:700; color:var(--warn-12); font-size:13px; }
@@ -3939,6 +4278,7 @@
     .me-panel .theme-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; }
     .me-panel .theme-seg-btn { min-height: 38px; border-radius: 10px; font-size: 0.74rem; }
     .me-panel .text-scale-row { flex: 1 1 160px; padding: 0; }
+    .glass-photo-btns { display: flex; gap: 6px; flex-wrap: wrap; }
     .me-panel .settings-list { display: grid; }
     .me-subs { display: flex; flex-wrap: wrap; gap: 6px 14px; color: var(--text-dim); font-size: 0.76rem; transition: opacity 0.2s; }
     .me-subs label { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; }
@@ -4265,4 +4605,373 @@
 
       /* «Хронология»: a finger pans sideways and pinches, the page still scrolls up and down */
       #timeline-canvas { touch-action: pan-y; }
+    }
+
+    /* === «Стекло» (Liquid Glass, iOS 26): what tokens alone cannot say. Every rule is scoped to
+       html[data-theme="glass"]; the other themes do not see this block. One theme, light or dark
+       as the system is (the tokens' prefers-color-scheme block); these rules serve both.
+       Speed (owner's farm: 15–20 cards, a refresh every 2 s, a Pi and a phone): nothing here
+       moves; the wallpaper is one fixed layer (body::before), painted once; the cards and the
+       panels have no backdrop-filter — the wallpaper under them is smooth, a blur of it would
+       cost a pass per card on every scroll frame and show nothing; the clear pane with its rim
+       is enough. The blur is kept for the surfaces that real content passes under: the sticky
+       bars, the phone's bottom bar, popovers, sheets, dialogs. ===  */
+    html[data-theme="glass"] { background-color: var(--glass-base); }
+    html[data-theme="glass"] body { background: var(--glass-base); -webkit-font-smoothing: antialiased; }
+    html[data-theme="glass"] body::before {
+      background-image: var(--glass-wall); background-size: cover; background-position: center; -webkit-mask-image: none; mask-image: none; opacity: 1;
+    }
+    /* a photo of the owner's choosing (👤 «Этот браузер» → «Своё фото»): it fills the screen,
+       a veil keeps the text readable on any picture */
+    html[data-theme="glass"][data-glass-photo] body::before {
+      background-image: linear-gradient(var(--glass-veil), var(--glass-veil)), var(--glass-photo);
+      background-size: cover; background-position: center;
+    }
+    /* a photo is busier and brighter than the wallpaper: a denser pane keeps the coloured
+       figures readable on it (:where keeps the fallback below the stronger rule) */
+    html[data-theme="glass"]:where([data-glass-photo]) { --glass-card: rgba(10, 12, 18, 0.24); --glass-veil: rgba(0, 0, 0, 0.36); --glass-pane-blur: blur(9px) saturate(120%); }
+    @media (prefers-color-scheme: light) {
+      html[data-theme="glass"]:where([data-glass-photo]) { --glass-card: rgba(255, 255, 255, 0.30); --glass-veil: rgba(255, 255, 255, 0.34); }
+    }
+    /* the full-screen noise blend layer: a compositing pass of its own, invisible on glass */
+    html[data-theme="glass"] body::after { display: none; }
+    /* the system font (SF on Apple devices); numbers keep their width as the monospace did */
+    html[data-theme="glass"] body, html[data-theme="glass"] body :not(svg, svg *) {
+      font-family: var(--glass-font) !important; font-variant-numeric: tabular-nums;
+    }
+
+    /* panels and cards: a clear pane, a bright rim (light at the top left, fading down: a gradient
+       border drawn by ::before with a mask), a soft shadow; no blur (see above) */
+    html[data-theme="glass"] :is(.section-panel, .printer-card, .ams-card) {
+      background: var(--glass-card); border-color: transparent; backdrop-filter: none;
+      box-shadow: var(--glass-light), var(--glass-shadow);
+    }
+    html[data-theme="glass"] .printer-card, html[data-theme="glass"] .ams-card { border-radius: 26px; }
+    html[data-theme="glass"] .ams-card { position: relative; }
+    html[data-theme="glass"] .section-panel { border-radius: 28px; }
+    /* the glass bends what is under it: the cards blur the wallpaper's shapes (light pools and
+       grey pools, colourless), a sheen runs across from the top-left, the inner edge catches
+       light at the top and glows faintly at the bottom. The dense fallback below still wins. */
+    @supports ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+      html[data-theme="glass"] :is(.printer-card, .ams-card, .section-panel:not(.fleet-section)) {
+        -webkit-backdrop-filter: var(--glass-pane-blur); backdrop-filter: var(--glass-pane-blur);
+      }
+    }
+    html[data-theme="glass"] :is(.printer-card, .ams-card, .section-panel:not(.fleet-section)) {
+      background-image: linear-gradient(135deg, rgba(255, 255, 255, 0.14) 0%, rgba(255, 255, 255, 0.03) 36%, rgba(255, 255, 255, 0) 60%, rgba(255, 255, 255, 0.06) 100%);
+      box-shadow: inset 1.5px 1.5px 1px -0.5px rgba(255, 255, 255, 0.42), inset -1.5px -1.5px 1px -0.5px rgba(255, 255, 255, 0.20),
+        inset 0 0 22px rgba(255, 255, 255, 0.06), var(--glass-shadow);
+    }
+    html[data-theme="glass"] :is(.printer-card, .ams-card, .section-panel)::before { padding: 1.5px; }
+    html[data-theme="glass"] :is(.section-panel, .printer-card, .ams-card)::before {
+      content: ""; position: absolute; inset: 0; height: auto; z-index: 0; border-radius: inherit; padding: 1px;
+      background: var(--glass-rim); pointer-events: none;
+      -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+      -webkit-mask-composite: xor; mask-composite: exclude;
+    }
+    html[data-theme="glass"] .printer-card:hover { transform: translateY(-2px); box-shadow: var(--glass-light), var(--shadow-hover); }
+    /* a state colours the pane a little (the wallpaper still shows through); printing does not */
+    html[data-theme="glass"] .printer-card.finished { background: linear-gradient(180deg, var(--ok-bg-grad-start), var(--ok-bg-grad-end)), var(--glass-card); }
+    html[data-theme="glass"] .printer-card.error {
+      background: linear-gradient(180deg, var(--danger-bg-grad-start), var(--danger-bg-grad-end)), var(--glass-card);
+      box-shadow: var(--glass-light), inset 0 0 0 1px var(--danger-border-strong), var(--glass-shadow);
+    }
+    html[data-theme="glass"] .printer-card.paused { background: linear-gradient(180deg, var(--warn-bg-grad-start), var(--warn-bg-grad-end)), var(--glass-card); }
+    html[data-theme="glass"] .printer-card.offline { background: var(--glass-card-2); box-shadow: var(--glass-light); }
+    /* «Принтеры»: the cards float on the wallpaper, no second pane around them */
+    html[data-theme="glass"] .fleet-section { background: none; box-shadow: none; overflow: visible; }
+    html[data-theme="glass"] .fleet-section::before { display: none; }
+
+    /* capsules: buttons, chips, badges, segments — a clear drop with the light on its upper edge */
+    html[data-theme="glass"] :is(.pc-chip, .pc-ctl, .farm-chip, .fb-btn, .farm-more, .panel-badge, .me-btn, .ghost-btn, .sort-btn,
+      .status-badge, .nf-badge:not(.fatal), .ams-badge, .bd-btn, .ad-btn, .nf-btn:not(.primary), .scroll-top-btn, .nf-bell, .hist-btn, .logout-btn) {
+      background-color: var(--glass-chip); border-color: var(--glass-chip-line); box-shadow: var(--glass-drop-light); border-radius: 999px;
+    }
+    html[data-theme="glass"] :is(.fin-row, .farm-seg, .seg, .ams-range, .seg-range, .adm-seg) {
+      background-color: var(--glass-chip); border-color: var(--glass-chip-line); border-radius: 999px;
+    }
+    html[data-theme="glass"] :is(.farm-seg, .seg, .ams-range, .seg-range, .adm-seg) button { border-radius: 999px; border-color: transparent; }
+    html[data-theme="glass"] :is(.farm-seg button.active, .ams-range button.active, .seg-range button.active, .seg button.active, .adm-seg button.active, .farm-chip.on) {
+      background-color: var(--glass-sel); background-image: none; color: var(--text); box-shadow: var(--glass-drop-light);
+    }
+    html[data-theme="glass"] .farm-chip.on { border-color: var(--glass-blue); }
+    /* the system's badge: sentence case, no halo; printing is a filled capsule in the label colour */
+    html[data-theme="glass"] .status-badge { text-transform: none; letter-spacing: 0; font-size: 0.74rem; font-weight: 600; }
+    html[data-theme="glass"] .status-badge::before { box-shadow: none; }
+    html[data-theme="glass"] .status-badge.printing { color: var(--st-printing-ink); background-color: var(--st-printing); border-color: transparent; }
+    html[data-theme="glass"] .status-badge.printing::before { background: var(--st-printing-ink); }
+    html[data-theme="glass"] :is(.status-dot-live, .ams-dot.on) { box-shadow: none; }
+    html[data-theme="glass"] .farm-chip.st-printing { --st: var(--st-printing); }
+    html[data-theme="glass"] .seg-printing { background: var(--chart-printing); }
+    html[data-theme="glass"] .seg-idle { background: var(--chart-idle); }
+    html[data-theme="glass"] .seg-finished { background: var(--chart-ok, var(--ok)); }
+    html[data-theme="glass"] .seg-paused { background: var(--chart-warn, var(--warn)); }
+    html[data-theme="glass"] .seg-error { background: var(--chart-danger, var(--danger)); }
+    html[data-theme="glass"] .event-badge-printing { color: var(--st-printing); background-image: none; }
+    html[data-theme="glass"] .printer-card.printing .progress-ring .fg { stroke: var(--st-printing); filter: none; }
+    html[data-theme="glass"] .progress-ring .fg { filter: none; }
+    html[data-theme="glass"] .progress-track { background: var(--glass-well); border-color: transparent; }
+    html[data-theme="glass"] .printer-visual { border-radius: 18px; border-color: var(--glass-chip-line); background: var(--glass-well); box-shadow: var(--glass-light); }
+    html[data-theme="glass"] .printer-visual::after { display: none; }
+    /* --bg-elev is opaque in every theme (the bars, the panels and the dialogs rest on it);
+       what lies on a glass card takes a clear well instead, the card is its base */
+    html[data-theme="glass"] :is(.printer-card, .ams-card, .section-panel) :is(.nf-strip, .nf-sev, .ams-dry, .ams-spool,
+      .seg button, .adm-seg button, .pc-confirm button):not(.fatal) {
+      background-color: var(--glass-well);
+    }
+    html[data-theme="glass"] .nf-strip { border-radius: 18px; }
+    /* inputs: a well */
+    html[data-theme="glass"] :is(input[type="text"], input[type="number"], input[type="password"], input[type="search"], select, textarea) {
+      border-radius: 12px;
+    }
+    /* the tint, the system blue: links and what is selected, nothing else */
+    html[data-theme="glass"] :is(.nf-strip .go, .nf-grp-go, .jobs-more, .topbar-brand-mark) { color: var(--glass-blue); }
+
+    /* surfaces content passes under: glass that blurs (and its dense fallback below). The
+       sticky bars blur through a ::before of their own: a backdrop-filter on the bar itself
+       would make it the containing block of its position: fixed children (the phone's bottom
+       navigation lives inside the header). */
+    html[data-theme="glass"] :is(.topbar, .ams-strip, .hist-head, .adm-head) {
+      background: none; border-bottom-color: var(--line);
+    }
+    html[data-theme="glass"] :is(.topbar, .ams-strip, .hist-head, .adm-head)::before {
+      content: ""; position: absolute; inset: 0; z-index: -1; pointer-events: none;
+      background-color: var(--glass-bar);
+      -webkit-backdrop-filter: var(--glass-blur); backdrop-filter: var(--glass-blur);
+    }
+    /* a desktop: the selected screen is a capsule in the header, its name in the tint */
+    @media (min-width: 901px) {
+      html[data-theme="glass"] .view-tabs .view-tab { margin: 8px 0; border-radius: 999px; padding: 0 14px; }
+      html[data-theme="glass"] .view-tabs .view-tab.active { background: var(--glass-sel); color: var(--glass-blue); box-shadow: var(--glass-drop-light); }
+      html[data-theme="glass"] .view-tabs .view-tab.active::after { display: none; }
+    }
+    /* a phone: the bottom navigation is a floating glass capsule clear of the edges, as the
+       tab bar of iOS 26; the selected screen a lighter capsule inside it */
+    @media (max-width: 900px) {
+      html[data-theme="glass"] .shell { padding-bottom: calc(92px + env(safe-area-inset-bottom)); }
+      html[data-theme="glass"] .view-tabs {
+        left: 14px; right: 14px; bottom: calc(10px + env(safe-area-inset-bottom)); height: 64px; padding: 5px;
+        border: 1px solid var(--glass-chip-line); border-radius: 32px;
+        background-color: var(--glass-bar);
+        -webkit-backdrop-filter: var(--glass-blur); backdrop-filter: var(--glass-blur);
+        box-shadow: var(--glass-light), 0 10px 30px rgba(0, 0, 0, 0.22);
+      }
+      html[data-theme="glass"] .view-tabs .view-tab { border-radius: 27px; color: var(--text-dim); }
+      html[data-theme="glass"] .view-tabs .view-tab.active { color: var(--glass-blue); background: var(--glass-sel); box-shadow: var(--glass-drop-light); }
+      html[data-theme="glass"] .app-toast { bottom: calc(86px + env(safe-area-inset-bottom)); }
+      html[data-theme="glass"] .autodry .ad-save { bottom: calc(80px + env(safe-area-inset-bottom)); }
+      html[data-theme="glass"] .farm-chip { box-shadow: inset 0 -2px 0 var(--st, transparent), var(--glass-drop-light); }
+    }
+    html[data-theme="glass"] :is(.pc-pop, .nf-pop, .me-panel, .fin-sheet, .bd, .ad-dlg, .app-toast, .pc-tip, .timeline-tooltip,
+      .dash-log-loader.loader-fixed) {
+      background-color: var(--glass-surface);
+      -webkit-backdrop-filter: var(--glass-blur); backdrop-filter: var(--glass-blur);
+      border-color: var(--glass-chip-line);
+      box-shadow: var(--glass-light), var(--shadow-hover);
+    }
+    html[data-theme="glass"] :is(.pc-pop, .nf-pop, .bd, .ad-dlg) { border-radius: 24px; }
+    html[data-theme="glass"] .nf-badge.fatal { border-radius: 999px; box-shadow: var(--glass-drop-light); }
+    @media (min-width: 900px) {
+      html[data-theme="glass"] .me-panel { border-radius: 26px 0 0 26px; }
+    }
+    /* their sticky heads and feet: clear, the surface under them already blurs */
+    html[data-theme="glass"] :is(.me-h, .fin-sheet-h, .nf-pop-h, .nf-pop-foot) { background: transparent; }
+    html[data-theme="glass"] :is(.me-back, .fin-back, .nf-back, .pc-pop-back) { background: rgba(0, 0, 0, 0.18); }
+    html[data-theme="glass"] .bd-modal, html[data-theme="glass"] .ad-dlg-back { background: rgba(0, 0, 0, 0.28); backdrop-filter: none; }
+    html[data-theme="glass"] .theme-seg-btn { border-radius: 999px; }
+
+    /* the fallback: no backdrop-filter, or the system asks for less transparency — dense fills */
+    @supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+      html[data-theme="glass"] { --glass-surface: var(--glass-dense); --glass-bar: var(--glass-dense); }
+    }
+    @media (prefers-reduced-transparency: reduce) {
+      html[data-theme="glass"] {
+        --glass-surface: var(--glass-dense); --glass-bar: var(--glass-dense); --glass-blur: none;
+        --glass-card: var(--glass-dense); --glass-card-2: var(--glass-dense);
+      }
+    }
+
+    /* === «Янтарь»: a warm dark for the workshop at night. Every rule is scoped to
+       html[data-theme="amber"]. Next to no blue light: no cold pools, no grid, the printers'
+       pictures warmed. Solid warm boards (no translucency to blend), a thin warm edge, a soft
+       drop shadow; the state of a printer is a lamp-coloured band along the card's top edge
+       and a faint tint, not a glow. ===  */
+    html[data-theme="amber"] body {
+      background: radial-gradient(ellipse 70% 42% at 50% -6%, rgba(242, 174, 75, 0.09), transparent 72%), var(--bg);
+    }
+    html[data-theme="amber"] body::before, html[data-theme="amber"] body::after { display: none; }
+    html[data-theme="amber"] :is(.section-panel, .printer-card) {
+      background-color: var(--bg-panel); border-color: var(--line);
+    }
+    html[data-theme="amber"] .printer-card { border-radius: 14px; }
+    html[data-theme="amber"] .printer-card::before { height: 2px; inset: 0 14px auto 14px; border-radius: 0 0 2px 2px; opacity: 0.9; }
+    html[data-theme="amber"] .printer-card.printing::before { background: var(--info); }
+    html[data-theme="amber"] .printer-card.paused::before { background: var(--warn); }
+    html[data-theme="amber"] .printer-card.error::before { background: var(--danger); }
+    html[data-theme="amber"] .printer-card.finished::before { background: var(--ok); }
+    html[data-theme="amber"] .printer-card:is(.finished, .error, .paused) { box-shadow: var(--shadow-xl); }
+    html[data-theme="amber"] .printer-card:hover { transform: translateY(-2px); }
+    /* a calm badge: the dot without a halo */
+    html[data-theme="amber"] .status-badge::before { box-shadow: none; }
+    html[data-theme="amber"] .status-dot-live { box-shadow: none; }
+    html[data-theme="amber"] .pc-chip { border-radius: 8px; }
+    /* the printers' pictures (cool screens and steel) warmed to the room's light */
+    html[data-theme="amber"] .printer-visual img { filter: sepia(0.55) saturate(0.9); }
+    html[data-theme="amber"] .view-tab.active { box-shadow: none; }
+
+    /* === «Ночь»: a true OLED black, minimalism. Every rule is scoped to html[data-theme="night"].
+       Black on black: the panels and cards are drawn by a hairline only (no fill, no shadow, no
+       glow); the state of a printer is the hairline of its card in the state's muted colour and
+       an outlined badge. No grid, no noise layer: nothing is lit that does not say something. === */
+    html[data-theme="night"] body { background: #000000; }
+    html[data-theme="night"] body::before, html[data-theme="night"] body::after { display: none; }
+    html[data-theme="night"] :is(.section-panel, .printer-card, .ams-card) { background: #000000; box-shadow: none; }
+    html[data-theme="night"] :is(.section-panel, .printer-card)::before { display: none; }
+    html[data-theme="night"] .printer-card { border-radius: 10px; }
+    html[data-theme="night"] .ams-card { border-radius: 10px; }
+    html[data-theme="night"] .printer-card:hover { transform: none; }
+    /* «Принтеры»: no second frame around the grid, the cards on the page itself */
+    html[data-theme="night"] .fleet-section { border-color: transparent; }
+    /* the outlined badge: the state's colour in the text and a hairline, no fill, no halo */
+    html[data-theme="night"] .status-badge { background: transparent; letter-spacing: 0.1em; }
+    html[data-theme="night"] .status-badge::before { box-shadow: none; }
+    html[data-theme="night"] :is(.status-dot-live, .ams-dot.on) { box-shadow: none; }
+    html[data-theme="night"] .status-chip .status-dot-live { box-shadow: none; }
+    html[data-theme="night"] :is(.pc-chip, .farm-chip, .fb-btn, .sort-btn, .farm-seg) { background: transparent; }
+    html[data-theme="night"] .pc-chip { border-radius: 6px; }
+    html[data-theme="night"] .printer-visual { background: #000000; border-radius: 8px; }
+    html[data-theme="night"] .printer-visual::after { display: none; }
+    html[data-theme="night"] .progress-track { height: 3px; border: 0; background: rgba(255, 255, 255, 0.12); box-shadow: none; }
+    html[data-theme="night"] .progress-fill { box-shadow: none; }
+    html[data-theme="night"] :is(.topbar, .view-tabs) { background-image: none; border-color: rgba(255, 255, 255, 0.11); }
+    html[data-theme="night"] .view-tabs .view-tab.active::after { height: 1px; background: var(--text); }
+    html[data-theme="night"] .view-tab.active { box-shadow: none; }
+
+    /* === «Классика»: a neutral graphite, as a dark IDE. Every rule is scoped to
+       html[data-theme="dark-classic"]. Flat and strict: solid surfaces, 1 px borders, 4 px
+       corners, no gradients, shadows or glows, no grid, no noise. A printer's state is a 3 px
+       gutter bar along its card's left edge; badges are flat tags; the selection is the IDE
+       blue. === */
+    html[data-theme="dark-classic"] body { background: #181818; }
+    html[data-theme="dark-classic"] body::before, html[data-theme="dark-classic"] body::after { display: none; }
+    html[data-theme="dark-classic"] :is(.section-panel, .printer-card, .ams-card) {
+      background: #1f1f1f; border-color: #2b2b2b; box-shadow: none; border-radius: 4px;
+    }
+    html[data-theme="dark-classic"] :is(.section-panel, .printer-card)::before { display: none; }
+    /* «Принтеры»: the grid lies on the editor itself, no second frame */
+    html[data-theme="dark-classic"] .fleet-section { background: none; border-color: transparent; }
+    html[data-theme="dark-classic"] .printer-card:hover { transform: none; border-color: #3c3c3c; box-shadow: none; }
+    html[data-theme="dark-classic"] .printer-card.offline { background: #1c1c1c; }
+    /* the gutter: the state of a printer along the card's left edge */
+    html[data-theme="dark-classic"] .printer-card { box-shadow: inset 3px 0 0 var(--gutter, transparent); }
+    html[data-theme="dark-classic"] .printer-card.printing { --gutter: #0078d4; }
+    html[data-theme="dark-classic"] .printer-card.paused { --gutter: var(--warn); }
+    html[data-theme="dark-classic"] .printer-card.error { --gutter: var(--danger); }
+    html[data-theme="dark-classic"] .printer-card.finished { --gutter: var(--ok); }
+    html[data-theme="dark-classic"] .printer-card.printing:hover,
+    html[data-theme="dark-classic"] .printer-card:is(.paused, .error, .finished):hover { box-shadow: inset 3px 0 0 var(--gutter); }
+    /* flat tags, flat chips and buttons, 3–4 px corners */
+    html[data-theme="dark-classic"] .status-badge { border-radius: 3px; letter-spacing: 0.04em; }
+    html[data-theme="dark-classic"] .status-badge::before { box-shadow: none; border-radius: 1px; }
+    html[data-theme="dark-classic"] :is(.status-dot-live, .ams-dot.on) { box-shadow: none; }
+    html[data-theme="dark-classic"] :is(.pc-chip, .pc-ctl, .farm-chip, .fb-btn, .farm-more, .panel-badge, .me-btn, .ghost-btn,
+      .sort-btn, .farm-seg, .seg, .ams-badge, .nf-badge, .nf-strip, .ams-range, .seg-range, .adm-seg, .fin-row, .nf-bell) { border-radius: 4px; }
+    html[data-theme="dark-classic"] :is(.ams-range, .seg-range) button { border-radius: 0; }
+    html[data-theme="dark-classic"] .printer-visual { border-radius: 4px; background: #181818; }
+    html[data-theme="dark-classic"] .printer-visual::after { border-radius: 2px; }
+    html[data-theme="dark-classic"] .progress-track { height: 4px; border-radius: 0; border: 0; background: #2b2b2b; }
+    html[data-theme="dark-classic"] .farm-chip.on, html[data-theme="dark-classic"] .farm-seg button.active { border-color: #0078d4; background-image: linear-gradient(rgba(0, 120, 212, 0.22), rgba(0, 120, 212, 0.22)); }
+    html[data-theme="dark-classic"] :is(.topbar, .view-tabs) { background-image: none; }
+    html[data-theme="dark-classic"] .view-tabs .view-tab.active::after { height: 2px; border-radius: 0; left: 0; right: 0; background: #0078d4; }
+    html[data-theme="dark-classic"] .view-tab.active { box-shadow: none; }
+    html[data-theme="dark-classic"] .theme-seg-btn { border-radius: 4px; }
+
+    /* === «Космос»: the night sky and dense dark boards. Every rule is scoped to
+       html[data-theme="cosmos"]. The sky is one fixed layer (body::before, the photo),
+       painted once, never on scroll, nothing moves. The boards are nearly opaque (no blur:
+       the sky stays behind them, unlike «Стекло», where it shows through), 20 px corners, a
+       thin cold line of starlight along the top edge, a deep black shadow; the states glow
+       in their own colours. === */
+    html[data-theme="cosmos"] body { background: var(--bg); }
+    html[data-theme="cosmos"] body::before {
+      -webkit-mask-image: none; mask-image: none; opacity: 1;
+      background: url("/night-sky.jpg") 30% 40% / cover no-repeat, #04060a;
+    }
+    html[data-theme="cosmos"] body::after { display: none; }
+    html[data-theme="cosmos"] :is(.section-panel, .printer-card, .ams-card) { border-color: var(--line); }
+    html[data-theme="cosmos"] .printer-card { border-radius: 20px; box-shadow: var(--shadow-xl); }
+    /* a state tints the board (its translucent gradient), the board under it stays dense */
+    html[data-theme="cosmos"] :is(.printer-card, .ams-card) { background-color: rgba(8, 11, 18, 0.90); }
+    html[data-theme="cosmos"] .ams-card { border-radius: 20px; box-shadow: var(--shadow-xl); }
+    html[data-theme="cosmos"] :is(.section-panel, .printer-card)::before {
+      background: linear-gradient(90deg, transparent, rgba(190, 220, 255, 0.40), transparent);
+    }
+    /* «Принтеры»: the cards float on the sky, no second pane around them */
+    html[data-theme="cosmos"] .fleet-section { background: none; border-color: transparent; box-shadow: none; overflow: visible; }
+    html[data-theme="cosmos"] .fleet-section::before { display: none; }
+    /* the states glow softly in their own colours */
+    html[data-theme="cosmos"] .printer-card.printing { box-shadow: 0 12px 34px rgba(0, 0, 0, 0.55), 0 0 26px rgba(140, 200, 255, 0.16); }
+    html[data-theme="cosmos"] .printer-card.finished { box-shadow: 0 12px 34px rgba(0, 0, 0, 0.55), 0 0 30px var(--ok-shadow-strong); }
+    html[data-theme="cosmos"] .printer-card.error { box-shadow: 0 12px 34px rgba(0, 0, 0, 0.55), 0 0 32px var(--danger-shadow-strong); }
+    html[data-theme="cosmos"] .printer-card.paused { box-shadow: 0 12px 34px rgba(0, 0, 0, 0.55), 0 0 28px var(--warn-shadow); }
+    html[data-theme="cosmos"] .printer-card.offline { box-shadow: 0 10px 26px rgba(0, 0, 0, 0.45); }
+    html[data-theme="cosmos"] :is(.pc-chip, .farm-chip, .fb-btn, .sort-btn) { border-radius: 10px; }
+    html[data-theme="cosmos"] .farm-chip { border-radius: 999px; }
+    html[data-theme="cosmos"] .progress-fill { box-shadow: 0 0 10px var(--info-glow); }
+    html[data-theme="cosmos"] .printer-card.paused .progress-fill { box-shadow: 0 0 10px var(--warn-shadow); }
+    html[data-theme="cosmos"] .view-tabs .view-tab.active::after { box-shadow: 0 0 10px var(--info-glow); }
+    html[data-theme="cosmos"] .view-tab.active { box-shadow: 0 0 18px var(--info-glow); }
+    html[data-theme="cosmos"] :is(.topbar, .view-tabs) { border-color: rgba(170, 200, 255, 0.22); }
+
+    /* === «Океан» (the default theme, no data-theme): deep water. Every rule is scoped to
+       html:not([data-theme]). Depth in layers: the page is a sea that darkens downwards with the
+       light from the surface (one fixed layer, painted once); a screen's panel is a recessed
+       basin; the cards are raised slabs with big soft corners and a layered, soft shadow and no
+       border; what lies on a card (chips, wells) is pressed in. === */
+    html:not([data-theme]) body { background: var(--bg); }
+    html:not([data-theme]) body::before {
+      -webkit-mask-image: none; mask-image: none; opacity: 1; background-size: auto;
+      background-image:
+        radial-gradient(ellipse 90% 55% at 50% -12%, rgba(45, 212, 191, 0.16), transparent 72%),
+        radial-gradient(ellipse 60% 50% at 0% 30%, rgba(30, 140, 200, 0.12), transparent 70%),
+        linear-gradient(180deg, #0c3044 0%, #082232 38%, #05151f 100%);
+    }
+    html:not([data-theme]) body::after { display: none; }
+    /* the basin: a screen's panel, sunk into the sea */
+    html:not([data-theme]) .section-panel {
+      background: rgba(2, 14, 24, 0.34); border-color: transparent; border-radius: 30px;
+      box-shadow: inset 0 2px 10px rgba(0, 8, 16, 0.45), inset 0 -1px 0 rgba(170, 235, 255, 0.05);
+    }
+    html:not([data-theme]) .section-panel::before { display: none; }
+    /* the raised slabs: the cards */
+    html:not([data-theme]) :is(.printer-card, .ams-card) {
+      border-color: transparent; border-radius: 26px; box-shadow: var(--shadow-xl);
+      background-color: var(--bg-panel);
+    }
+    html:not([data-theme]) .ams-card { background: linear-gradient(180deg, var(--bg-panel), var(--bg-panel-2)); }
+    html:not([data-theme]) .printer-card::before { display: none; }
+    html:not([data-theme]) .printer-card.printing { background: linear-gradient(180deg, #11364b, var(--bg-panel-2)); }
+    html:not([data-theme]) .printer-card:is(.finished, .error, .paused) { border-color: transparent; box-shadow: var(--shadow-xl); background-color: var(--bg-panel-2); }
+    html:not([data-theme]) .printer-card.finished { box-shadow: inset 0 0 0 1px rgba(45, 212, 191, 0.20), var(--shadow-xl); }
+    html:not([data-theme]) .printer-card.error { box-shadow: inset 0 0 0 1px rgba(248, 113, 113, 0.28), var(--shadow-xl); }
+    html:not([data-theme]) .printer-card.paused { box-shadow: inset 0 0 0 1px rgba(251, 191, 36, 0.24), var(--shadow-xl); }
+    html:not([data-theme]) .printer-card.offline { box-shadow: var(--shadow-lg); border-color: transparent; }
+    html:not([data-theme]) .printer-card:hover { transform: translateY(-3px); box-shadow: var(--shadow-hover); }
+    /* pressed into the slab: chips, the picture's frame, the controls' wells */
+    html:not([data-theme]) :is(.pc-chip, .pc-ctl, .progress-track) {
+      border-color: transparent; background-color: rgba(2, 14, 24, 0.42); box-shadow: inset 0 1px 2px rgba(0, 6, 12, 0.45);
+    }
+    html:not([data-theme]) .pc-chip { border-radius: 12px; }
+    html:not([data-theme]) .pc-ctl { border-radius: 14px; }
+    html:not([data-theme]) .printer-visual { border-radius: 20px; border-color: transparent; box-shadow: inset 0 1px 3px rgba(0, 6, 12, 0.5); }
+    html:not([data-theme]) .printer-visual::after { border-radius: 15px; }
+    html:not([data-theme]) :is(.farm-chip, .fb-btn, .sort-btn, .farm-seg, .fin-row) { border-color: transparent; background-color: rgba(2, 14, 24, 0.40); }
+    html:not([data-theme]) .fin-row { border-radius: 16px; }
+    html:not([data-theme]) .farm-seg, html:not([data-theme]) .fb-btn { border-radius: 14px; }
+    html:not([data-theme]) .farm-chip.on, html:not([data-theme]) .farm-seg button.active { background-image: linear-gradient(rgba(45, 212, 191, 0.16), rgba(45, 212, 191, 0.16)); border-color: rgba(45, 212, 191, 0.45); }
+    html:not([data-theme]) :is(.topbar, .view-tabs) { border-color: rgba(150, 220, 255, 0.10); }
+    html:not([data-theme]) .view-tabs .view-tab.active::after { background: var(--ok); }
+    /* a phone: «Принтеры» has no panel around the grid (as in every theme), the slabs lie on the sea */
+    @media (max-width: 900px) {
+      html:not([data-theme]) .fleet-section { background: none; box-shadow: none; border-radius: 0; }
     }

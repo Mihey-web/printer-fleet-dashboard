@@ -1,13 +1,17 @@
 # Kuznitsa — one-command self-hosting.
 #
-# First run (create the two SQLite files so Docker bind-mounts them as files,
-# not directories), then start:
+# First run, and after every `git pull` (create the SQLite files so Docker
+# bind-mounts them as files, not directories; touch keeps an existing file):
 #
-#   touch printer_history.db users.db
+#   touch printer_history.db users.db ams_history.db
 #   docker compose up -d --build
 #   docker compose logs -f          # grab the first-run admin password
 #
 # Open http://<host>:8000 and log in as admin. Add printers from Admin → Printers.
+#
+# Port 8000 is published on ALL interfaces, and Docker's own iptables rules
+# bypass ufw/firewalld. Behind nginx/Caddy on this host, publish it on loopback
+# only ("127.0.0.1:8000:8000") and see FORGE_TRUSTED_PROXIES below.
 services:
   app:
     build: .
@@ -27,8 +31,14 @@ services:
       # - FORGE_ADMIN_PASSWORD=change-me-immediately
       # Optional fixed JWT signing key (otherwise auto-generated & persisted):
       # - FORGE_JWT_SECRET=your-64-hex-chars
+      # Behind nginx/Caddy on the host: requests reach the container from the
+      # bridge gateway (`docker compose logs` shows it, e.g. 172.18.0.1). Trust
+      # it to pass X-Real-IP, or every user is one IP for the login limit:
+      # - FORGE_TRUSTED_PROXIES=172.18.0.1
     volumes:
       # Persist the databases on the host. The app writes them at the project
-      # root inside the container, so bind-mount the two files back out.
+      # root inside the container, so bind-mount the files back out.
       - ./printer_history.db:/app/printer_history.db
       - ./users.db:/app/users.db
+      # AMS humidity history: auto-drying decides on it.
+      - ./ams_history.db:/app/ams_history.db

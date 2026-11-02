@@ -56,11 +56,11 @@ the firewall — allow it for private networks.
     `COOKIE_SECURE=0` sends the login cookie without encryption. Do not expose such a setup to the
     internet. See [Users and security](../security.md).
 
-!!! info "The `.env` file is not read automatically"
-    The project has a `.env.example` file with all variables, but the program itself does not load
-    a `.env` file. On Windows set the variables with `set NAME=value` in the window before
-    `python main.py`, as shown above. All variables are listed in
-    [Settings and environment variables](../configuration.md).
+!!! info "Or keep the variables in a `.env` file"
+    Instead of typing `set` every time, copy `.env.example` to `.env` in the project folder and
+    remove the `#` in front of the lines you need (for example `WEB_HOST=0.0.0.0` and
+    `COOKIE_SECURE=0`). `python main.py` reads `.env` at start; a variable set with `set` in the
+    window wins. All variables are listed in [Settings and environment variables](../configuration.md).
 
 ## Every next start
 

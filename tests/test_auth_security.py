@@ -3,6 +3,7 @@
 Covers the X-Real-IP rate-limit bypass fix (client_ip trusted-proxy gating)
 and the persistent refresh-token (JTI) revocation that must survive restarts.
 """
+import asyncio
 import time
 import types
 
@@ -240,12 +241,20 @@ def test_login_valid_password_not_locked_out_by_username_flood(tmp_path, monkeyp
     for _ in range(15):
         svc.log("admin", "login_fail", "203.0.113.7", "ua")  # attacker, wrong pw
 
+    waits = []
+
+    async def no_wait(seconds):
+        waits.append(seconds)
+
+    monkeypatch.setattr(auth, "_throttle_sleep", no_wait)
     req = _req("203.0.113.99")  # a different, clean source IP (the real owner)
     resp = _FakeResponse()
     body = auth.LoginRequest(username="admin", password="correct-horse")
-    result = auth.login(body, req, resp)
+    result = asyncio.run(auth.login(body, req, resp))
     assert result["user"]["username"] == "admin"
     assert "access_token" in resp.cookies
+    # it is slowed down (15 failures: the 30 s cap), not refused
+    assert waits == [30.0]
 
 
 def test_login_wrong_password_still_locked_after_threshold(tmp_path, monkeypatch):
@@ -257,11 +266,15 @@ def test_login_wrong_password_still_locked_after_threshold(tmp_path, monkeypatch
     for _ in range(12):
         svc.log("admin", "login_fail", "203.0.113.7", "ua")
 
+    async def no_wait(seconds):
+        pass
+
+    monkeypatch.setattr(auth, "_throttle_sleep", no_wait)
     req = _req("203.0.113.7")
     resp = _FakeResponse()
     body = auth.LoginRequest(username="admin", password="WRONG")
     with pytest.raises(HTTPException) as exc:
-        auth.login(body, req, resp)
+        asyncio.run(auth.login(body, req, resp))
     assert exc.value.status_code == 429
 
 

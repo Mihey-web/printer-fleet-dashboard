@@ -35,7 +35,7 @@ CYR = re.compile(r"[А-Яа-яЁё]")
 ATTRS = ("title", "placeholder", "aria-label", "alt", "data-tip", "data-l", "content", "label")
 
 # Server modules whose strings reach the panel's screen (API errors, stage and state
-# labels, notification texts and hints, journal reasons, command answers).
+# labels, notification texts and hints, journal reasons, command answers) or the bot.
 SERVER_FILES = [
     "app/api/main.py",
     "app/api/admin.py",
@@ -58,6 +58,9 @@ SERVER_FILES = [
     "app/services/printer_registry.py",
     "app/services/bambu_extras.py",
     "app/services/audit_service.py",
+    # the Telegram bot's texts (its language: settings «telegram_lang», app/services/i18n.py)
+    "main.py",
+    "app/services/telegram_bot_async.py",
 ]
 
 

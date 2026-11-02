@@ -733,7 +733,7 @@ def test_header_is_sticky_and_opaque_on_a_desktop():
         assert need in rule, need
     # every theme's --bg-elev is opaque: the page never shows through
     elev = re.findall(r"^\s*--bg-elev:\s*([^;]+);", CSS, re.M)
-    assert len(elev) == 6                                                     # the six themes
+    assert len(elev) == 8                                                     # the seven themes, «Стекло» twice (dark, light)
     for value in elev:
         assert re.fullmatch(r"#[0-9a-fA-F]{6}", value.strip()), value
     assert "html { scroll-padding-top: 64px; }" in desk                      # scrollIntoView clears it

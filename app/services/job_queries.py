@@ -372,27 +372,31 @@ def _minutes(sec: Any) -> Optional[int]:
     return None if sec is None else int(round(sec / 60.0))
 
 
-def _csv_row(r: Mapping[str, Any]) -> List[str]:
+def _csv_row(r: Mapping[str, Any], lang: Optional[str] = None) -> List[str]:
+    from app.services import i18n
     return [csv_cell(v) for v in (
         r["label"], r["model"], r["job_name"],
         _when(r["started_at"], r["start_exact"]), _when(r["ended_at"], r["end_exact"]),
         _minutes(r["planned_sec"]), _minutes(r["actual_sec"]), r["pauses"], _minutes(r["paused_sec"]),
-        _minutes(r["offline_sec"]), RESULT_LABELS.get(r["result"] or "open", r["result"]),
+        _minutes(r["offline_sec"]), i18n.t(RESULT_LABELS.get(r["result"] or "open", r["result"]), lang or i18n.SOURCE),
         r["error_code"], r["error_text"], r["total_layers"],
     )]
 
 
 def jobs_csv(db: str, fr: float, to: float, printer: Optional[str] = None,
              results: Optional[Sequence[str]] = None, include_maint: bool = True, limit: int = CSV_LIMIT,
-             labels: Optional[Mapping[str, str]] = None) -> str:
-    """The list (same filters, newest first) as CSV for Russian Excel: BOM, `;`, local times."""
+             labels: Optional[Mapping[str, str]] = None, lang: Optional[str] = None) -> str:
+    """The list (same filters, newest first) as CSV for Russian Excel: BOM, `;`, local times.
+    lang: the panel's language for the column names and the result words (the data as it is)."""
+    from app.services import i18n
+    lang = lang if lang in i18n.languages() else i18n.SOURCE
     page = list_jobs(db, fr, to, printer=printer, results=results, include_maint=include_maint,
                      limit=limit, offset=0, labels=labels)
     buf = io.StringIO()
     buf.write("﻿")
     w = csv.writer(buf, delimiter=";", lineterminator="\r\n")
-    w.writerow(CSV_HEADER)
-    w.writerows(_csv_row(r) for r in page["rows"])
+    w.writerow([i18n.t(h, lang) for h in CSV_HEADER])
+    w.writerows(_csv_row(r, lang) for r in page["rows"])
     return buf.getvalue()
 
 

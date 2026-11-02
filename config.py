@@ -40,6 +40,14 @@ JWT_REFRESH_EXPIRES = 7 * 24 * 3600 # 7 days
 # access the app directly over plain HTTP without the TLS proxy.
 COOKIE_SECURE = os.environ.get("COOKIE_SECURE", "1") not in ("0", "false", "False", "")
 
+# Reverse proxies allowed to pass the real client address in X-Real-IP /
+# X-Forwarded-For (the login rate limit counts per client address). A comma list
+# of IPs or CIDR networks; default: a proxy on this machine. In Docker behind
+# nginx/Caddy on the host, requests arrive from the bridge gateway (e.g.
+# 172.18.0.1): add it here, otherwise every user is "one IP" for the limit.
+TRUSTED_PROXIES = [p.strip() for p in os.environ.get("FORGE_TRUSTED_PROXIES", "127.0.0.1,::1").split(",")
+                   if p.strip()]
+
 # First-run admin bootstrap (see app/api/main.py). Username defaults to 'admin'.
 # If FORGE_ADMIN_PASSWORD is unset, a random password is generated and logged once
 # on first boot — no default password is baked into the code.

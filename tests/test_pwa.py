@@ -162,14 +162,14 @@ def test_login_page_carries_the_pwa_head(client):
     html = r.text
     assert 'name="robots"' in html            # it is the login page, not the app shell
     assert '<link rel="manifest" href="/manifest.webmanifest">' in html
-    assert '<meta name="theme-color" content="#0f172a">' in html
+    assert '<meta name="theme-color" content="#061723">' in html
     assert "/api/auth/refresh" in html
 
 
 def test_index_carries_the_pwa_head():
     head = INDEX.split("</head>", 1)[0]
     assert '<link rel="manifest" href="/manifest.webmanifest">' in head
-    assert '<meta name="theme-color" content="#0f172a">' in head
+    assert '<meta name="theme-color" content="#061723">' in head
     assert 'rel="icon" href="data:image/svg+xml' in head      # the base href of the drawn favicon
 
 
@@ -225,7 +225,7 @@ def test_manifest_contents():
         assert [(i["src"].split("?")[0], i["sizes"], i["type"]) for i in s["icons"]] == [("/pwa/icon-192.png", "192x192", "image/png")]
         assert s["icons"][0]["src"].split("?")[0] in api_main.PWA_FILES
     bg = _css_root_var("--bg")
-    assert bg == "#0f172a"
+    assert bg == "#061723"
     assert m["theme_color"] == bg and m["background_color"] == bg
     icons = {(i["sizes"], i["purpose"]): i for i in m["icons"]}
     assert set(icons) == {("192x192", "any"), ("512x512", "any"), ("512x512", "maskable")}

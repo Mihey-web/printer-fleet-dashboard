@@ -1,6 +1,9 @@
 from fastapi import APIRouter, Request, Response, HTTPException, Cookie
 from pydantic import BaseModel
 from typing import Optional
+import asyncio
+import ipaddress
+import logging
 import sqlite3
 import threading
 import time
@@ -12,6 +15,9 @@ from app.services.auth_service import (
     create_refresh_token, decode_token, get_user_from_token, generate_secret,
 )
 from app.services.audit_service import get_audit_service
+from starlette.concurrency import run_in_threadpool
+
+logger = logging.getLogger(__name__)
 
 USERS_DB = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "users.db")
 
@@ -24,8 +30,8 @@ COOKIE_SECURE: bool = True
 # Only these source addresses (i.e. the reverse proxy in front of us) are
 # allowed to set the real client IP via X-Real-IP / X-Forwarded-For. Anyone
 # else's spoofed header is ignored, so the login rate-limit can't be bypassed
-# by rotating the header.
-TRUSTED_PROXIES: frozenset = frozenset({"127.0.0.1", "::1"})
+# by rotating the header. IP networks; set with FORGE_TRUSTED_PROXIES (config.py).
+TRUSTED_PROXIES: tuple = (ipaddress.ip_network("127.0.0.1/32"), ipaddress.ip_network("::1/128"))
 
 # A fixed bcrypt hash to verify against when the username doesn't exist, so the
 # login path spends the same ~bcrypt time whether or not the account is real.
@@ -59,13 +65,38 @@ def init_auth(secret: str, access_expires: int = 15 * 60, refresh_expires: int =
     JWT_REFRESH_EXPIRES = refresh_expires
     COOKIE_SECURE = cookie_secure
     if trusted_proxies is not None:
-        TRUSTED_PROXIES = frozenset(trusted_proxies)
+        TRUSTED_PROXIES = parse_trusted_proxies(trusted_proxies)
+
+
+def parse_trusted_proxies(items) -> tuple:
+    """IPs or CIDR networks ("172.18.0.1", "10.0.0.0/8") → ip_network objects.
+
+    A wrong entry is skipped with a warning, so a typo cannot stop the server
+    (and cannot widen the trust either: nothing is trusted in its place).
+    """
+    nets = []
+    for item in items or ():
+        try:
+            nets.append(ipaddress.ip_network(str(item).strip(), strict=False))
+        except ValueError:
+            logger.warning("FORGE_TRUSTED_PROXIES: %r is not an IP address or network — ignored", item)
+    return tuple(nets)
+
+
+def _is_trusted_proxy(host: str) -> bool:
+    try:
+        addr = ipaddress.ip_address(host)
+    except ValueError:
+        return False                      # "unknown", a unix socket, the test client
+    # a dual-stack socket reports an IPv4 peer as ::ffff:a.b.c.d
+    mapped = getattr(addr, "ipv4_mapped", None)
+    return any(addr in net or (mapped is not None and mapped in net) for net in TRUSTED_PROXIES)
 
 
 def client_ip(request: Request) -> str:
     """Resolve the real client IP, trusting proxy headers only from a known proxy."""
     direct = request.client.host if request.client else "unknown"
-    if direct in TRUSTED_PROXIES:
+    if _is_trusted_proxy(direct):
         real_ip = (request.headers.get("x-real-ip") or "").strip()
         if real_ip:
             return real_ip
@@ -282,8 +313,41 @@ def _set_token_cookies(response: Response, access: str, refresh: str):
     )
 
 
+# Progressive delay per username, across all source IPs: after
+# USERNAME_DELAY_AFTER failed logins for one name in 15 minutes, every further
+# attempt with that name — the right password too — first waits 1, 2, 4, 8 …
+# seconds, at most USERNAME_DELAY_MAX_S. Guessing from a pool of addresses slows
+# down; the real owner still gets in after the wait (no lockout to abuse).
+USERNAME_DELAY_AFTER = 10
+USERNAME_DELAY_MAX_S = 30.0
+
+
+def username_delay_s(failures: int) -> float:
+    """Seconds to wait before checking a login whose name has `failures` recent failures."""
+    if failures < USERNAME_DELAY_AFTER:
+        return 0.0
+    return min(USERNAME_DELAY_MAX_S, 2.0 ** min(failures - USERNAME_DELAY_AFTER, 16))
+
+
+async def _throttle_sleep(seconds: float) -> None:
+    # asyncio.sleep: a waiting attempt holds neither a worker thread nor the
+    # per-IP lock (tests replace this to skip the wait).
+    await asyncio.sleep(seconds)
+
+
 @router.post("/login")
-def login(body: LoginRequest, request: Request, response: Response):
+async def login(body: LoginRequest, request: Request, response: Response):
+    if body.username and body.password:
+        failures = await run_in_threadpool(
+            get_audit_service().count_failed_attempts_by_username, body.username)
+        delay = username_delay_s(failures)
+        if delay > 0:
+            await _throttle_sleep(delay)
+    # bcrypt and SQLite block: off the event loop, like a sync route.
+    return await run_in_threadpool(_login_checked, body, request, response)
+
+
+def _login_checked(body: LoginRequest, request: Request, response: Response):
     audit = get_audit_service()
     source_ip = client_ip(request)
     user_agent = request.headers.get("user-agent", "")
@@ -310,11 +374,11 @@ def login(body: LoginRequest, request: Request, response: Response):
         if user is None or not password_ok:
             audit.log(body.username, "login_fail", source_ip, user_agent)
     if user is None or not password_ok:
-        # Wrong credentials. The cross-IP per-username lockout is applied ONLY on
-        # this failure path — never on a correct password — so a flood of failed
-        # attempts for 'admin' throttles guessing but can't lock out the real
-        # owner, who supplies the right password and skips this branch entirely.
-        if audit.count_failed_attempts_by_username(body.username) >= 10:
+        # Wrong credentials past the per-username threshold: 429. The attempt
+        # has already waited out the progressive delay above (login), which is
+        # what slows guessing from many IPs; a correct password skips this
+        # branch, so a flood for 'admin' cannot lock out the real owner.
+        if audit.count_failed_attempts_by_username(body.username) >= USERNAME_DELAY_AFTER:
             audit.log(body.username or None, "rate_limit_block", source_ip, user_agent)
             raise HTTPException(status_code=429, detail="Too many login attempts. Try again later.")
         raise HTTPException(status_code=401, detail="Invalid username or password")

@@ -3,7 +3,9 @@
 Bambu Studio builds its error dialog from two tables it downloads per printer
 model: GetActionImage.php (the button ids of every code) and query.php (the
 texts). This daemon thread does the same once a day (notifications spec,
-step 3). Only the 3-character model prefix of a serial ever leaves the farm
+step 3). The texts come twice: in Russian (the panel's cards) and in Bambu's
+English original (the English panel and bot, for the codes the vendored
+English table does not have; app/api/i18n.py). Only the 3-character model prefix of a serial ever leaves the farm
 (d=22E), never a serial, and no cookies or credentials are sent.
 
 The tables are Bambu's data: they live in data/hms/ (gitignored, not in the DB
@@ -26,6 +28,7 @@ logger = logging.getLogger(__name__)
 ACTION_URL = "https://e.bambulab.com/hms/GetActionImage.php"
 TEXT_URL = "https://e.bambulab.com/query.php"
 LANG = "ru"
+EN = "en"                       # the second text table: Bambu's English original
 USER_AGENT = "Forge-HMS/1"
 TIMEOUT_S = 15                  # each socket operation
 DOWNLOAD_S = 60                 # the whole download: a trickling answer never stalls the refresh loop
@@ -45,7 +48,9 @@ NOT_MODIFIED = 201              # {"result":201,"ver":0}: the v=<ver> we sent is
 CACHE_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
                          "data", "hms")
 META_FILE = "meta.json"
-FILES = {"action": "action_%s.json", "text": "text_" + LANG + "_%s.json"}
+FILES = {"action": "action_%s.json", "text": "text_" + LANG + "_%s.json", "text_en": "text_" + EN + "_%s.json"}
+# kind -> (index keys, version slot, query.php language)
+_KINDS = {"action": (("act",), 0, None), "text": (("err", "hms"), 1, LANG), "text_en": (("err_en", "hms_en"), 2, EN)}
 
 PREFIX_RE = re.compile(r"^[0-9A-Z]{3}$")
 _VER_RE = re.compile(r"^[0-9A-Za-z._-]{1,32}$")
@@ -68,9 +73,11 @@ class BadResponse(ValueError):
 
 # Readers never lock: every update builds a new dict and swaps the reference.
 _prefix_by_pid: Dict[str, str] = {}
-_index: Dict[str, Dict[str, Any]] = {}   # P -> {"act", "err", "hms", "ver": (action_ver, text_ver)}
-_meta: Optional[Dict[str, Dict[str, Any]]] = None   # P -> {action_ver, text_ver, checked_at, error}
-_EMPTY = {"act": None, "err": None, "hms": None, "ver": (None, None)}
+# P -> {"act", "err", "hms", "err_en", "hms_en", "ver": (action_ver, text_ver, text_en_ver)}
+_index: Dict[str, Dict[str, Any]] = {}
+_meta: Optional[Dict[str, Dict[str, Any]]] = None   # P -> {action_ver, text_ver, text_en_ver, checked_at, error}
+_EMPTY = {"act": None, "err": None, "hms": None, "err_en": None, "hms_en": None, "ver": (None, None, None)}
+_VER_KEYS = ("action_ver", "text_ver", "text_en_ver")
 
 
 # ---- prefixes -------------------------------------------------------------
@@ -116,14 +123,15 @@ def _norm(ecode: Any) -> Optional[str]:
     return s if len(s) in (8, 16) and set(s) <= _HEX else None
 
 
-def text(prefix: Optional[str], ecode: Any) -> Optional[str]:
-    """Bambu's Russian text of a print_error (8 hex) or HMS (16 hex) code.
-    None: no table, no such code, or an empty intro (Studio hides those)."""
+def text(prefix: Optional[str], ecode: Any, lang: str = LANG) -> Optional[str]:
+    """Bambu's Russian (lang="en": English) text of a print_error (8 hex) or HMS
+    (16 hex) code. None: no table, no such code, or an empty intro (Studio hides those)."""
     code = _norm(ecode)
     e = _index.get(prefix or "")
     if code is None or not e:
         return None
-    return (e.get("err" if len(code) == 8 else "hms") or {}).get(code) or None
+    section = ("err" if len(code) == 8 else "hms") + ("_en" if lang == EN else "")
+    return (e.get(section) or {}).get(code) or None
 
 
 def action_ids(prefix: Optional[str], ecode: Any) -> Tuple[List[int], bool]:
@@ -151,7 +159,8 @@ def status() -> Dict[str, Dict[str, Any]]:
     out = {}
     for p in sorted(set(pids.values()) | set(idx)):
         e, m = idx.get(p) or _EMPTY, meta.get(p) or {}
-        out[p] = {"action_ver": e["ver"][0], "text_ver": e["ver"][1], "checked_at": m.get("checked_at"),
+        out[p] = {"action_ver": e["ver"][0], "text_ver": e["ver"][1], "text_en_ver": e["ver"][2],
+                  "checked_at": m.get("checked_at"),
                   "n_actions": len(e["act"] or {}), "n_err": len(e["err"] or {}), "n_hms": len(e["hms"] or {}),
                   "error": m.get("error"), "printers": sum(1 for v in pids.values() if v == p)}
     return out
@@ -202,7 +211,7 @@ def parse_actions(doc: Any, prefix: str) -> Dict[str, Dict[str, List[int]]]:
     return act
 
 
-def parse_texts(doc: Any) -> Tuple[Dict[str, str], Dict[str, str]]:
+def parse_texts(doc: Any, lang: str = LANG) -> Tuple[Dict[str, str], Dict[str, str]]:
     """query.php body -> ({ecode8: intro}, {ecode16: intro}); an empty intro stays ""."""
     data = doc.get("data") if _result(doc) == 0 else None
     if not isinstance(data, dict):
@@ -210,9 +219,9 @@ def parse_texts(doc: Any) -> Tuple[Dict[str, str], Dict[str, str]]:
     out = []
     for section, size in (("device_error", 8), ("device_hms", 16)):
         sec = data.get(section)
-        rows = sec.get(LANG) if isinstance(sec, dict) else None
+        rows = sec.get(lang) if isinstance(sec, dict) else None
         if not isinstance(rows, list):
-            raise BadResponse("text table: no %s/%s" % (section, LANG))
+            raise BadResponse("text table: no %s/%s" % (section, lang))
         table: Dict[str, str] = {}
         for item in rows:
             code = _norm(item.get("ecode")) if isinstance(item, dict) else None
@@ -226,19 +235,19 @@ def parse_texts(doc: Any) -> Tuple[Dict[str, str], Dict[str, str]]:
 def _apply(entry: Dict[str, Any], kind: str, doc: Dict[str, Any], prefix: str) -> Dict[str, Any]:
     """A copy of the index entry with this kind's table replaced (raises BadResponse)."""
     entry = dict(entry)
-    av, tv = entry["ver"]
+    keys, slot, lang = _KINDS[kind]
     if kind == "action":
         entry["act"] = parse_actions(doc, prefix)
-        av = _ver(doc)
     else:
-        entry["err"], entry["hms"] = parse_texts(doc)
-        tv = _ver(doc)
-    entry["ver"] = (av, tv)
+        entry[keys[0]], entry[keys[1]] = parse_texts(doc, lang)
+    ver = list(entry["ver"])
+    ver[slot] = _ver(doc)
+    entry["ver"] = tuple(ver)
     return entry
 
 
 def _loaded(entry: Dict[str, Any], kind: str) -> bool:
-    return entry["act" if kind == "action" else "err"] is not None
+    return entry[_KINDS[kind][0][0]] is not None
 
 
 # ---- disk -----------------------------------------------------------------
@@ -316,7 +325,8 @@ def _url(kind: str, prefix: str, ver: Optional[str]) -> str:
     """Nothing but the model prefix, the language and the cached version goes out."""
     if not PREFIX_RE.match(prefix or ""):
         raise ValueError("bad model prefix")
-    q = [("lang", LANG)] if kind == "text" else []
+    lang = _KINDS[kind][2]
+    q = [("lang", lang)] if lang else []
     q.append(("d", prefix))
     if ver:
         q.append(("v", ver))
@@ -362,7 +372,7 @@ def _refresh_prefix(prefix: str, now: float) -> None:
     entry = _index.get(prefix) or _EMPTY
     errors = []
     for kind in FILES:
-        have = entry["ver"][0 if kind == "action" else 1] if _loaded(entry, kind) else None
+        have = entry["ver"][_KINDS[kind][1]] if _loaded(entry, kind) else None
         try:
             body = _http_get(_url(kind, prefix, have))
             doc = json.loads(body.decode("utf-8-sig"))
@@ -372,16 +382,16 @@ def _refresh_prefix(prefix: str, now: float) -> None:
             _write_atomic(FILES[kind] % prefix, body)
             entry = new
             _index_set(prefix, entry)
-            n = len(entry["act"]) if kind == "action" else len(entry["err"]) + len(entry["hms"])
+            n = sum(len(entry[k]) for k in _KINDS[kind][0])
             logger.info("[hms-catalog] %s: %s table ver %s (%d codes)", prefix, kind,
-                        entry["ver"][0 if kind == "action" else 1], n)
+                        entry["ver"][_KINDS[kind][1]], n)
         except Exception as e:
             errors.append(type(e).__name__)
             logger.warning("[hms-catalog] %s: %s table not refreshed: %s: %s", prefix, kind, type(e).__name__,
                            str(e)[:200])
     meta = {k: dict(v) for k, v in _load_meta().items()}
     m = meta.setdefault(prefix, {})
-    m["action_ver"], m["text_ver"] = entry["ver"]
+    m.update(zip(_VER_KEYS, entry["ver"]))
     if errors:
         m["error"] = ",".join(dict.fromkeys(errors))
     else:

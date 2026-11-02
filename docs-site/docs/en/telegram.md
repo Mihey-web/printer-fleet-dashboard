@@ -59,8 +59,11 @@ first), idle, the rest; printers in maintenance are last. For example:
 🔧 H2D — на обслуживании
 ```
 
-⏱ is the time left, ⏳ the time printed, 🌡 nozzle / bed. The words are in Russian, as in the
-interface.
+⏱ is the time left, ⏳ the time printed, 🌡 nozzle / bed. The words are in Russian by default.
+
+**Bot language** («Язык бота») switches the bot to English: the summary (`— offline`,
+`⏱2h10m`), Bambu's error texts (their English original by the code) and the default
+templates. A template you wrote yourself is sent as written.
 
 ## 5. Event notifications
 

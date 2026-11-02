@@ -9,6 +9,26 @@ this repository's history.
 
 ## [Unreleased]
 
+### Changed
+- Themes reworked so the dark ones differ in how they are built, not just in
+  hue: «Ночь» is OLED black with hairlines, «Классика» a flat graphite with a
+  state stripe, «Космос» a violet sky, «Океан» layers of depth. All text and
+  statuses pass WCAG AA in every theme; «Светлая» scrolls twice as fast.
+- «Космос» (Cosmos) without violet: the real night sky with the Milky Way under
+  dense dark boards with a thin line of cold starlight; starlight blue for
+  printing and the selection, coral for errors.
+- New theme «Стекло» (Glass): clear glass with bright edges as in iOS 26, light
+  or dark as the system is. In the dark it lies over a night sky with the Milky
+  Way, in the light over soft blue and sea-green light; a floating bottom bar on
+  phones; a dense fallback for reduced transparency.
+- «Своё фото» (Own photo) in 👤 → «Оформление» while «Стекло» is on: any picture
+  under the glass, made smaller in the browser and kept in it only (the login
+  page shows it too); «Убрать фото» brings the built-in one back.
+
+### Removed
+- Theme «Неон»; it is replaced by «Янтарь» (Amber), a warm dark with little
+  blue light. A browser that had «Неон» moves to «Янтарь» on its own.
+
 ## [2.1.0] — 2026-11-02
 
 The panel speaks English, and the project has a documentation site.

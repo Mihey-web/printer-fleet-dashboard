@@ -856,7 +856,7 @@ def test_icons_of_the_block_are_in_the_sprite():
 def test_css_has_every_level_and_the_pause_tokens_in_every_theme():
     themes = re.findall(r'^\s*html\[data-theme="([\w-]+)"\] \{', CSS, re.M)
     themed = set(re.findall(r'html\[data-theme="([\w-]+)"\] \{ --sev-pause:', CSS))
-    assert themed == set(themes) - {""} and len(themed) == 5           # + the default theme on :root
+    assert themed == set(themes) - {""} and len(themed) == 6           # + the default theme on :root
     assert re.search(r":root \{\s*--sev-pause: #fb923c;", CSS)
     for sel in ("nf-sev", "nf-badge", "nf-item"):
         for lvl in ("fatal", "pause", "serious", "common"):

@@ -15,10 +15,12 @@ Kuznitsa has two kinds of settings:
 | Linux / systemd | an `Environment=NAME=value` line in the `[Service]` section of the unit — see [Linux / Raspberry Pi](install/linux.md#add-settings-environment-variables) |
 | Docker | a `- NAME=value` line under `environment:` in `docker-compose.yml` — see [Docker](install/docker.md#settings) |
 
-!!! info "About `.env.example`"
-    The repository has `.env.example` with the main variables and comments. The program itself does
-    **not** read a `.env` file; use it as a reference, or let your service manager load it (for
-    example systemd's `EnvironmentFile=` or Docker Compose's `env_file:`).
+!!! info "The `.env` file"
+    The repository has `.env.example` with every variable and comments. Copy it to `.env` next to
+    `main.py` and uncomment what you need: `python main.py` reads it at start. Format: `NAME=value`
+    per line, `#` starts a comment, quotes are optional. A variable already set in the environment
+    (systemd `Environment=`, Docker `environment:`, `set` / `export`) wins over the same name in
+    `.env`. The log shows which names were taken from the file (`.env: set …`), never the values.
 
 Restart the dashboard after changing a variable.
 
@@ -32,6 +34,7 @@ Links in the last column point to the line of code (version 2.0.0) where the var
 | --- | --- | --- | --- |
 | `WEB_HOST` | `127.0.0.1` | The address the dashboard listens on. `127.0.0.1` — only this computer (use behind nginx or a tunnel). `0.0.0.0` — every network interface, so other devices can open it. The Docker image sets `0.0.0.0`. | [config.py:7](https://github.com/mihey-web/printer-fleet-dashboard/blob/313ccaec83e4a3a05e632db1127df39faeed967e/config.py#L7), [main.py:52](https://github.com/mihey-web/printer-fleet-dashboard/blob/313ccaec83e4a3a05e632db1127df39faeed967e/main.py#L52) |
 | `WEB_PORT` | `8000` | The port. Must be a whole number. | [config.py:8](https://github.com/mihey-web/printer-fleet-dashboard/blob/313ccaec83e4a3a05e632db1127df39faeed967e/config.py#L8), [main.py:53](https://github.com/mihey-web/printer-fleet-dashboard/blob/313ccaec83e4a3a05e632db1127df39faeed967e/main.py#L53) |
+| `FORGE_TRUSTED_PROXIES` | `127.0.0.1,::1` | Addresses of reverse proxies (nginx, Caddy) whose `X-Real-IP` / `X-Forwarded-For` headers are trusted: a comma list of IPs or networks (`172.18.0.1`, `172.16.0.0/12`). The login limits and the action log then see the visitors' real addresses. Needed for [Docker behind nginx or Caddy on the same computer](install/docker.md#behind-nginx-or-caddy). A wrong entry is skipped with a warning in the log. | [config.py](https://github.com/mihey-web/printer-fleet-dashboard/blob/main/config.py), [app/api/auth.py](https://github.com/mihey-web/printer-fleet-dashboard/blob/main/app/api/auth.py) |
 | `COOKIE_SECURE` | `1` | `1` — login cookies are sent only over HTTPS (right behind an HTTPS proxy). `0`, `false`, `False` or an empty value — also over plain HTTP; needed if you open the dashboard by `http://` from another device. The Docker files set `0`. | [config.py:41](https://github.com/mihey-web/printer-fleet-dashboard/blob/313ccaec83e4a3a05e632db1127df39faeed967e/config.py#L41) |
 | `FORGE_JWT_SECRET` | generated on the first start and stored in `users.db` | The key that signs login sessions. Set it to choose the key yourself; changing it logs everybody out. Generate one with `python -c "import secrets; print(secrets.token_hex(32))"`. | [config.py:34](https://github.com/mihey-web/printer-fleet-dashboard/blob/313ccaec83e4a3a05e632db1127df39faeed967e/config.py#L34), [app/api/main.py:818](https://github.com/mihey-web/printer-fleet-dashboard/blob/313ccaec83e4a3a05e632db1127df39faeed967e/app/api/main.py#L818), [app/api/auth.py:178](https://github.com/mihey-web/printer-fleet-dashboard/blob/313ccaec83e4a3a05e632db1127df39faeed967e/app/api/auth.py#L178) |
 | `FORGE_ADMIN_USERNAME` | `admin` | Login of the administrator created on the first start. Used only while there are no users. | [config.py:46](https://github.com/mihey-web/printer-fleet-dashboard/blob/313ccaec83e4a3a05e632db1127df39faeed967e/config.py#L46) |
@@ -48,7 +51,7 @@ Links in the last column point to the line of code (version 2.0.0) where the var
 
 ### History and automation
 
-These three are not in `.env.example` but are read by the code.
+These three are in `.env.example` too.
 
 | Variable | Default | What it does | Read in |
 | --- | --- | --- | --- |

@@ -159,6 +159,15 @@ def test_csv_of_the_filtered_list(env):
     assert rows[1][1].startswith("'=")
 
 
+def test_csv_column_names_in_the_panels_language(env):
+    url = "/api/admin/audit.csv?prefix=auto_ignore&printer=bambu-10&fr=%d&to=%d" % (T0, T0 + 3600)
+    ru = list(csv.reader(io.StringIO(env.client.get(url).content.decode("utf-8")[1:]), delimiter=";"))
+    en = list(csv.reader(io.StringIO(env.client.get(url + "&lang=en").content.decode("utf-8")[1:]), delimiter=";"))
+    assert en[0] == ["Time", "User", "Action", "IP", "Browser"]
+    assert en[1:] == ru[1:]
+    assert env.client.get(url + "&lang=xx").content == env.client.get(url).content
+
+
 def test_admins_only(env):
     env.role["r"] = UserRole.VIEWER
     for url in ("/api/admin/audit", "/api/admin/audit/counts", "/api/admin/audit.csv"):

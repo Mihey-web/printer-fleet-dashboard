@@ -37,9 +37,11 @@ PWA_FILES = {
 }
 # The login page's own file, served the same way: the page has no session, and
 # it shows the theme this browser chose (IA §9). theme.js holds the theme boot
-# and colour getters only — nothing about the farm.
+# and colour getters only — nothing about the farm. night-sky.jpg is the night
+# sky of «Космос» and of «Стекло» in the dark, on the login page as in the app.
 LOGIN_FILES = {
     '/theme.js': ('app/web/theme.js', 'text/javascript', 'no-cache'),
+    '/night-sky.jpg': ('app/web/night-sky.jpg', 'image/jpeg', _PWA_ICON_CACHE),
 }
 
 # Everything else — including /static/ and the app shell — is auth-gated so an
@@ -770,11 +772,12 @@ def create_app(store: StateStore) -> FastAPI:
     @app.get("/api/history/jobs.csv", dependencies=[Depends(_admin_only)])
     def get_jobs_csv(request: Request, fr: float = None, to: float = None, printer: str = None,
                      result: str = None, include_maint: bool = True,
-                     limit: int = Query(20000, ge=1, le=20000)):
+                     limit: int = Query(20000, ge=1, le=20000), lang: str = Query(None, max_length=8)):
         fr, to = _jobs_window(fr, to)
+        # lang: the panel's language (the column names; app/web/i18n/<lang>.js)
         text = job_queries.jobs_csv(_history_db_path(), fr, to, printer=printer,
                                     results=_jobs_results(result), include_maint=include_maint,
-                                    limit=limit, labels=_current_labels())
+                                    limit=limit, labels=_current_labels(), lang=lang)
         body = text.encode("utf-8")
         headers = {"Content-Disposition": 'attachment; filename="%s"' % job_queries.csv_filename(fr, to),
                    "Cache-Control": "no-store"}

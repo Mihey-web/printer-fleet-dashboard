@@ -8,6 +8,15 @@ import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any, Optional, Protocol
 
+# .env in the project root (cp .env.example .env), read before any module below
+# reads the environment at import. Keys already set by systemd / Docker / the
+# shell win. Only when started as the program: importing main (tests) reads nothing.
+if __name__ == '__main__':
+    from app.services import env_file
+    _ENV_FILE_KEYS = env_file.load(os.path.join(os.path.dirname(os.path.abspath(__file__)), '.env'))
+else:
+    _ENV_FILE_KEYS = []
+
 import uvicorn
 from app.api.main import create_app
 from app.collectors.bambu_collector import BambuCollector, quiet_vendor_logging, tls_verify_enabled
@@ -18,8 +27,10 @@ from app.domain.models import MAINTENANCE_STATE, PrinterKind, PrinterState, Prin
 
 from app.services.normalizer import normalize_bambu, normalize_ws_dict
 from app.services.state_store import StateStore, snapshot_reason
+from app.services import ams_store as ams_store_module
 from app.services.ams_store import AmsStore
 from app.services import ams_autodry_engine, job_journal, notification_tracker, printer_commands, settings_service, state_store
+from app.services import i18n as bot_i18n
 from app.services.proxy_checker import RedactingFilter
 import config
 
@@ -196,26 +207,21 @@ def _build_grace_status(prev_item, reason, now, device_type):
     )
 
 
-def _error_notification(template, label, last_error):
+def _error_notification(template, label, last_error, status=None, lang=None):
     """Telegram error text. It goes out with parse_mode=HTML: the template's own
     markup stays, the label and the printer's error text are escaped (labels are
     free-form, and Bambu's HMS texts contain '>', e.g. «Настройки > Калибровка»;
-    either would reject the whole message)."""
+    either would reject the whole message). The error is in the bot's language:
+    Bambu's texts as the English original of their code (status.notifications)."""
     msg = template.replace('{label}', html.escape(str(label)))
     if last_error:
-        msg += f': {html.escape(str(last_error))}'
+        msg += f': {html.escape(str(bot_i18n.printer_error(last_error, status, lang)))}'
     return msg
 
 
-def _fmt_time(seconds):
-    if not seconds or seconds <= 0:
-        return None
-    h, m = divmod(seconds // 60, 60)
-    if h and m:
-        return f"{h}ч{m}м"
-    if h:
-        return f"{h}ч"
-    return f"{m}м"
+def _fmt_time(seconds, lang=None):
+    # 5ч30м / 5h30m: the bot's language (app/services/i18n.py)
+    return bot_i18n.duration(seconds, lang)
 
 def _fmt_job(name):
     if not name:
@@ -255,7 +261,11 @@ def _state_sort_key(s):
     return (group, s.label)
 
 
-def format_status_text(store: StateStore) -> str:
+def format_status_text(store: StateStore, lang: Optional[str] = None) -> str:
+    """The bot's summary, in its language (settings «telegram_lang»): the texts are
+    looked up in the panel's dictionary, names and jobs stay as they are."""
+    lang = bot_i18n.bot_lang() if lang is None else lang
+    _t = lambda text: bot_i18n.t(text, lang)
     printers = sorted(store.get_all(), key=_state_sort_key)
 
     lines = []
@@ -267,7 +277,7 @@ def format_status_text(store: StateStore) -> str:
         # escape them, the <b> markup is ours.
         label = html.escape(str(_display_label(s.id, s.label)))
         if _in_maintenance(s.id):
-            lines.append(f"\U0001F527 <b>{label}</b> — на обслуживании")
+            lines.append(f"\U0001F527 <b>{label}</b> — {_t('на обслуживании')}")
         elif s.state == PrinterState.PRINTING or s.state == PrinterState.PAUSED:
             icon = "\U0001F7E2" if s.state == PrinterState.PRINTING else "\U0001F7E1"
             pct = f"{s.progress_pct:.0f}%" if s.progress_pct is not None else ""
@@ -279,9 +289,9 @@ def format_status_text(store: StateStore) -> str:
                 line1 += f" · {job}"
             details = []
             if s.eta_seconds and s.eta_seconds > 0:
-                details.append(f"\u23f1{_fmt_time(s.eta_seconds)}")
+                details.append(f"\u23f1{_fmt_time(s.eta_seconds, lang)}")
             if s.print_time_seconds and s.print_time_seconds > 0:
-                details.append(f"\u23f3{_fmt_time(s.print_time_seconds)}")
+                details.append(f"\u23f3{_fmt_time(s.print_time_seconds, lang)}")
             if s.nozzle_temp is not None and s.nozzle_temp > 0:
                 t = f"\U0001F321{s.nozzle_temp:.0f}"
                 if s.bed_temp is not None and s.bed_temp > 0:
@@ -295,24 +305,24 @@ def format_status_text(store: StateStore) -> str:
                 lines.append(line1)
 
         elif not s.online or s.state == PrinterState.OFFLINE:
-            lines.append(f"\u2B1B {label} — офлайн")
+            lines.append(f"\u2B1B {label} — {_t('офлайн')}")
 
         elif s.state == PrinterState.FINISHED:
-            line = f"\u2705 <b>{label}</b> — завершено"
+            line = f"\u2705 <b>{label}</b> — {_t('завершено')}"
             job = _fmt_job(s.job_name)
             if job:
                 line += f" · {html.escape(job)}"
             lines.append(line)
 
         elif s.state == PrinterState.ERROR:
-            line = f"\U0001F534 <b>{label}</b> — ошибка"
+            line = f"\U0001F534 <b>{label}</b> — {_t('ошибка')}"
             if s.last_error:
-                line += f": {html.escape(str(s.last_error))}"
+                line += f": {html.escape(str(bot_i18n.printer_error(s.last_error, s, lang)))}"
             lines.append(line)
 
         elif s.state == PrinterState.CANCELLED:
             # Not an error: last_error would show the cancel echo as a failure.
-            lines.append(f"\u26AA {label} — отменено")
+            lines.append(f"\u26AA {label} — {_t('отменено')}")
 
         else:
             line = f"\u26AA {label}"
@@ -324,7 +334,7 @@ def format_status_text(store: StateStore) -> str:
                     line += "°C"
             lines.append(line)
 
-    return "\n".join(lines) if lines else "Нет данных о принтерах"
+    return "\n".join(lines) if lines else _t("Нет данных о принтерах")
 
 
 
@@ -407,7 +417,7 @@ def poll_loop(
                                 if entered or repeat_due:
                                     try:
                                         # parse_mode=HTML: the free-form label is escaped.
-                                        msg = scfg['telegram_finish_template'].format(label=html.escape(str(disp_label)))
+                                        msg = bot_i18n.template(scfg, 'telegram_finish_template').format(label=html.escape(str(disp_label)))
                                         # Only anchor the repeat timer if the message
                                         # was actually dispatched. Marking it on a
                                         # no-op (bot down / no chat) would suppress
@@ -428,7 +438,7 @@ def poll_loop(
                         if tg is not None and not quiet and scfg.get('telegram_notify_on_paused'):
                             if effective_prev == PrinterState.PRINTING and status.state == PrinterState.PAUSED:
                                 try:
-                                    msg = scfg['telegram_paused_template'].replace('{label}', html.escape(str(disp_label)))
+                                    msg = bot_i18n.template(scfg, 'telegram_paused_template').replace('{label}', html.escape(str(disp_label)))
                                     tg.notify(msg)
                                     logger.info('[%s] Telegram paused notification sent', label)
                                 except Exception as e:
@@ -436,7 +446,8 @@ def poll_loop(
                         if tg is not None and not quiet and scfg.get('telegram_notify_on_error'):
                             if effective_prev is not None and status.state == PrinterState.ERROR and effective_prev not in (PrinterState.ERROR, PrinterState.OFFLINE):
                                 try:
-                                    msg = _error_notification(scfg['telegram_error_template'], disp_label, status.last_error)
+                                    msg = _error_notification(bot_i18n.template(scfg, 'telegram_error_template'), disp_label,
+                                                              status.last_error, status, bot_i18n.bot_lang(scfg))
                                     tg.notify(msg)
                                     logger.info('[%s] Telegram error notification sent', label)
                                 except Exception as e:
@@ -525,7 +536,38 @@ def poll_loop(
         time.sleep(max(0.0, POLL_INTERVAL - elapsed))
 
 
+_LOOPBACK_HOSTS = ('localhost', '::1')
+
+
+def cookie_secure_http_warning(host: str, port, cookie_secure: bool) -> Optional[str]:
+    """One log line when sign-in will likely fail silently: Secure cookies, and
+    the server reachable from other machines (opened there as plain http://).
+    Behind an HTTPS proxy on the same host WEB_HOST is 127.0.0.1: no warning."""
+    host = (host or '').strip().strip('[]')
+    if not cookie_secure or host in _LOOPBACK_HOSTS or host.startswith('127.'):
+        return None
+    return ('COOKIE_SECURE=1 while the panel listens on %s:%s: browsers keep the login cookie '
+            'only over HTTPS, so opened as http://<address>:%s the sign-in will not stick. '
+            'Use an HTTPS proxy, or set COOKIE_SECURE=0 on a trusted LAN.' % (host, port, port))
+
+
+def db_paths_that_are_directories() -> list:
+    """Database paths that exist as directories. Docker creates one when a
+    bind-mounted file (docker-compose.yml volumes) is missing on the host."""
+    from app.api import auth
+    return [p for p in (state_store.DB_PATH, auth.USERS_DB, ams_store_module.DB_PATH) if os.path.isdir(p)]
+
+
 def main():
+    if _ENV_FILE_KEYS:
+        logger.info('.env: set %s', ', '.join(_ENV_FILE_KEYS))
+    bad_db = db_paths_that_are_directories()
+    if bad_db:
+        # A clear line in `docker compose logs` instead of SQLite's "unable to open database file".
+        logger.error('%s: a directory, not a database file. Docker creates it when the file is missing '
+                     'on the host: stop the container, remove the empty directory, run `touch <file>`, '
+                     'start again.', ', '.join(bad_db))
+        raise SystemExit(1)
     # A printer in maintenance mode writes 'maintenance' history rows.
     store = StateStore(history_state=_history_state)
     # Notification first-seen times and the cancel flag, kept in the history DB
@@ -567,6 +609,9 @@ def main():
     _redact_uvicorn_logs()  # after Config: it creates uvicorn's handlers
     threading.Thread(target=server.run, daemon=True).start()
     logger.info('Web dashboard: http://%s:%s', WEB_HOST, WEB_PORT)
+    cookie_warning = cookie_secure_http_warning(WEB_HOST, WEB_PORT, getattr(config, 'COOKIE_SECURE', True))
+    if cookie_warning:
+        logger.warning(cookie_warning)
 
     # Telegram bot + proxy checker: settings live in the DB; telegram_manager
     # hot-applies edits from the settings page, so no restart is needed for them.

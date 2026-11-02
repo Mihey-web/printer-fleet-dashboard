@@ -37,7 +37,8 @@
   var LETTER = /[A-Za-zА-Яа-яЁё]/;
 
   var langs = {};      // lang -> its registered data (+ the built lookup)
-  langs[SOURCE] = { name: "Русский", locale: "ru-RU", strings: {} };
+  // dateSep / decimal: the separators app.js writes by hand in «01.11» and «×1,00»
+  langs[SOURCE] = { name: "Русский", locale: "ru-RU", dateSep: ".", decimal: ",", strings: {} };
   var current = SOURCE;
   var active = null;   // the current language's data, null for Russian
   var cache = new Map();
@@ -709,7 +710,7 @@
     SOURCE: SOURCE,
     STORAGE_KEY: STORAGE_KEY,
     RU_FAMILY: RU_FAMILY,
-    // app/web/i18n/<lang>.js: I18N.register("en", {name, locale, match, strings, patterns, fix, css})
+    // app/web/i18n/<lang>.js: I18N.register("en", {name, locale, dateSep, decimal, match, strings, patterns, fix, css})
     register: function (lang, data) {
       data.strings = data.strings || {};
       build(data);
@@ -720,6 +721,8 @@
     tr: function (lang, s) { return langs[lang] && lang !== SOURCE ? tr(langs[lang], s) : s; },
     lang: function () { return current; },
     locale: function () { return (active || langs[SOURCE]).locale; },
+    dateSep: function () { return (active || langs[SOURCE]).dateSep || langs[SOURCE].dateSep; },
+    decimal: function () { return (active || langs[SOURCE]).decimal || langs[SOURCE].decimal; },
     languages: function () { return Object.keys(langs); },
     set: setLang,
     start: start,

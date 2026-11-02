@@ -152,8 +152,10 @@ class AuditService:
     def count_failed_attempts_by_username(self, username: str, window_sec: int = 900) -> int:
         """Count recent failed logins for a username across ALL source IPs.
 
-        Complements the per-IP counter so credential-stuffing from a pool of
-        proxies (one attempt per IP) still trips a per-account lockout.
+        Complements the per-IP counter: auth.login turns it into a progressive
+        delay for that name (1, 2, 4 … 30 s after 10 failures), so guessing from
+        a pool of proxies slows down. It is a delay, not a lockout: the correct
+        password still logs in after the wait, so a flood cannot lock out the owner.
         """
         if not username:
             return 0

@@ -3,6 +3,7 @@
 Each test failed before its fix; the finding's number in the report is in the
 test's name (f1 = finding 1, …).
 """
+import asyncio
 import sqlite3
 import threading
 import time
@@ -83,8 +84,8 @@ def test_f2_parallel_logins_from_one_ip_get_at_most_five_password_checks(auth_db
     def attempt(i):
         start.wait()
         try:
-            auth.login(auth.LoginRequest(username="admin", password="guess%d" % i),
-                       _req("203.0.113.5"), Response())
+            asyncio.run(auth.login(auth.LoginRequest(username="admin", password="guess%d" % i),
+                                   _req("203.0.113.5"), Response()))
             results.append(200)
         except HTTPException as e:
             results.append(e.status_code)

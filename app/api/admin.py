@@ -410,18 +410,21 @@ def get_audit_csv(request: Request,
                   access_token_cookie: Optional[str] = Cookie(None, alias="access_token"),
                   user: Optional[str] = None, action: Optional[str] = None,
                   prefix: Optional[List[str]] = Query(None), exclude: Optional[List[str]] = Query(None),
-                  printer: Optional[str] = None, fr: Optional[float] = None, to: Optional[float] = None):
+                  printer: Optional[str] = None, fr: Optional[float] = None, to: Optional[float] = None,
+                  lang: Optional[str] = Query(None, max_length=8)):
     """«⇩ Выгрузить» of «История → Действия»: the same filters, newest first, as CSV for
-    Russian Excel (BOM, «;», farm-local times), at most AUDIT_CSV_LIMIT rows."""
+    Russian Excel (BOM, «;», farm-local times), at most AUDIT_CSV_LIMIT rows. lang: the
+    panel's language for the column names."""
     import csv
     import io
-    from app.services import job_queries
+    from app.services import i18n, job_queries
     entries = get_audit_service().get_logs(limit=AUDIT_CSV_LIMIT, offset=0,
                                            **_audit_filters(user, action, prefix, exclude, printer, fr, to))
     buf = io.StringIO()
     buf.write("\ufeff")
     w = csv.writer(buf, delimiter=";", lineterminator="\r\n")
-    w.writerow(("Время", "Пользователь", "Действие", "IP", "Браузер"))
+    lang = lang if lang in i18n.languages() else i18n.SOURCE
+    w.writerow([i18n.t(h, lang) for h in ("Время", "Пользователь", "Действие", "IP", "Браузер")])
     for e in entries:
         when = job_queries._local(e.created_at)
         w.writerow([job_queries.csv_cell(v) for v in (when.strftime("%d.%m.%Y %H:%M:%S") if when else "",
@@ -474,6 +477,12 @@ def _validate_settings(values: dict):
 
     if "telegram_token" in values and not isinstance(values["telegram_token"], str):
         raise HTTPException(status_code=400, detail="telegram_token must be a string")
+
+    if "telegram_lang" in values:
+        from app.services import i18n as bot_i18n
+        if values["telegram_lang"] not in bot_i18n.languages():
+            raise HTTPException(status_code=400,
+                                detail="telegram_lang must be one of: " + ", ".join(bot_i18n.languages()))
 
     if "auto_ignore_print_errors" in values:
         import re as _re
@@ -580,7 +589,13 @@ ENGINE_KEYS = ("ams_autodry", "ams_autodry_state", "ams_autodry_journal")
 
 
 def _public_settings(values: dict) -> dict:
-    return {k: v for k, v in values.items() if k not in ENGINE_KEYS}
+    from app.services import i18n as bot_i18n
+    out = {k: v for k, v in values.items() if k not in ENGINE_KEYS}
+    # a default template in the bot's language, as the bot sends it; the admin's own text as written
+    for key in bot_i18n.TEMPLATE_KEYS:
+        if key in out:
+            out[key] = bot_i18n.template(values, key)
+    return out
 
 
 @router.get("/settings")

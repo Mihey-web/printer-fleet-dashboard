@@ -15,7 +15,9 @@ Most answers start with the log.
 ### After logging in, the page asks for the password again {#login-loops}
 
 The browser dropped the login cookie. By default (`COOKIE_SECURE=1`) the cookie is sent only over
-HTTPS. If you open the dashboard by `http://<address>:8000` from another device, either:
+HTTPS. Opened by `http://`, the login page then says so: «Вход принят, но браузер отклонил cookie…»
+(«Sign-in accepted, but the browser rejected the cookie…»), and the log has a `COOKIE_SECURE=1 while
+the panel listens on …` warning at start. If you open the dashboard by `http://<address>:8000` from another device, either:
 
 - set `COOKIE_SECURE=0` (only in a trusted local network), or
 - set up [HTTPS with nginx](security.md#https-with-nginx) and keep `COOKIE_SECURE=1`.
@@ -43,8 +45,10 @@ The printers, settings and history are in `printer_history.db` and are not affec
 
 ### Login says `Too many login attempts. Try again later.`
 
-Too many wrong passwords within 15 minutes (5 from one address, or 10 for one login). Wait 15
-minutes. See [Sessions and login protection](security.md#sessions-and-login-protection).
+Too many wrong passwords within 15 minutes: 5 from one address — wait 15 minutes; or more than
+10 for one login — then each attempt waits up to 30 seconds first, and the right password still
+gets in. If everybody gets this answer at once with Docker behind nginx or Caddy, see
+[`FORGE_TRUSTED_PROXIES`](install/docker.md#behind-nginx-or-caddy). See [Sessions and login protection](security.md#sessions-and-login-protection).
 
 ### Some messages are in English
 

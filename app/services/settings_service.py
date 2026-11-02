@@ -39,6 +39,9 @@ DEFAULTS: Dict[str, Any] = {
     "telegram_error_template": "\U0001f534 Ошибка: {label}",
     "telegram_notify_on_paused": False,
     "telegram_paused_template": "⚠️ Пауза: {label}",
+    # The bot's language: its summary, its own texts and the default templates
+    # (app/services/i18n.py). The admin's own templates are sent as written.
+    "telegram_lang": "ru",
     "proxy_list": [],
     "proxy_check_interval": 600,
     # printer_id -> bool: принимает ли прошивка print-класс (вердикт зонда).

@@ -35,9 +35,12 @@ Open **Admin → Access** («Админ → Доступ»):
   (`HttpOnly`), are not sent by other sites (`SameSite=Strict`) and, unless `COOKIE_SECURE=0`, are
   sent only over HTTPS.
 - **Brute-force protection:** after 5 wrong attempts from one address within 15 minutes, logins
-  from that address are refused for a while; after 10 wrong attempts for one login within 15
-  minutes, further wrong attempts for it are refused. The answer is `Too many login attempts. Try
-  again later.` The right password from another address still works.
+  from that address are refused for a while (`Too many login attempts. Try again later.`). After 10
+  wrong attempts for one login within 15 minutes — from any addresses — every further attempt with
+  that login waits before the password is checked: 1, 2, 4, 8, 16, then 30 seconds. This slows
+  guessing from many addresses at once. The right password still gets in after the wait, so nobody
+  can lock the real owner out; a wrong one after the wait is answered with the same
+  `Too many login attempts`.
 - Changing a user's role or password, or deleting the user, ends their sessions at once.
 - The sessions are signed with a key that is generated on the first start and stored in
   `users.db`. Setting `FORGE_JWT_SECRET` replaces it; changing it logs everybody out. See
@@ -60,7 +63,10 @@ Why bother:
 The recommended layout: the dashboard listens only on `127.0.0.1` (the default `WEB_HOST`),
 `COOKIE_SECURE` stays `1` (the default) and **nginx** in front of it handles HTTPS. nginx passes the
 visitor's address in `X-Real-IP` / `X-Forwarded-For`; the dashboard trusts these headers only from
-`127.0.0.1` / `::1`, so the action log and the login limits see real addresses.
+`127.0.0.1` / `::1`, so the action log and the login limits see real addresses. If the proxy
+connects from another address — Docker behind nginx or Caddy on the host, a proxy on another
+machine — list it in `FORGE_TRUSTED_PROXIES` (see
+[Docker behind nginx or Caddy](install/docker.md#behind-nginx-or-caddy)).
 
 The `deploy/` folder has ready-to-adapt templates:
 

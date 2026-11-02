@@ -7,7 +7,7 @@
   <script src="/i18n.js?v=1"></script>
   <title>Кузница</title>
   <link rel="manifest" href="/manifest.webmanifest">
-  <meta name="theme-color" content="#0f172a">
+  <meta name="theme-color" content="#061723">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
@@ -15,30 +15,47 @@
   <style>
     /* The theme this browser chose in the panel (forge-ops-theme), set on <html> by
        /theme.js below. The page has no session, so it cannot load styles.css: these are
-       its tokens for the six themes, the same values (tests/test_web_me_ui.py checks). */
+       its tokens for the seven themes, the same values (tests/test_web_me_ui.py checks). */
     :root {
-      --bg: #0f172a; --gray-2: #1e293b; --gray-3: #263548; --line-strong: rgba(255, 255, 255, 0.14); --text: #e2eaf3; --text-muted: #8ba7be; --info: #60a5fa;
-      --ok-grad-mid: #2dd4bf; --ok-grad-end: #6eeed9; --ok-border: rgba(45, 212, 191, 0.22); --tab-active-text: #0a1a1a; --danger: #f87171; --shadow-xl: 0 30px 80px rgba(0, 0, 0, 0.42);
+      --bg: #061723; --gray-2: #0b2231; --gray-3: #11293a; --line-strong: rgba(150, 220, 255, 0.15); --text: #e3f0f6; --text-muted: #94b2c6; --info: #4cc2ff;
+      --ok-grad-mid: #2dd4bf; --ok-grad-end: #6eeed9; --ok-border: rgba(45, 212, 191, 0.22); --tab-active-text: #0a1a1a; --danger: #f87171; --shadow-xl: inset 0 1px 0 rgba(170, 235, 255, 0.07), 0 1px 2px rgba(0, 8, 16, 0.40), 0 8px 18px rgba(0, 8, 16, 0.32), 0 22px 44px rgba(0, 8, 16, 0.34);
     }
     html[data-theme="dark-classic"] {
-      --bg: #0d1117; --gray-2: #161b22; --gray-3: #1c2128; --line-strong: rgba(255, 255, 255, 0.14); --text: #e6edf3; --text-muted: #656c76; --info: #58a6ff;
-      --ok-grad-mid: #3fb950; --ok-grad-end: #6edb7e; --ok-border: rgba(63, 185, 80, 0.22); --tab-active-text: #0d1117; --danger: #f85149; --shadow-xl: 0 30px 80px rgba(0, 0, 0, 0.55);
+      --bg: #181818; --gray-2: #1f1f1f; --gray-3: #262626; --line-strong: #3c3c3c; --text: #d4d4d4; --text-muted: #939393; --info: #4daafc;
+      --ok-grad-mid: #89d185; --ok-grad-end: #89d185; --ok-border: rgba(137, 209, 133, 0.35); --tab-active-text: #141414; --danger: #f4645f; --shadow-xl: none;
     }
     html[data-theme="light"] {
-      --bg: #f6f8fa; --gray-2: #ffffff; --gray-3: #f0f2f5; --line-strong: rgba(0, 0, 0, 0.14); --text: #1f2328; --text-muted: #848d99; --info: #0969da;
-      --ok-grad-mid: #2da44e; --ok-grad-end: #56be60; --ok-border: rgba(45, 164, 78, 0.30); --tab-active-text: #1f2328; --danger: #cf222e; --shadow-xl: 0 30px 80px rgba(0, 0, 0, 0.12);
+      --bg: #f6f8fa; --gray-2: #ffffff; --gray-3: #f0f2f5; --line-strong: rgba(0, 0, 0, 0.14); --text: #1f2328; --text-muted: #656d76; --info: #0969da;
+      --ok-grad-mid: #1f883d; --ok-grad-end: #56be60; --ok-border: rgba(45, 164, 78, 0.30); --tab-active-text: #1f2328; --danger: #cf222e; --shadow-xl: 0 30px 80px rgba(0, 0, 0, 0.12);
     }
     html[data-theme="night"] {
-      --bg: #000000; --gray-2: #111111; --gray-3: #1a1a1a; --line-strong: rgba(255, 255, 255, 0.14); --text: #eeeeee; --text-muted: #666666; --info: #3291ff;
-      --ok-grad-mid: #50e3c2; --ok-grad-end: #80f0dc; --ok-border: rgba(80, 227, 194, 0.22); --tab-active-text: #000000; --danger: #ff3333; --shadow-xl: 0 30px 80px rgba(0, 0, 0, 0.60);
-    }
-    html[data-theme="neon"] {
-      --bg: #0a0a1a; --gray-2: #111128; --gray-3: #1a1a38; --line-strong: rgba(255, 255, 255, 0.20); --text: #ddddf0; --text-muted: #666698; --info: #ff1493;
-      --ok-grad-mid: #00ff88; --ok-grad-end: #50ffb0; --ok-border: rgba(0, 255, 136, 0.30); --tab-active-text: #0a0a1a; --danger: #ff4500; --shadow-xl: 0 30px 80px rgba(0, 0, 0, 0.65);
+      --bg: #000000; --gray-2: #0a0a0a; --gray-3: #141414; --line-strong: rgba(255, 255, 255, 0.17); --text: #e8e8e8; --text-muted: #8c8c8c; --info: #8aaedb;
+      --ok-grad-mid: #74c7a6; --ok-grad-end: #74c7a6; --ok-border: rgba(116, 199, 166, 0.40); --tab-active-text: #000000; --danger: #e7867b; --shadow-xl: none;
     }
     html[data-theme="cosmos"] {
-      --bg: #04070c; --gray-2: #0b1119; --gray-3: #131c27; --line-strong: rgba(122, 180, 210, 0.18); --text: #e9f4fb; --text-muted: #63788c; --info: #5fd9f5;
-      --ok-grad-mid: #3ad684; --ok-grad-end: #7dedb2; --ok-border: rgba(58, 214, 132, 0.22); --tab-active-text: #03212b; --danger: #ff4d5e; --shadow-xl: 0 30px 80px rgba(0, 0, 0, 0.60);
+      --bg: #04060a; --gray-2: #0b0f16; --gray-3: #121823; --line-strong: rgba(170, 200, 255, 0.26); --text: #eef3f8; --text-muted: #9ba6b5; --info: #8cc8ff;
+      --ok-grad-mid: #6ee7b7; --ok-grad-end: #a2f2d4; --ok-border: rgba(110, 231, 183, 0.30); --tab-active-text: #04101e; --danger: #ff7a6b; --shadow-xl: 0 12px 34px rgba(0, 0, 0, 0.55), 0 0 28px rgba(120, 180, 255, 0.10);
+    }
+    html[data-theme="amber"] {
+      --bg: #14100c; --gray-2: #1c1611; --gray-3: #261e17; --line-strong: rgba(255, 210, 150, 0.16); --text: #f3e6cf; --text-muted: #b29d7f; --info: #f2ae4b;
+      --ok-grad-mid: #a3c96f; --ok-grad-end: #c4de9c; --ok-border: rgba(163, 201, 111, 0.26); --tab-active-text: #1c1206; --danger: #ff6a52; --shadow-xl: 0 1px 0 rgba(255, 220, 170, 0.04) inset, 0 10px 26px rgba(0, 0, 0, 0.42);
+    }
+    html[data-theme="glass"] {
+      --bg: #1c1c1e; --gray-2: #1c1c1e; --gray-3: rgba(255, 255, 255, 0.08); --line-strong: rgba(255, 255, 255, 0.20); --text: #ffffff; --text-muted: rgba(235, 235, 245, 0.76); --info: #74baff;
+      --ok-grad-mid: #30d158; --ok-grad-end: #6be38a; --ok-border: rgba(48, 209, 88, 0.34); --tab-active-text: #1c1c1e; --danger: #ff9e98; --shadow-xl: 0 1px 2px rgba(0, 0, 0, 0.18), 0 10px 30px rgba(0, 0, 0, 0.26);
+      --glass-font: -apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro", system-ui, "Segoe UI", Roboto, sans-serif; --glass-base: #000000; --glass-veil: rgba(0, 0, 0, 0.30);
+      --glass-surface: rgba(30, 30, 33, 0.62); --glass-dense: rgba(30, 30, 33, 0.96); --glass-blur: blur(26px) saturate(180%); --glass-light: inset 0 1px 0 rgba(255, 255, 255, 0.14);
+      --glass-well: rgba(255, 255, 255, 0.08); --glass-chip-line: rgba(255, 255, 255, 0.18); --glass-drop-light: inset 1px 1px 0 rgba(255, 255, 255, 0.30), inset -1px -1px 0 rgba(255, 255, 255, 0.12), 0 1px 3px rgba(0, 0, 0, 0.18); --glass-blue: #74baff; --glass-ink: #ffffff;
+      --glass-wall: url("/night-sky.jpg");
+    }
+    @media (prefers-color-scheme: light) {
+      html[data-theme="glass"] {
+        --bg: #f2f2f7; --gray-2: #ffffff; --gray-3: rgba(255, 255, 255, 0.45); --line-strong: rgba(0, 0, 0, 0.14); --text: #000000; --text-muted: rgba(0, 0, 0, 0.66); --info: #0040b8;
+        --tab-active-text: #000000; --danger: #a30014; --shadow-xl: 0 1px 2px rgba(0, 0, 0, 0.08), 0 10px 30px rgba(0, 0, 0, 0.12); --glass-base: #dfe7fb; --glass-veil: rgba(255, 255, 255, 0.24);
+        --glass-surface: rgba(255, 255, 255, 0.66); --glass-dense: rgba(250, 250, 252, 0.97); --glass-light: inset 0 1px 0 rgba(255, 255, 255, 0.70);
+        --glass-well: rgba(255, 255, 255, 0.42); --glass-chip-line: rgba(255, 255, 255, 0.70); --glass-drop-light: inset 1px 1px 0 rgba(255, 255, 255, 0.95), inset -1px -1px 0 rgba(255, 255, 255, 0.55), 0 1px 3px rgba(0, 0, 0, 0.10); --glass-blue: #0040b8;
+        --glass-wall: radial-gradient(ellipse 46vmax 36vmax at 88% 6%, rgba(90, 165, 255, 0.60), transparent 70%), radial-gradient(ellipse 40vmax 34vmax at 4% 30%, rgba(130, 140, 255, 0.42), transparent 70%), radial-gradient(ellipse 34vmax 26vmax at 52% 48%, rgba(120, 190, 255, 0.30), transparent 70%), radial-gradient(ellipse 48vmax 30vmax at 86% 96%, rgba(40, 210, 200, 0.45), transparent 70%), radial-gradient(ellipse 30vmax 22vmax at 14% 98%, rgba(255, 180, 90, 0.45), transparent 70%), linear-gradient(160deg, #eaf1ff 0%, #dfe7fb 50%, #d6e0f6 100%);
+      }
     }
     [data-theme="light"] .field input { color-scheme: light; }
     * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -120,8 +137,42 @@
     }
     button:disabled { opacity: 0.6; cursor: default; }
     .err { min-height: 18px; font-size: 0.75rem; color: var(--danger); text-align: center; margin-top: 10px; }
+    /* «Стекло»: the wallpaper under a frosted pane that blurs the dot grid behind it, light or
+       dark as the system is. These rules only run in that theme; the fallbacks keep a missing
+       token harmless. */
+    html[data-theme="glass"] body { background: var(--glass-wall, var(--bg)) center / cover fixed; background-color: var(--glass-base, var(--bg)); }
+    html[data-theme="glass"][data-glass-photo] body {
+      background: linear-gradient(var(--glass-veil, transparent), var(--glass-veil, transparent)), var(--glass-photo) center / cover fixed; background-color: var(--glass-base, var(--bg));
+    }
+    html[data-theme="cosmos"] body { background: url("/night-sky.jpg") 30% 40% / cover no-repeat fixed, var(--bg); }
+    html[data-theme="glass"] body, html[data-theme="glass"] body * { font-family: var(--glass-font, inherit); }
+    html[data-theme="glass"] h1 { letter-spacing: 0.12em; }
+    html[data-theme="glass"] .card {
+      background-color: var(--glass-surface, var(--gray-2)); background-image: none;
+      -webkit-backdrop-filter: var(--glass-blur, none); backdrop-filter: var(--glass-blur, none);
+      border-color: var(--glass-chip-line, var(--line-strong)); border-radius: 28px;
+      box-shadow: var(--glass-light, 0 0 transparent), var(--shadow-xl);
+    }
+    html[data-theme="glass"] .emblem {
+      border-radius: 18px; background: var(--glass-well, var(--gray-3)); border-color: var(--glass-chip-line, var(--line-strong)); color: var(--text);
+      box-shadow: var(--glass-drop-light, 0 0 transparent);
+    }
+    html[data-theme="glass"] .field label { text-transform: none; letter-spacing: 0; font-size: 0.78rem; }
+    html[data-theme="glass"] .field input { background: var(--glass-well, var(--bg)); border-color: var(--glass-chip-line, var(--line-strong)); border-radius: 14px; }
+    html[data-theme="glass"] .field input:focus { border-color: var(--glass-blue, var(--info)); }
+    /* the primary button: a capsule in the tint */
+    html[data-theme="glass"] form button {
+      border-radius: 999px; border-color: transparent; background: var(--glass-blue, var(--info)); color: var(--glass-ink, var(--text));
+      letter-spacing: 0; box-shadow: var(--glass-drop-light, 0 0 transparent);
+    }
+    @supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+      html[data-theme="glass"] .card { background-color: var(--glass-dense, var(--gray-2)); }
+    }
+    @media (prefers-reduced-transparency: reduce) {
+      html[data-theme="glass"] .card { background-color: var(--glass-dense, var(--gray-2)); backdrop-filter: none; -webkit-backdrop-filter: none; }
+    }
   </style>
-  <script src="/theme.js?v=5"></script>
+  <script src="/theme.js?v=8"></script>
 </head>
 <body>
   <div class="card">
@@ -159,6 +210,15 @@
         return res.json().then(function (data) { return { ok: res.ok, data: data }; });
       }).then(function (r) {
         // the screen asked for (a PWA shortcut, a bookmark: /#/ams) opens after the sign-in
+        if (r.ok && location.protocol === 'http:') {
+          // Over plain http the browser drops a Secure cookie (COOKIE_SECURE=1) without
+          // a word: the sign-in "succeeds" and the form comes back. Check the session.
+          return fetch('/api/auth/me', { credentials: 'same-origin' }).then(function (me) {
+            if (me.ok) { window.location.replace('/' + location.hash); return; }
+            err.textContent = 'Вход принят, но браузер отклонил cookie: откройте панель по HTTPS или задайте COOKIE_SECURE=0 в локальной сети.';
+            btn.disabled = false;
+          });
+        }
         if (r.ok) { window.location.replace('/' + location.hash); }
         else {
           err.textContent = r.data.detail || 'Ошибка входа';

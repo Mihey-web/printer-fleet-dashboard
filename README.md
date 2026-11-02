@@ -86,7 +86,9 @@ auto-drying line on top.*
   to a limit; never stops a drying itself, leaves drying started elsewhere
   alone, and starts in a journal-only shadow mode (rules on the AMS tab).
 - **Auth & roles** — JWT cookie sessions, `admin` and `viewer` roles, login rate
-  limiting, refresh-token rotation, and an audit log.
+  limiting (5 failures per address; past 10 failures per login name a growing
+  1–30 s delay, the right password still gets in), refresh-token rotation, and
+  an audit log.
 - **Fleet managed from the UI** — add, edit, and remove printers in the admin
   panel; no code edits or redeploys to change the fleet.
 
@@ -120,13 +122,35 @@ auto-drying line on top.*
 
 ```bash
 git clone <your-fork-url> kuznitsa && cd kuznitsa
-touch printer_history.db users.db      # so Docker mounts them as files
+touch printer_history.db users.db ams_history.db   # so Docker mounts them as files
 docker compose up -d --build
 docker compose logs -f                 # read the first-run admin password once
 ```
 
 Open `http://<host>:8000` and log in as `admin`. Databases persist in the repo
-directory; `docker compose pull`/`up --build` picks up new versions.
+directory; `git pull` and `docker compose up -d --build` pick up new versions
+(run the `touch` line again first: older versions did not mount `ams_history.db`).
+
+**Exposure.** `docker-compose.yml` publishes port 8000 on **all** interfaces
+with `COOKIE_SECURE=0` — meant for a trusted LAN. Docker writes its own iptables
+rules, so **ufw / firewalld rules do not block that port**. If the host is
+reachable from the internet, or nginx/Caddy on the host serves HTTPS, publish
+the port on loopback only (`"127.0.0.1:8000:8000"`) and set `COOKIE_SECURE=1`.
+
+**Docker behind nginx/Caddy on the host.** The proxy connects to the published
+port, so inside the container every request comes from the Docker bridge
+gateway (e.g. `172.18.0.1` — `docker compose logs` shows it in the access log),
+not from `127.0.0.1`. The dashboard then ignores `X-Real-IP` and sees all users
+as one address: five wrong passwords from anyone lock everyone out for 15
+minutes. Trust the gateway:
+
+```yaml
+    environment:
+      - FORGE_TRUSTED_PROXIES=172.18.0.1    # your gateway; or a network: 172.16.0.0/12
+```
+
+Trust only the address your proxy really comes from: whoever connects from a
+trusted address can set any client IP.
 
 ### From source
 
@@ -141,6 +165,10 @@ pip install -r requirements.txt
 cp .env.example .env            # optional — see below
 python main.py
 ```
+
+`main.py` reads `.env` from the project root at start (no extra package needed):
+`KEY=VALUE` lines, `#` comments, optional quotes. A variable already set in the
+environment (systemd `Environment=`, Docker `environment:`, `export`) wins.
 
 Then open the dashboard (default `http://127.0.0.1:8000`).
 
@@ -169,11 +197,14 @@ All runtime configuration is optional and has safe defaults. See
 | `FORGE_JWT_SECRET` | auto-generated & persisted | JWT signing key |
 | `FORGE_ADMIN_USERNAME` | `admin` | First-run admin username |
 | `FORGE_ADMIN_PASSWORD` | random (logged once) | First-run admin password |
-| `COOKIE_SECURE` | `1` | Send auth cookies over HTTPS only |
+| `COOKIE_SECURE` | `1` | Send auth cookies over HTTPS only (over plain `http://` the browser then drops them — the login page says so) |
+| `FORGE_TRUSTED_PROXIES` | `127.0.0.1,::1` | IPs / CIDR networks of reverse proxies whose `X-Real-IP` / `X-Forwarded-For` is trusted |
 | `WEB_HOST` / `WEB_PORT` | `127.0.0.1` / `8000` | Server bind address |
 | `POLL_INTERVAL` / `MAX_WORKERS` | `5` (30 s at least) / `10` | Full poll cadence (history, journal, notifications) / concurrency |
 | `FORGE_LIVE_REFRESH_S` | `2` | Live card refresh from the printers' telemetry; `0` = off |
 | `FORGE_BAMBU_TLS_VERIFY` | empty (off) | Verify Bambu printer TLS certificates against Bambu's CAs: `*` or comma-separated models |
+| `HISTORY_RETENTION_DAYS` / `JOBS_RETENTION_DAYS` | `90` / `730` | Days of state / AMS history and of the print journal |
+| `FORGE_TZ_OFFSET_MIN` | `180` | Farm time zone for the auto-drying window, minutes from UTC |
 
 The **Telegram bot token, chat id, notification templates, and proxy list** are
 managed in the database and edited from **Admin → System** in the UI — not via env or
@@ -195,7 +226,7 @@ reverse-tunnel unit for exposing a LAN instance through a public VPS.
 ## Running the tests
 
 ```bash
-pip install pytest
+pip install -r requirements.txt pytest httpx    # httpx: FastAPI's TestClient needs it
 python -m pytest -q
 ```
 

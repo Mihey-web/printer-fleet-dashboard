@@ -32,13 +32,14 @@ def _actions(ver="101", data=None):
     ]}
 
 
-def _texts(ver="202", err=None, hms=None):
+def _texts(ver="202", err=None, hms=None, lang="ru"):
+    en = lang == "en"
     return {"result": 0, "ver": ver, "data": {
-        "device_error": {"ver": ver, "ru": err if err is not None else [
-            {"ecode": "0C008001", "intro": " Тестовая пауза "},
+        "device_error": {"ver": ver, lang: err if err is not None else [
+            {"ecode": "0C008001", "intro": " Test pause " if en else " Тестовая пауза "},
             {"ecode": "0C008002", "intro": ""}]},
-        "device_hms": {"ver": ver, "ru": hms if hms is not None else [
-            {"ecode": "0C00010000010001", "intro": "Тестовый HMS"},
+        "device_hms": {"ver": ver, lang: hms if hms is not None else [
+            {"ecode": "0C00010000010001", "intro": "Test HMS" if en else "Тестовый HMS"},
             {"ecode": "0C00010000020002", "intro": ""}]}}}
 
 
@@ -72,12 +73,13 @@ class _Net:
 
     def __init__(self):
         self.requests = []
-        self.answer = {"action": _actions(), "text": _texts()}
+        self.answer = {"action": _actions(), "text": _texts(), "text_en": _texts("303", lang="en")}
 
     def __call__(self, req, timeout=None):
         assert isinstance(req, urllib.request.Request) and timeout == hc.TIMEOUT_S
         self.requests.append(req)
-        kind = "action" if req.full_url.startswith(hc.ACTION_URL) else "text"
+        kind = ("action" if req.full_url.startswith(hc.ACTION_URL)
+                else "text_en" if "lang=en" in req.full_url else "text")
         a = self.answer[kind]
         if isinstance(a, Exception):
             raise a
@@ -154,10 +156,12 @@ def test_texts_by_code_length_and_empty_intro_is_none(cat):
 
 def test_first_download_writes_the_cache_and_meta(cat):
     hc.refresh_once(NOW, ROWS)
-    assert [q for _, q in cat.queries()] == [{"d": [P]}, {"lang": ["ru"], "d": [P]}]   # nothing cached: no v
+    assert [q for _, q in cat.queries()] == [{"d": [P]}, {"lang": ["ru"], "d": [P]},   # nothing cached: no v
+                                             {"lang": ["en"], "d": [P]}]
     files = sorted(os.listdir(hc.CACHE_DIR))
-    assert files == ["action_%s.json" % P, "meta.json", "text_ru_%s.json" % P]
-    assert _meta() == {P: {"action_ver": "101", "text_ver": "202", "checked_at": NOW, "error": None}}
+    assert files == ["action_%s.json" % P, "meta.json", "text_en_%s.json" % P, "text_ru_%s.json" % P]
+    assert _meta() == {P: {"action_ver": "101", "text_ver": "202", "text_en_ver": "303", "checked_at": NOW,
+                           "error": None}}
 
 
 def test_cache_survives_a_restart_without_the_network(cat, monkeypatch):
@@ -176,20 +180,23 @@ def test_201_only_moves_checked_at(cat):
     hc.refresh_once(NOW, ROWS)
     before = sorted(os.listdir(hc.CACHE_DIR))
     cat.requests.clear()
-    cat.answer = {"action": NOT_MODIFIED, "text": NOT_MODIFIED}
+    cat.answer = {"action": NOT_MODIFIED, "text": NOT_MODIFIED, "text_en": NOT_MODIFIED}
     later = NOW + hc.REFRESH_S
     hc.refresh_once(later, ROWS)
-    assert [q for _, q in cat.queries()] == [{"d": [P], "v": ["101"]}, {"lang": ["ru"], "d": [P], "v": ["202"]}]
+    assert [q for _, q in cat.queries()] == [{"d": [P], "v": ["101"]}, {"lang": ["ru"], "d": [P], "v": ["202"]},
+                                             {"lang": ["en"], "d": [P], "v": ["303"]}]
     assert hc.action_ids(P, "0C00_8001") == ([27], True)
     assert hc.text(P, "0C00_8001") == "Тестовая пауза"
-    assert _meta()[P] == {"action_ver": "101", "text_ver": "202", "checked_at": later, "error": None}
+    assert hc.text(P, "0C00_8001", "en") == "Test pause"
+    assert _meta()[P] == {"action_ver": "101", "text_ver": "202", "text_en_ver": "303", "checked_at": later,
+                          "error": None}
     assert sorted(os.listdir(hc.CACHE_DIR)) == before
 
 
 def test_a_new_version_replaces_the_table(cat):
     hc.refresh_once(NOW, ROWS)
     cat.answer = {"action": _actions("103", [{"ecode": "0C008001", "device": "default", "actions": [9]}]),
-                  "text": NOT_MODIFIED}
+                  "text": NOT_MODIFIED, "text_en": NOT_MODIFIED}
     hc.refresh_once(NOW + hc.REFRESH_S, ROWS)
     assert hc.action_ids(P, "0C00_8001") == ([9], True)
     assert hc.text(P, "0C00_8001") == "Тестовая пауза"
@@ -207,26 +214,61 @@ def test_a_new_version_replaces_the_table(cat):
 ])
 def test_a_failed_refresh_keeps_the_old_tables_and_retries_next_pass(cat, answer, error):
     hc.refresh_once(NOW, ROWS)
-    cat.answer = {"action": answer, "text": NOT_MODIFIED}
+    cat.answer = {"action": answer, "text": NOT_MODIFIED, "text_en": NOT_MODIFIED}
     later = NOW + hc.REFRESH_S
     hc.refresh_once(later, ROWS)
     assert hc.action_ids(P, "0C00_8001") == ([27], True)
-    assert _meta()[P] == {"action_ver": "101", "text_ver": "202", "checked_at": NOW, "error": error}
+    assert _meta()[P] == {"action_ver": "101", "text_ver": "202", "text_en_ver": "303", "checked_at": NOW,
+                          "error": error}
     cat.requests.clear()
     hc.refresh_once(later + hc.LOOP_S, ROWS)                        # checked_at not moved: tried again
-    assert len(cat.requests) == 2
+    assert len(cat.requests) == 3
 
 
 def test_no_network_on_first_start_leaves_the_fallback(cat):
-    cat.answer = {"action": urllib.error.URLError("offline"), "text": urllib.error.URLError("offline")}
+    cat.answer = {"action": urllib.error.URLError("offline"), "text": urllib.error.URLError("offline"),
+                  "text_en": urllib.error.URLError("offline")}
     hc.refresh_once(NOW, ROWS)
     assert hc.action_ids(P, "0C00_8001") == ([], False)
-    assert _meta()[P] == {"action_ver": None, "text_ver": None, "error": "URLError"}
+    assert _meta()[P] == {"action_ver": None, "text_ver": None, "text_en_ver": None, "error": "URLError"}
     assert hc.status()[P]["error"] == "URLError"
 
 
+def test_the_english_table_comes_with_the_russian_one(cat, monkeypatch):
+    # Bambu's English original for the English panel and bot (app/api/i18n.py): the same
+    # query.php, lang=en, its own cache file and version
+    hc.refresh_once(NOW, ROWS)
+    assert hc.text(P, "0C00_8001", "en") == "Test pause" and hc.text(P, "0C00010000010001", "en") == "Test HMS"
+    assert hc.text(P, "0C00_8002", "en") is None                     # an empty intro, as in Russian
+    assert hc.text(P, "0C00_8001") == "Тестовая пауза"               # Russian stays the default
+    _restart(monkeypatch)
+    hc.load_cached(ROWS)
+    assert hc.text(P, "0C00_8001", "en") == "Test pause"
+
+
+def test_a_cache_from_before_the_english_table_fetches_only_it(cat, monkeypatch):
+    hc.refresh_once(NOW, ROWS)
+    os.remove(os.path.join(hc.CACHE_DIR, "text_en_%s.json" % P))     # what 2.1.0 left in data/hms
+    _restart(monkeypatch)
+    hc.load_cached(ROWS)
+    cat.requests.clear()
+    cat.answer = {"action": NOT_MODIFIED, "text": NOT_MODIFIED, "text_en": _texts("303", lang="en")}
+    hc.refresh_once(NOW + 60, ROWS)                                  # fresh checked_at, the new table missing
+    assert [q for _, q in cat.queries()] == [{"d": [P], "v": ["101"]}, {"lang": ["ru"], "d": [P], "v": ["202"]},
+                                             {"lang": ["en"], "d": [P]}]
+    assert hc.text(P, "0C00_8001", "en") == "Test pause" and _meta()[P]["error"] is None
+
+
+def test_a_failed_english_table_leaves_the_russian_one_working(cat):
+    cat.answer["text_en"] = _texts("303")                            # no "en" section
+    hc.refresh_once(NOW, ROWS)
+    assert hc.text(P, "0C00_8001") == "Тестовая пауза" and hc.action_ids(P, "0C00_8001") == ([27], True)
+    assert hc.text(P, "0C00_8001", "en") is None
+    assert _meta()[P]["error"] == "BadResponse" and "checked_at" not in _meta()[P]   # retried next pass
+
+
 def test_201_without_a_cached_table_is_an_error(cat):
-    cat.answer = {"action": NOT_MODIFIED, "text": _texts()}
+    cat.answer = {"action": NOT_MODIFIED, "text": _texts(), "text_en": _texts("303", lang="en")}
     hc.refresh_once(NOW, ROWS)
     assert hc.action_ids(P, "0C00_8001") == ([], False)
     assert hc.text(P, "0C00_8001") == "Тестовая пауза"
@@ -243,7 +285,7 @@ def test_write_is_atomic(cat, monkeypatch):
         raise OSError("disk full")
 
     monkeypatch.setattr(hc.os, "replace", boom)
-    cat.answer = {"action": _actions("104", []), "text": NOT_MODIFIED}
+    cat.answer = {"action": _actions("104", []), "text": NOT_MODIFIED, "text_en": NOT_MODIFIED}
     hc.refresh_once(NOW + hc.REFRESH_S, ROWS)
     with open(path, "rb") as f:
         assert f.read() == old
@@ -260,16 +302,17 @@ def test_a_broken_cache_file_is_downloaded_again(cat, monkeypatch):
     assert hc.text(P, "0C00_8001") is None and hc.action_ids(P, "0C00_8001") == ([27], True)
     cat.requests.clear()
     hc.refresh_once(NOW + 60, ROWS)                                 # fresh checked_at, but a table is missing
-    assert [q for _, q in cat.queries()] == [{"d": [P], "v": ["101"]}, {"lang": ["ru"], "d": [P]}]
+    assert [q for _, q in cat.queries()] == [{"d": [P], "v": ["101"]}, {"lang": ["ru"], "d": [P]},
+                                             {"lang": ["en"], "d": [P], "v": ["303"]}]
     assert hc.text(P, "0C00_8001") == "Тестовая пауза"
 
 
 def test_a_clock_that_went_back_rechecks(cat):
     hc.refresh_once(NOW, ROWS)
     cat.requests.clear()
-    cat.answer = {"action": NOT_MODIFIED, "text": NOT_MODIFIED}
+    cat.answer = {"action": NOT_MODIFIED, "text": NOT_MODIFIED, "text_en": NOT_MODIFIED}
     hc.refresh_once(NOW - 7 * 86400, ROWS)                          # fake-hwclock after a brownout
-    assert len(cat.requests) == 2
+    assert len(cat.requests) == 3
 
 
 def test_gzip_body_is_unpacked(cat):
@@ -331,9 +374,9 @@ def test_a_huge_record_parses_quickly_and_is_capped(cat):
 def test_only_the_prefix_lang_and_version_go_out(cat):
     serial = ROWS[0]["serial"]
     hc.refresh_once(NOW, ROWS)
-    cat.answer = {"action": NOT_MODIFIED, "text": NOT_MODIFIED}
+    cat.answer = {"action": NOT_MODIFIED, "text": NOT_MODIFIED, "text_en": NOT_MODIFIED}
     hc.refresh_once(NOW + hc.REFRESH_S, ROWS)
-    assert len(cat.requests) == 4
+    assert len(cat.requests) == 6
     for (base, q), req in zip(cat.queries(), cat.requests):
         assert base in (hc.ACTION_URL, hc.TEXT_URL) and base.startswith("https://e.bambulab.com/")
         assert set(q) <= {"d", "lang", "v"} and q["d"] == [P]
@@ -350,7 +393,8 @@ def test_prefixes_from_serial_then_model(cat):
             {"id": "b4", "kind": "bambu", "serial": None, "model": "Unknown"},
             {"id": "k1", "kind": "klipper", "serial": "ABC123", "model": "X1C"}]
     assert hc.collect_prefixes(rows) == {"b1": "Q7X", "b2": "22E", "b3": "030"}
-    cat.answer = {"action": urllib.error.URLError("x"), "text": urllib.error.URLError("x")}
+    cat.answer = {"action": urllib.error.URLError("x"), "text": urllib.error.URLError("x"),
+                  "text_en": urllib.error.URLError("x")}
     hc.refresh_once(NOW, rows)
     assert hc.prefix_for("b1", "X1C") == "Q7X"
     assert hc.prefix_for("b4", "H2S") == "093"                      # no registry prefix: model fallback
@@ -368,7 +412,7 @@ def test_a_bad_prefix_never_builds_a_url():
 def test_status_per_prefix(cat):
     hc.refresh_once(NOW, ROWS + [{"id": "bambu-2", "kind": "bambu", "serial": P + "0000TEST0002"}])
     st = hc.status()
-    assert st == {P: {"action_ver": "101", "text_ver": "202", "checked_at": NOW, "n_actions": 3,
+    assert st == {P: {"action_ver": "101", "text_ver": "202", "text_en_ver": "303", "checked_at": NOW, "n_actions": 3,
                       "n_err": 2, "n_hms": 2, "error": None, "printers": 2}}
     assert ROWS[0]["serial"] not in json.dumps(st)
 

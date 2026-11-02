@@ -2,10 +2,13 @@
 // rule as app.js initTheme), set on <html> as soon as this file runs: the app
 // and the login page both load it, so the login page shows that theme too.
 // Nothing else here reaches the page: the file is public (the login page has
-// no session), it only holds colour getters.
+// no session), it only holds colour getters and this browser's own photo for
+// «Стекло», read from this browser's storage.
 (function forgeThemeBoot() {
   var root = document.documentElement, t = null;
   try { t = localStorage.getItem("forge-ops-theme"); } catch (e) {}
+  // «Неон» is gone: whoever kept it moves to «Янтарь», silently and once (app.js initTheme, the same)
+  if (t === "neon") { t = "amber"; try { localStorage.setItem("forge-ops-theme", t); } catch (e) {} }
   if (t === null) t = window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches ? "" : "light";
   if (t) root.setAttribute("data-theme", t);
   else root.removeAttribute("data-theme");
@@ -13,16 +16,44 @@
   var meta = document.querySelector('meta[name="theme-color"]');
   var bg = getComputedStyle(root).getPropertyValue("--bg").trim();
   if (meta && bg) meta.setAttribute("content", bg);
+  applyGlassPhoto();
 })();
+// The photo this browser put under «Стекло» (👤 → «Своё фото», app.js glassPhotoPick): a JPEG
+// data URL in forge-ops-glass-photo, shown through a blob: address, so the page's style holds
+// a short link and not the picture. app.js calls it again after a pick or «Убрать фото».
+var glassPhotoUrl = null;
+function applyGlassPhoto() {
+  var root = document.documentElement, data = null, url = null;
+  try { data = localStorage.getItem("forge-ops-glass-photo"); } catch (e) {}
+  var m = data && /^data:(image\/[a-z0-9.+-]+);base64,/.exec(data);
+  if (m) {
+    try {
+      var bin = atob(data.slice(m[0].length)), bytes = new Uint8Array(bin.length);
+      for (var i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+      url = URL.createObjectURL(new Blob([bytes], { type: m[1] }));
+    } catch (e) { url = null; }
+  }
+  if (url) {
+    root.style.setProperty("--glass-photo", 'url("' + url + '")');
+    root.setAttribute("data-glass-photo", "");
+  } else {
+    root.style.removeProperty("--glass-photo");
+    root.removeAttribute("data-glass-photo");
+  }
+  if (glassPhotoUrl) URL.revokeObjectURL(glassPhotoUrl);
+  glassPhotoUrl = url;
+}
 function getStateColors() {
         var style = getComputedStyle(document.documentElement);
         return {
-          printing: style.getPropertyValue('--info').trim(),
-          finished: style.getPropertyValue('--ok').trim(),
-          paused: style.getPropertyValue('--warn').trim(),
-          error: style.getPropertyValue('--danger').trim(),
+          // a theme may give the charts their own printing and idle colours (--chart-*), and
+          // printing its own colour (--st-printing); the rest take --info and the greys
+          printing: style.getPropertyValue('--chart-printing').trim() || style.getPropertyValue('--st-printing').trim() || style.getPropertyValue('--info').trim(),
+          finished: style.getPropertyValue('--chart-ok').trim() || style.getPropertyValue('--ok').trim(),
+          paused: style.getPropertyValue('--chart-warn').trim() || style.getPropertyValue('--warn').trim(),
+          error: style.getPropertyValue('--chart-danger').trim() || style.getPropertyValue('--danger').trim(),
           cancelled: style.getPropertyValue('--gray-9').trim(),
-          idle: style.getPropertyValue('--gray-11').trim(),
+          idle: style.getPropertyValue('--chart-idle').trim() || style.getPropertyValue('--gray-11').trim(),
           offline: style.getPropertyValue('--gray-7').trim(),
           maintenance: style.getPropertyValue('--warn').trim(),
           unknown: style.getPropertyValue('--gray-11').trim()

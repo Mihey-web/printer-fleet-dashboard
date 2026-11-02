@@ -27,7 +27,7 @@ HTML = (WEB / "index.html").read_text(encoding="utf-8")
 CSS = (WEB / "styles.css").read_text(encoding="utf-8")
 LOGIN = (WEB / "login.html").read_text(encoding="utf-8")
 THEME_JS = (WEB / "theme.js").read_text(encoding="utf-8")
-THEMES = ["", "dark-classic", "light", "night", "neon", "cosmos"]
+THEMES = ["", "dark-classic", "light", "night", "cosmos", "amber", "glass"]
 
 
 def _js_function(name, src=JS):
@@ -440,13 +440,18 @@ def client(monkeypatch):
 
 
 def test_theme_js_is_public_on_its_own_route(client):
-    assert api_main.LOGIN_FILES == {"/theme.js": ("app/web/theme.js", "text/javascript", "no-cache")}
-    assert "/theme.js" in api_main.PUBLIC_EXACT
+    assert api_main.LOGIN_FILES == {"/theme.js": ("app/web/theme.js", "text/javascript", "no-cache"),
+                                    "/night-sky.jpg": ("app/web/night-sky.jpg", "image/jpeg", "public, max-age=604800")}
+    assert "/theme.js" in api_main.PUBLIC_EXACT and "/night-sky.jpg" in api_main.PUBLIC_EXACT
     assert api_main.PUBLIC_EXACT[:2] == ("/api/health", "/favicon.ico")
     assert not [p for p in api_main.PUBLIC_EXACT if p.startswith("/static")]
     r = client.get("/theme.js?v=5")
     assert r.status_code == 200 and r.headers["content-type"].split(";")[0] == "text/javascript"
     assert r.headers["cache-control"] == "no-cache" and r.content == (WEB / "theme.js").read_bytes()
+    # the night sky of «Космос» and «Стекло»: the login page shows it before any session
+    r = client.get("/night-sky.jpg")
+    assert r.status_code == 200 and r.headers["content-type"] == "image/jpeg" and r.content[:2] == b"\xff\xd8"
+    assert len(r.content) < 400_000
     # the rest stays closed to a visitor
     for path in ("/static/theme.js", "/static/app.js", "/theme.js/../static/app.js", "/static/styles.css"):
         assert client.get(path).status_code in (401, 404), path
@@ -456,7 +461,7 @@ def test_theme_js_reveals_nothing():
     # public now: only the theme boot and the colour getters, no farm, no API
     for bad in ("fetch(", "/api/", "XMLHttpRequest", "printer", "currentUser"):
         assert bad not in THEME_JS, bad
-    assert set(re.findall(r"^function (\w+)", THEME_JS, re.M)) == {"getStateColors", "getTimelineColors"}
+    assert set(re.findall(r"^function (\w+)", THEME_JS, re.M)) == {"applyGlassPhoto", "getStateColors", "getTimelineColors"}
 
 
 def test_login_page_loads_the_theme():
@@ -467,7 +472,7 @@ def test_login_page_loads_the_theme():
     assert m.group(1) == re.search(r'/static/theme\.js\?v=(\d+)', HTML).group(1)
     # after its tokens (theme.js reads --bg for the theme-color), the head still the PWA one
     assert head.index("</style>") < head.index('<script src="/theme.js')
-    assert '<meta name="theme-color" content="#0f172a">' in head
+    assert '<meta name="theme-color" content="#061723">' in head
     css = head[head.index("<style>"):head.index("</style>")]
     # no colours of its own outside the token blocks
     rules = re.sub(r'(:root|html\[data-theme="[\w-]+"\]) \{[^}]*\}', "", css)
@@ -508,8 +513,9 @@ def test_login_tokens_are_the_apps(theme):
         app.update(_decls(_block(CSS, '    html[data-theme="%s"]' % theme)))
     for name, value in login.items():
         assert value == _resolve(app, name), (theme, name)
-    # every token the page uses is declared for this theme
-    used = set(re.findall(r"var\((--[\w-]+)\)", LOGIN))
+    # every token the page uses is declared for this theme (--glass-photo is theme.js's, set
+    # on <html> when this browser has a photo of its own)
+    used = set(re.findall(r"var\((--[\w-]+)\)", LOGIN)) - {"--glass-photo"}
     assert used <= set(login), used - set(login)
 
 
@@ -517,35 +523,105 @@ BOOT_HARNESS = r"""
 var attrs = {}, meta = { content: "#0f172a", setAttribute: function (k, v) { this[k] = v; } };
 var store = %(store)s, throws = %(throws)s;
 var localStorage = { getItem: function (k) { if (throws) throw new Error("denied");
-  return Object.prototype.hasOwnProperty.call(store, k) ? store[k] : null; } };
+  return Object.prototype.hasOwnProperty.call(store, k) ? store[k] : null; },
+  setItem: function (k, v) { if (throws) throw new Error("denied"); store[k] = String(v); } };
 var window = { matchMedia: function (q) { return { matches: %(dark)s }; } };
+var props = {};
 var document = {
-  documentElement: { setAttribute: function (k, v) { attrs[k] = v; }, removeAttribute: function (k) { delete attrs[k]; } },
+  documentElement: { setAttribute: function (k, v) { attrs[k] = v; }, removeAttribute: function (k) { delete attrs[k]; },
+    style: { setProperty: function (k, v) { props[k] = v; }, removeProperty: function (k) { delete props[k]; } } },
   querySelector: function () { return meta; }
 };
 function getComputedStyle() { return { getPropertyValue: function (n) { return n === "--bg" ? " #f6f8fa " : ""; } }; }
 %(boot)s
-console.log(JSON.stringify({ theme: attrs["data-theme"] === undefined ? null : attrs["data-theme"], meta: meta.content }));
+console.log(JSON.stringify({ theme: attrs["data-theme"] === undefined ? null : attrs["data-theme"], meta: meta.content, store: store,
+  photo: "data-glass-photo" in attrs, photoUrl: props["--glass-photo"] || null }));
 """
 
 
 @pytest.mark.parametrize("store,throws,dark,want", [
     ({"forge-ops-theme": "light"}, False, True, "light"),
-    ({"forge-ops-theme": "neon"}, False, False, "neon"),
+    ({"forge-ops-theme": "amber"}, False, False, "amber"),
+    ({"forge-ops-theme": "neon"}, False, False, "amber"),     # «Неон» is gone: moved to «Янтарь»
     ({"forge-ops-theme": ""}, False, False, None),           # «Океан» chosen: no attribute
     ({}, False, True, None),                                  # never chosen: the system's dark → «Океан»
     ({}, False, False, "light"),                              # … or its light
-    ({"forge-ops-theme": "neon"}, True, False, "light"),      # no storage: the system's choice
+    ({"forge-ops-theme": "amber"}, True, False, "light"),     # no storage: the system's choice
 ])
 def test_theme_boot(store, throws, dark, want):
     boot = THEME_JS[THEME_JS.index("(function forgeThemeBoot() {"):THEME_JS.index("function getStateColors")]
     out = _node(BOOT_HARNESS % {"store": json.dumps(store), "throws": json.dumps(throws),
                                 "dark": json.dumps(dark), "boot": boot})
-    assert out == {"theme": want, "meta": "#f6f8fa"}
+    assert {k: out[k] for k in ("theme", "meta")} == {"theme": want, "meta": "#f6f8fa"}
+    if not throws and "forge-ops-theme" in store:
+        # what is kept is what is shown: a «Неон» left behind is rewritten once, as «Янтарь»
+        assert out["store"]["forge-ops-theme"] == (want or "")
     # the same rule and key as the app's own initTheme
     init = _js_function("initTheme")
     assert 'window.matchMedia("(prefers-color-scheme: dark)").matches' in init and 'applyTheme("light")' in init
     assert 'const THEME_STORAGE_KEY = "forge-ops-theme";' in JS
+
+
+
+@pytest.mark.parametrize("photo,want", [
+    ("data:image/jpeg;base64,/9j/4AAQ", True),     # a photo of this browser's own: shown through a blob: link
+    ("", False), (None, False),
+    ("javascript:alert(1)", False),               # anything but a base64 picture is not shown
+    ("data:image/jpeg;base64,%%%", False),         # a broken one neither
+])
+def test_theme_boot_shows_this_browsers_photo(photo, want):
+    store = {"forge-ops-theme": "glass"}
+    if photo is not None:
+        store["forge-ops-glass-photo"] = photo
+    boot = THEME_JS[THEME_JS.index("(function forgeThemeBoot() {"):THEME_JS.index("function getStateColors")]
+    out = _node(BOOT_HARNESS % {"store": json.dumps(store), "throws": "false", "dark": "true", "boot": boot})
+    assert out["theme"] == "glass" and out["photo"] is want
+    if want:
+        assert re.fullmatch(r'url\("blob:[^"]+"\)', out["photoUrl"])
+    else:
+        assert out["photoUrl"] is None
+
+
+def test_glass_photo_pick_in_the_panel():
+    # 👤 → «Оформление»: the row is in «Стекло» only, the picture stays in this browser
+    row = HTML[HTML.index('id="glassPhotoRow"'):]
+    row = row[:row.index('<input type="file"')]
+    assert 'id="glassPhotoPick"' in row and 'id="glassPhotoClear"' in row
+    assert '<input type="file" id="glassPhotoInput" accept="image/*" hidden />' in HTML
+    assert 'const GLASS_PHOTO_KEY = "forge-ops-glass-photo";' in JS
+    sync = _js_function("glassPhotoSync")
+    assert 'getAttribute("data-theme") !== "glass"' in sync
+    assert "glassPhotoSync();" in _js_function("applyTheme")
+    pick = _js_function("glassPhotoPick")
+    assert "[[1920, 0.82], [1280, 0.72]]" in pick and "fetch(" not in pick and "/api/" not in pick
+    # the photo is drawn under the glass with a veil, and only in «Стекло»
+    assert 'html[data-theme="glass"][data-glass-photo] body::before' in CSS
+    assert "var(--glass-veil), var(--glass-veil)), var(--glass-photo)" in CSS
+    assert 'html[data-theme="glass"][data-glass-photo] body' in LOGIN
+
+
+INIT_HARNESS = r"""
+var store = %(store)s, applied = [];
+var localStorage = { getItem: function (k) { return Object.prototype.hasOwnProperty.call(store, k) ? store[k] : null; },
+  setItem: function (k, v) { store[k] = String(v); }, removeItem: function (k) { delete store[k]; } };
+var window = { matchMedia: function () { return { matches: true }; } };
+const THEME_STORAGE_KEY = "forge-ops-theme";
+function applyTheme(v) { applied.push(v); }
+%(fn)s
+initTheme();
+console.log(JSON.stringify({ applied: applied, store: store }));
+"""
+
+
+@pytest.mark.parametrize("stored,want", [("neon", "amber"), ("amber", "amber"), ("glass", "glass"), ("", "")])
+def test_init_theme_moves_neon_to_amber(stored, want):
+    # «Неон» is gone: a browser that kept it opens in «Янтарь», and keeps «Янтарь» from now on
+    out = _node(INIT_HARNESS % {"store": json.dumps({"forge-ops-theme": stored}), "fn": _js_function("initTheme")})
+    assert out["applied"] == [want]
+    assert out["store"]["forge-ops-theme"] == want
+    # nothing of the old theme is left to choose or to draw
+    assert 'data-theme="neon"' not in HTML and 'data-theme="neon"' not in CSS and 'data-theme="neon"' not in LOGIN
+    assert '"Неон"' not in (WEB / "i18n" / "en.js").read_text(encoding="utf-8")
 
 
 def test_cache_bust_bumped():
