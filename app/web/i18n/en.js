@@ -135,6 +135,7 @@ I18N.register("en", {
   "printer: некорректный id принтера": "printer: invalid printer id",
   "printer_capability: ожидается {id принтера: true|false}": "printer_capability: expected {printer id: true|false}",
   "printer_capability: ожидается": "printer_capability: expected",
+  "Документация": "Documentation",
   "Маркер позиционирования печатной пластины не обнаружен. Пожалуйста, проверьте, правильно ли расположена печатная пластина.": "The print plate marker was not detected. Please confirm the print plate is correctly positioned on the heatbed.",
   "printer_light_disabled: ожидается список id принтеров":"printer_light_disabled: expected a list of printer ids",
   "t° и скорость": "t° and speed",

@@ -3934,6 +3934,8 @@
     .me-who { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-dim); }
     .me-who b, .me-who .me-login { color: var(--text); }
     .me-note { font-size: 0.72rem; color: var(--text-muted); line-height: 1.4; }
+    .me-links a { color: inherit; text-decoration: none; }
+    .me-links a:hover, .me-links a:focus-visible { color: var(--text); text-decoration: underline; }
     .me-panel .theme-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; }
     .me-panel .theme-seg-btn { min-height: 38px; border-radius: 10px; font-size: 0.74rem; }
     .me-panel .text-scale-row { flex: 1 1 160px; padding: 0; }

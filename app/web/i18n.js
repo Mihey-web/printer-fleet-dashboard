@@ -597,11 +597,21 @@
       if (title && hasCyr(title.textContent)) title.textContent = t(title.textContent);
     }
     syncSwitchers();
+    relink(lang);
     if (!first) {
       retitle();
       // what draws itself (the timeline's canvas) follows on its next draw; a resize asks for it
       try { window.dispatchEvent(new Event("resize")); } catch (e) {}
       try { document.dispatchEvent(new CustomEvent("forge-lang", { detail: { lang: lang } })); } catch (e) {}
+    }
+  }
+
+  // a link with a page per language (👤 → «Документация»): data-href-<lang>, else the source's
+  function relink(lang) {
+    var links = document.querySelectorAll("a[data-href-" + SOURCE + "]");
+    for (var i = 0; i < links.length; i++) {
+      var href = links[i].getAttribute("data-href-" + lang) || links[i].getAttribute("data-href-" + SOURCE);
+      if (links[i].getAttribute("href") !== href) links[i].setAttribute("href", href);
     }
   }
 
@@ -688,6 +698,7 @@
     var ready = function () {
       mountCss();
       mountSwitchers();
+      relink(current);
       refresh();
     };
     if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", ready);

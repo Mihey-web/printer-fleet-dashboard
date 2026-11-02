@@ -29,7 +29,8 @@ The panel speaks English, and the project has a documentation site.
   Linux / Raspberry Pi, Windows and Docker, first run, adding each printer
   brand, every screen, Telegram and proxy, users and security,
   configuration, FAQ. Built and published to GitHub Pages by
-  `.github/workflows/docs.yml`.
+  `.github/workflows/docs.yml`. The 👤 menu links to it (in the panel's
+  language) and to the project, next to the version.
 
 ### Fixed
 - One NaN or Infinity in one printer's telemetry no longer breaks

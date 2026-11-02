@@ -256,6 +256,30 @@ console.log(JSON.stringify(seen));
     assert out == ["Kuznitsa", "Кузница", "Kuznitsa", "Кузница"]
 
 
+def test_docs_link_follows_the_language():
+    # 👤 → «Документация» opens the docs site in the panel's language
+    docs = re.search(r'<a href="([^"]+)" data-href-ru="([^"]+)" data-href-en="([^"]+)"[^>]*>Документация</a>', HTML)
+    assert docs and docs.group(1) == docs.group(2) and docs.group(2).endswith("/ru/"), "the docs link in 👤"
+    assert 'href="https://github.com/Mihey-web/printer-fleet-dashboard"' in HTML
+    out = _node("""
+globalThis.Document = function () {};
+globalThis.document = new Document();
+var a = { attrs: {"data-href-ru": "/ru/", "data-href-en": "/", href: "/ru/"},
+          getAttribute: function (n) { return n in this.attrs ? this.attrs[n] : null; },
+          setAttribute: function (n, v) { this.attrs[n] = v; } };
+document.documentElement = { setAttribute: function () {} };
+document.querySelector = function () { return null; };
+document.querySelectorAll = function (s) { return s === "a[data-href-ru]" ? [a] : []; };
+document.createTreeWalker = function () { return { nextNode: function () { return null; } }; };
+""" + LIB + """
+var seen = [];
+I18N.set("en"); seen.push(a.attrs.href);
+I18N.set("ru"); seen.push(a.attrs.href);
+console.log(JSON.stringify(seen));
+""")
+    assert out == ["/", "/ru/"]
+
+
 def test_live_texts_are_bambus_english():
     from app.vendor.pybambu.utils import get_HMS_error_text, get_print_error_text
     hms_ru = get_HMS_error_text("0500_0100_0003_0004", "X1C", "ru")
