@@ -222,7 +222,7 @@ This project is dual-licensed:
 - **Commercial:** a separate license is available for closed-source / SaaS use —
   see [`COMMERCIAL-LICENSE.md`](./COMMERCIAL-LICENSE.md).
 
-Contributions are accepted under the CLA in [`CONTRIBUTING.md`](./CONTRIBUTING.md).
+Contributions are accepted under the CLA in [`CONTRIBUTING.md`](./.github/CONTRIBUTING.md).
 
 ### Third-party code
 

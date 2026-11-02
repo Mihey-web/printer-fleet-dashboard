@@ -102,7 +102,7 @@ def test_get_rejects_unknown_key(db):
 
 
 def test_proxy_checker_set_proxies_drops_removed_state():
-    from proxy_checker import ProxyChecker
+    from app.services.proxy_checker import ProxyChecker
     pc = ProxyChecker(["http://a:1@h1:1", "http://a:1@h2:2"], 600)
     pc._update({"http://a:1@h1:1": 0.1, "http://a:1@h2:2": 0.2})
     assert pc.best_proxy == "http://a:1@h1:1"

@@ -6,17 +6,20 @@ ffmpeg_binary = shutil.which('ffmpeg')
 binaries = [(ffmpeg_binary, '.')] if ffmpeg_binary else []
 
 
+# Paths are relative to this file (deploy/): build from the repo root with
+#   python -m PyInstaller deploy/main.spec
 a = Analysis(
-    ['main.py'],
-    pathex=[],
+    ['../main.py'],
+    pathex=['..'],
     binaries=binaries,
-    datas=[('config.py', '.'), ('creality_client.py', '.'), ('klipper_client.py', '.'), ('telegram_bot_async.py', '.'),
-           ('app/web/styles.css', 'app/web'), ('app/web/theme.js', 'app/web'), ('app/web/app.js', 'app/web'),
+    datas=[('../config.py', '.'),
+           # the whole web panel: pages, scripts, styles, dictionaries, PWA, printer images
+           ('../app/web', 'app/web'),
            # Vendored pybambu data, found next to the package's __file__ (see app/vendor/pybambu/VENDORED.md).
-           ('app/vendor/pybambu/certs', 'app/vendor/pybambu/certs'),
-           ('app/vendor/pybambu/hms_error_text', 'app/vendor/pybambu/hms_error_text'),
-           ('app/vendor/pybambu/filaments.json', 'app/vendor/pybambu'),
-           ('app/vendor/pybambu/LICENSE', 'app/vendor/pybambu')],
+           ('../app/vendor/pybambu/certs', 'app/vendor/pybambu/certs'),
+           ('../app/vendor/pybambu/hms_error_text', 'app/vendor/pybambu/hms_error_text'),
+           ('../app/vendor/pybambu/filaments.json', 'app/vendor/pybambu'),
+           ('../app/vendor/pybambu/LICENSE', 'app/vendor/pybambu')],
     hiddenimports=['aiogram', 'websocket', 'app.vendor.pybambu'],
     hookspath=[],
     hooksconfig={},

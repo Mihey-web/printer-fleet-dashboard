@@ -20,7 +20,7 @@ from app.services.normalizer import normalize_bambu, normalize_ws_dict
 from app.services.state_store import StateStore, snapshot_reason
 from app.services.ams_store import AmsStore
 from app.services import ams_autodry_engine, job_journal, notification_tracker, printer_commands, settings_service, state_store
-from proxy_checker import RedactingFilter
+from app.services.proxy_checker import RedactingFilter
 import config
 
 # The vendored pybambu (logger app.vendor.pybambu) and paho: ERROR only, rate-limited.

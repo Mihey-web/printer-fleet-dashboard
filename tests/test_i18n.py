@@ -1,4 +1,4 @@
-"""The panel's languages (app/web/i18n.js, app/web/i18n/en.js, app/api/i18n.py; I18N_REPORT.md).
+"""The panel's languages (app/web/i18n.js, app/web/i18n/en.js, app/api/i18n.py; docs/dev/I18N_REPORT.md).
 
 * coverage: every Cyrillic piece of app.js, i18n.js, index.html, login.html, the PWA
   manifest and the server texts that reach the screen (scripts/i18n_extract.py) is in

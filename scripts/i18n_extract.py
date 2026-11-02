@@ -1,4 +1,4 @@
-"""Collect every Cyrillic string the panel can show (i18n coverage, I18N_REPORT.md).
+"""Collect every Cyrillic string the panel can show (i18n coverage, docs/dev/I18N_REPORT.md).
 
 The panel is translated on the client, keyed by the Russian string (app/web/i18n.js).
 This script finds the Russian strings by parsing the sources, not by eye:

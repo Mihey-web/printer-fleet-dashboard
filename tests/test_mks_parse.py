@@ -6,7 +6,7 @@ Regression: a reachable-but-garbled printer must be surfaced as offline
 """
 import pytest
 
-from mks_wifi_client import MksWifiClient
+from app.clients.mks_wifi_client import MksWifiClient
 
 
 def _client():

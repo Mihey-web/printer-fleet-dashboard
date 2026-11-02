@@ -5,7 +5,7 @@ import threading
 
 import main
 from app.domain.models import PrinterStatus, PrinterKind, PrinterState
-from telegram_bot_async import TelegramReporter
+from app.services.telegram_bot_async import TelegramReporter
 
 
 class _Store:

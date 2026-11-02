@@ -29,7 +29,7 @@ with a short description of how you intend to use it.
 ## Contributions
 
 Contributions are accepted under the Contributor License Agreement in
-[CONTRIBUTING.md](https://github.com/mihey-web/printer-fleet-dashboard/blob/main/CONTRIBUTING.md):
+[CONTRIBUTING.md](https://github.com/mihey-web/printer-fleet-dashboard/blob/main/.github/CONTRIBUTING.md):
 contributors grant the copyright holder a license that keeps the dual-licensing possible.
 
 ## Third-party code

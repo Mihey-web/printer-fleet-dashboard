@@ -31,7 +31,7 @@
 ## Вклад в проект
 
 Изменения принимаются на условиях соглашения с участниками (CLA) из
-[CONTRIBUTING.md](https://github.com/mihey-web/printer-fleet-dashboard/blob/main/CONTRIBUTING.md):
+[CONTRIBUTING.md](https://github.com/mihey-web/printer-fleet-dashboard/blob/main/.github/CONTRIBUTING.md):
 участник даёт правообладателю лицензию, которая сохраняет возможность двойного лицензирования.
 
 ## Сторонний код

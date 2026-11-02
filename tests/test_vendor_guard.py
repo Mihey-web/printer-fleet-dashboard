@@ -227,7 +227,7 @@ def test_requirements_have_no_pypi_pybambu():
 def _spec_analysis_kwargs() -> dict:
     import ast
 
-    tree = ast.parse((ROOT / "main.spec").read_text(encoding="utf-8"))
+    tree = ast.parse((ROOT / "deploy" / "main.spec").read_text(encoding="utf-8"))
     for node in ast.walk(tree):
         if isinstance(node, ast.Call) and getattr(node.func, "id", None) == "Analysis":
             return {kw.arg: kw.value for kw in node.keywords}
@@ -244,8 +244,8 @@ def test_pyinstaller_spec_bundles_vendored_pybambu():
     datas = set(ast.literal_eval(kwargs["datas"]))
     # The lib finds these next to its own __file__ (sys._MEIPASS/app/vendor/pybambu/...).
     assert {
-        ("app/vendor/pybambu/certs", "app/vendor/pybambu/certs"),
-        ("app/vendor/pybambu/hms_error_text", "app/vendor/pybambu/hms_error_text"),
-        ("app/vendor/pybambu/filaments.json", "app/vendor/pybambu"),
-        ("app/vendor/pybambu/LICENSE", "app/vendor/pybambu"),
+        ("../app/vendor/pybambu/certs", "app/vendor/pybambu/certs"),
+        ("../app/vendor/pybambu/hms_error_text", "app/vendor/pybambu/hms_error_text"),
+        ("../app/vendor/pybambu/filaments.json", "app/vendor/pybambu"),
+        ("../app/vendor/pybambu/LICENSE", "app/vendor/pybambu"),
     } <= datas

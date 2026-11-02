@@ -9,8 +9,8 @@ import time
 
 import pytest
 
-from klipper_client import KlipperClient
-from creality_client import CrealityK1Client
+from app.clients.klipper_client import KlipperClient
+from app.clients.creality_client import CrealityK1Client
 
 
 def test_klipper_parse_and_get_data_copy():
@@ -279,7 +279,7 @@ def test_creality_unknown_numeric_state_is_not_idle():
 
 # --- Klipper: light pin discovery, acknowledged commands (run_action) -------------
 
-from klipper_client import pick_light_pin
+from app.clients.klipper_client import pick_light_pin
 
 
 @pytest.mark.parametrize("objects,want", [
@@ -574,7 +574,7 @@ def test_creality_set_frames_cut_short_say_how_many_went_out():
 
 # --- Klipper: klippy host state, the host watchdog (notifications spec step 6) -----
 
-import klipper_client
+from app.clients import klipper_client
 
 
 def _notice(k, method):

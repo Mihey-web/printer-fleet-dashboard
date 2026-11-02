@@ -29,7 +29,7 @@ Please include a short description of your intended use so an appropriate licens
 can be offered.
 
 The copyright holder retains all rights necessary to offer the software under
-these alternative terms (see [`CONTRIBUTING.md`](./CONTRIBUTING.md) for how
+these alternative terms (see [`CONTRIBUTING.md`](./.github/CONTRIBUTING.md) for how
 contributions are licensed to make this possible).
 
 Third-party code bundled with the project is not part of either grant: the

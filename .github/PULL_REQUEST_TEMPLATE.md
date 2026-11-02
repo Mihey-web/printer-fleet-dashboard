@@ -21,6 +21,6 @@
 
 ## Checklist
 
-- [ ] I read [`CONTRIBUTING.md`](../CONTRIBUTING.md) and agree to the CLA
+- [ ] I read [`CONTRIBUTING.md`](CONTRIBUTING.md) and agree to the CLA
 - [ ] No secrets, credentials, personal IPs/hostnames, or real fleet data in the diff
 - [ ] Docs / `CHANGELOG.md` updated if behavior changed

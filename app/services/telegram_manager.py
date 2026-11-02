@@ -26,7 +26,7 @@ _restarting = False
 
 
 def _make_reporter():
-    from telegram_bot_async import TelegramReporter
+    from app.services.telegram_bot_async import TelegramReporter
 
     s = settings_service.get_all()
     reporter = TelegramReporter(
@@ -73,7 +73,7 @@ def init(status_getter: Callable[[], str]) -> None:
 
     if s["proxy_list"]:
         try:
-            from proxy_checker import ProxyChecker
+            from app.services.proxy_checker import ProxyChecker
             _proxy_checker = ProxyChecker(s["proxy_list"], s["proxy_check_interval"])
             _proxy_checker.start()
         except Exception as e:
@@ -129,7 +129,7 @@ def apply_settings(changed_keys) -> Dict[str, Any]:
     if changed & {"proxy_list", "proxy_check_interval"}:
         if s["proxy_list"] and _proxy_checker is None:
             try:
-                from proxy_checker import ProxyChecker
+                from app.services.proxy_checker import ProxyChecker
                 _proxy_checker = ProxyChecker(s["proxy_list"], s["proxy_check_interval"])
                 _proxy_checker.start()
             except Exception as e:

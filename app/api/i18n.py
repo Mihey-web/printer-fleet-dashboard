@@ -1,4 +1,4 @@
-"""The panel's languages on the server side (app/web/i18n.js, I18N_REPORT.md).
+"""The panel's languages on the server side (app/web/i18n.js, docs/dev/I18N_REPORT.md).
 
 * GET /i18n.js — public, like /theme.js: the runtime (app/web/i18n.js) and every
   dictionary of app/web/i18n/*.js in one script, so the login page and the app

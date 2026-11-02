@@ -1410,8 +1410,8 @@ def test_ws_klipper_ready_and_startup_are_not_errors():
 def test_ws_klipper_startup_with_stale_statuses_is_not_printing():
     # klippy shut down mid-print (MCU lost, the last print_stats said printing), then
     # «Перезапуск прошивки»: it hangs in startup while the statuses are 2 min old.
-    import klipper_client
-    from klipper_client import KlipperClient
+    from app.clients import klipper_client
+    from app.clients.klipper_client import KlipperClient
 
     k = KlipperClient("host", 7125, "Varan")
     k.parse_status({"print_stats": {"state": "printing"}, "display_status": {"progress": 0.47},
@@ -1439,7 +1439,7 @@ def test_ws_klipper_print_error():
 def test_ws_klipper_job_name_is_never_the_error_message():
     # print_stats.message / display_status.message used to land in data["message"], a
     # safe_job_name fallback: an error text became the job's name.
-    from klipper_client import KlipperClient
+    from app.clients.klipper_client import KlipperClient
 
     k = KlipperClient("host", 7125, "Ghost 6")
     k.parse_status({"print_stats": {"state": "error", "filename": "", "message": "Move out of range"},

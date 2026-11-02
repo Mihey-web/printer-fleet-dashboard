@@ -1,4 +1,4 @@
-"""Regression tests for the findings of REVIEW_2026-11.md.
+"""Regression tests for the findings of docs/dev/REVIEW_2026-11.md.
 
 Each test failed before its fix; the finding's number in the report is in the
 test's name (f1 = finding 1, …).

@@ -1,6 +1,6 @@
 import logging
 
-from klipper_client import KlipperClient
+from app.clients.klipper_client import KlipperClient
 
 logger = logging.getLogger(__name__)
 

@@ -1,6 +1,6 @@
 import logging
 
-from mks_wifi_client import MksWifiClient
+from app.clients.mks_wifi_client import MksWifiClient
 
 logger = logging.getLogger(__name__)
 

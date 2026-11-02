@@ -490,7 +490,7 @@ def _validate_settings(values: dict):
             raise HTTPException(status_code=400, detail="proxy_list must be a list of URLs")
         if len(v) != len(set(v)):
             raise HTTPException(status_code=400, detail="proxy_list contains duplicates")
-        from proxy_checker import _split_credentials, mask_proxy
+        from app.services.proxy_checker import _split_credentials, mask_proxy
         for p in v:
             # Parse only scheme://host:port: urlparse raises (500 + traceback with
             # the password in the journal) or misreads the userinfo when the

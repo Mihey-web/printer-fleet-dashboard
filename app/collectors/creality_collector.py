@@ -1,6 +1,6 @@
 import logging
 
-from creality_client import CrealityK1Client
+from app.clients.creality_client import CrealityK1Client
 
 logger = logging.getLogger(__name__)
 

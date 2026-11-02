@@ -4,7 +4,7 @@ import logging
 import time
 from typing import Callable, Optional, Dict
 
-from proxy_checker import mask_proxy
+from app.services.proxy_checker import mask_proxy
 
 logger = logging.getLogger(__name__)
 

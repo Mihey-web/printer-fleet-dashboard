@@ -640,7 +640,7 @@ def test_cancel_text_top_text_and_pruned_state():
 def test_cancel_text_of_a_creality_row():
     # a K1C's state 4 after a cancel (creality_client STATE_CODES) reaches the card as
     # cancelled: no cancel echo (Bambu's pe codes) to time it, the progress it stopped at
-    from creality_client import CrealityK1Client
+    from app.clients.creality_client import CrealityK1Client
     from app.services.normalizer import normalize_ws_dict
 
     def row(*frames):

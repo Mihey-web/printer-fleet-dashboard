@@ -9,8 +9,8 @@ from pathlib import Path
 
 import pytest
 
-import proxy_checker
-from proxy_checker import ProxyChecker, mask_proxy
+from app.services import proxy_checker
+from app.services.proxy_checker import ProxyChecker, mask_proxy
 
 SECRET = "s3cr3t-pa55"
 URL_A = "http://bot_user:%s@192.0.2.10:8080" % SECRET
@@ -54,7 +54,7 @@ def test_mask_proxy_hides_credentials_keeps_endpoint():
 
 
 def test_best_proxy_change_and_all_failed_logs_are_masked(caplog):
-    caplog.set_level(logging.DEBUG, logger="proxy_checker")
+    caplog.set_level(logging.DEBUG, logger="app.services.proxy_checker")
     pc = ProxyChecker([URL_A, URL_B])
     pc._update({URL_A: 0.5, URL_B: 0.9})   # best changes None -> A
     pc._update({URL_A: None, URL_B: 0.4})  # best changes A -> B
@@ -65,7 +65,7 @@ def test_best_proxy_change_and_all_failed_logs_are_masked(caplog):
 
 
 def test_check_one_failure_and_success_logs_are_masked(caplog, monkeypatch):
-    caplog.set_level(logging.DEBUG, logger="proxy_checker")
+    caplog.set_level(logging.DEBUG, logger="app.services.proxy_checker")
 
     class _Boom:
         def __init__(self, *a, **k):
@@ -180,7 +180,7 @@ def test_redacting_filter_never_raises_or_drops():
 
 
 def test_periodic_check_failure_logs_no_password_no_traceback(caplog, monkeypatch):
-    caplog.set_level(logging.DEBUG, logger="proxy_checker")
+    caplog.set_level(logging.DEBUG, logger="app.services.proxy_checker")
     pc = ProxyChecker([URL_A])
 
     async def boom():
@@ -223,9 +223,9 @@ def test_checker_thread_survives_unprintable_errors_and_non_str_proxies(monkeypa
 def test_main_installs_the_filter_on_its_own_root_handler():
     # Behavioural, in a fresh interpreter (empty root logger, as in production).
     import subprocess
-    code = ("import logging, main, proxy_checker; h = logging.getLogger().handlers; "
+    code = ("import logging, main; from app.services import proxy_checker; h = logging.getLogger().handlers; "
             "print(len(h), any(isinstance(f, proxy_checker.RedactingFilter) for x in h for f in x.filters))")
-    out = subprocess.run([sys.executable, "-c", code], cwd=Path(proxy_checker.__file__).parent,
+    out = subprocess.run([sys.executable, "-c", code], cwd=Path(__file__).resolve().parents[1],
                          capture_output=True, text=True, timeout=120)
     assert out.stdout.split()[-2:] == ["1", "True"], out.stdout + out.stderr
 
@@ -425,7 +425,7 @@ def test_registry_keeps_a_refreshed_proxy_and_a_large_current_batch():
 
 
 def test_periodic_check_masks_fragments_and_unlisted_urls(caplog, monkeypatch):
-    caplog.set_level(logging.DEBUG, logger="proxy_checker")
+    caplog.set_level(logging.DEBUG, logger="app.services.proxy_checker")
     pc = ProxyChecker(["http://bot_user:Zq9xK/fakePW7@192.0.2.90:8080"])
     msgs = iter(["invalid literal for int() with base 10: 'Zq9xK'",
                  "Cannot connect to http://other:Unlisted-9pw@192.0.2.91:1"])
