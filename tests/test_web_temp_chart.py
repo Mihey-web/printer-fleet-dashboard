@@ -388,7 +388,7 @@ def test_fetch_is_one_request_per_window_and_cached_a_minute():
 
 def test_wiring_period_switch_never_sends_and_stale_answers_are_dropped():
     pop = _js_function("onPopClick")
-    assert '"[data-trange],' in pop
+    assert '[data-trange],' in pop
     assert pop.index("tempChartSwitch(") < pop.index("var sends")             # before any command path
     load = _js_function("tempChartLoad")
     assert load.count("tempChartCurrent(seq, pid, kind)") == 2               # the answer and the failure

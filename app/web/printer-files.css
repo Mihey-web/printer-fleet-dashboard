@@ -1,0 +1,90 @@
+/* «Файлы на принтере» (printer-files.js): the shell is preview.css's dialog. */
+.pf-dialog { width:min(600px,calc(100vw - 32px)); }
+.pf-back { flex:none; width:40px; height:40px; padding:0; border:0; border-radius:9px; color:var(--text); background:var(--bg-soft); font-size:24px; cursor:pointer; }
+.pf-body { padding:14px 18px 20px; }
+.pf-list { list-style:none; margin:0; padding:0; display:grid; gap:6px; }
+.pf-row { width:100%; display:flex; align-items:center; gap:12px; padding:8px 10px; border:1px solid var(--line); border-radius:var(--radius-sm); background:var(--bg-soft); color:var(--text); text-align:left; cursor:pointer; font:inherit; }
+.pf-row:hover, .pf-row:focus-visible { border-color:var(--line-strong); background:var(--bg-panel); }
+.pf-thumb { flex:none; width:56px; height:56px; border-radius:8px; background:var(--bg-panel); display:grid; place-items:center; overflow:hidden; }
+.pf-thumb img { width:100%; height:100%; object-fit:contain; }
+.pf-copy { min-width:0; flex:1; display:grid; gap:3px; }
+.pf-name { font-size:14px; font-weight:600; overflow-wrap:anywhere; }
+.pf-meta { font-size:12px; color:var(--text-dim); }
+.pf-demo { font-weight:400; color:var(--text-muted); font-size:11px; border:1px solid var(--line-strong); border-radius:6px; padding:0 5px; }
+.pf-go { flex:none; color:var(--text-muted); font-size:20px; }
+.pf-empty, .pf-hint { color:var(--text-dim); font-size:13px; }
+.pf-hint { margin:10px 0 0; }
+.pf-note { color:var(--text-dim); font-size:12px; margin:0 0 10px; }
+.pf-error { color:var(--danger); font-size:13px; margin:12px 0 0; }
+.pf-ok { color:var(--ok); font-size:13px; margin:12px 0 0; }
+.pf-stage { height:min(30dvh,260px); padding:16px; display:grid; place-items:center; background:radial-gradient(ellipse at center,var(--bg-panel),var(--bg-elev)); }
+.pf-stage img { width:100%; height:100%; min-height:0; object-fit:contain; }
+.pf-nopic { color:var(--text-muted); font-size:13px; }
+.pf-title { font-size:17px; line-height:1.35; margin:0 0 8px; overflow-wrap:anywhere; }
+.pf-facts { color:var(--text-dim); font-size:13px; margin:0 0 12px; }
+.pf-body h3 { font-size:12px; text-transform:uppercase; letter-spacing:.04em; color:var(--text-muted); margin:14px 0 6px; }
+.pf-plates { display:flex; flex-wrap:wrap; gap:6px; margin:0 0 10px; }
+.pf-plates button { padding:6px 12px; border:1px solid var(--line-strong); border-radius:999px; background:var(--bg-soft); color:var(--text); font:inherit; font-size:13px; cursor:pointer; }
+.pf-plates button.on { background:var(--info-soft); border-color:var(--info); }
+.pf-fils { list-style:none; margin:0; padding:0; display:grid; gap:6px; }
+.pf-fil { display:flex; align-items:center; gap:10px; }
+.pf-fil .pj-swatch { flex:none; width:18px; height:18px; border-radius:50%; border:1px solid var(--line-strong); background:var(--bg-panel); }
+.pf-fil-name { flex:1; min-width:0; display:grid; font-size:13px; }
+.pf-fil-name small { color:var(--text-dim); }
+.pf-fil select { flex:none; max-width:55%; padding:6px 8px; border:1px solid var(--line-strong); border-radius:8px; background:var(--bg-panel); color:var(--text); font:inherit; font-size:13px; }
+.pf-opt { display:flex; align-items:center; gap:8px; margin:10px 0 0; font-size:14px; cursor:pointer; }
+.pf-opt input { width:18px; height:18px; }
+.pf-actions { margin-top:16px; }
+.pf-print, .pf-secondary { width:100%; min-height:44px; padding:10px 14px; border:1px solid var(--ok); border-radius:var(--radius-sm); background:var(--ok-soft); color:var(--text); font:inherit; font-size:15px; font-weight:600; cursor:pointer; }
+.pf-secondary { width:auto; margin-top:12px; border-color:var(--line-strong); background:var(--bg-soft); font-weight:400; }
+.pf-print.armed { border-color:var(--warn); background:var(--warn-soft); }
+.pf-delete { width:100%; }
+.pf-delete.armed { border-color:var(--danger); background:var(--warn-soft); }
+.pf-print:disabled { opacity:.5; cursor:not-allowed; }
+/* «Сервис» (printer-service.js): one button per macro, the running one's console lines */
+.ps-list { list-style:none; margin:12px 0 0; padding:0; display:grid; gap:8px; }
+.ps-btn { width:100%; min-height:44px; display:grid; gap:2px; text-align:left; padding:10px 14px; border:1px solid var(--line-strong); border-radius:var(--radius-sm); background:var(--bg-soft); color:var(--text); font:inherit; cursor:pointer; }
+.ps-btn.armed { border-color:var(--warn); background:var(--warn-soft); }
+.ps-btn:disabled { opacity:.5; cursor:not-allowed; }
+.ps-name { font-size:15px; font-weight:600; }
+.ps-sub { font-size:13px; opacity:.75; }
+.ps-job { display:grid; gap:4px; margin:0 0 4px; padding:10px 12px; border:1px solid var(--line-strong); border-radius:var(--radius-sm); }
+.ps-job.ps-failed { border-color:var(--danger); }
+.ps-lines { margin:0; padding-left:18px; font-size:12px; overflow-wrap:anywhere; }
+@media(max-width:600px) { .pf-dialog { width:100%; } .pf-fil select { max-width:60%; } }
+/* «Общие файлы по моделям» (file-pool.js, Админ → Парк) */
+.fp-group { border-top:1px solid var(--line); padding:12px 0; }
+.fp-head { display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap; }
+.fp-head small { display:block; color:var(--text-dim); font-size:12px; margin-top:2px; }
+.fp-btns { display:flex; gap:6px; flex-wrap:wrap; }
+.fp-light { padding:6px 12px; font-size:13px; }
+.fp-upload { cursor:pointer; }
+.fp-note { color:var(--text-dim); font-size:12px; margin:8px 0 0; }
+.fp-err { color:var(--danger); font-size:12px; margin:8px 0 0; display:block; }
+.fp-ok { color:var(--ok); font-size:12px; margin:8px 0 0; }
+.fp-table { width:100%; border-collapse:collapse; font-size:13px; margin-top:8px; }
+.fp-table th { text-align:left; color:var(--text-muted); font-weight:500; font-size:12px; padding:4px 6px; }
+.fp-table td { padding:6px; border-top:1px solid var(--line); vertical-align:top; }
+.fp-name { overflow-wrap:anywhere; }
+.fp-pick { width:24px; }
+.fp-why { display:block; color:var(--text-muted); font-size:11px; margin-top:2px; }
+.fp-pick input { width:16px; height:16px; }
+.fp-plan details summary { cursor:pointer; color:var(--text-dim); font-size:12px; }
+.fp-size { white-space:nowrap; color:var(--text-dim); }
+.fp-tag { font-size:11px; border:1px solid var(--info); border-radius:6px; padding:0 5px; color:var(--text-dim); }
+.fp-tag.fp-dim { border-color:var(--line-strong); color:var(--text-muted); }
+.fp-chip { display:inline-block; font-size:11px; padding:1px 6px; margin:0 4px 4px 0; border-radius:999px; border:1px dashed var(--line-strong); color:var(--text-muted); }
+.fp-chip.on { border:1px solid var(--ok); background:var(--ok-soft); color:var(--text); }
+.fp-x { border:0; background:var(--bg-soft); color:var(--text); border-radius:6px; width:26px; height:26px; cursor:pointer; }
+.fp-plan, .fp-sync { margin-top:10px; padding:10px 12px; border:1px solid var(--line-strong); border-radius:var(--radius-sm); background:var(--bg-soft); font-size:13px; }
+.fp-plan h4, .fp-sync h4 { margin:0 0 6px; font-size:14px; }
+.fp-plan ul { margin:0; padding-left:18px; display:grid; gap:4px; }
+.fp-actions { display:flex; gap:8px; margin-top:10px; flex-wrap:wrap; }
+.fp-armed { border-color:var(--warn) !important; background:var(--warn-soft) !important; color:var(--text) !important; }
+.fp-row { display:grid; grid-template-columns:90px 1fr; gap:4px 10px; align-items:center; margin:6px 0; }
+.fp-lbl { font-weight:600; }
+.fp-bar { height:8px; border-radius:4px; background:var(--bg-panel); overflow:hidden; }
+.fp-bar span { display:block; height:100%; background:var(--ok); transition:width .3s; }
+.fp-st { grid-column:2; color:var(--text-dim); font-size:12px; }
+.fp-row .fp-err { grid-column:2; margin:0; }
+@media(max-width:600px) { .fp-row { grid-template-columns:70px 1fr; } .fp-table .fp-on { min-width:120px; } }

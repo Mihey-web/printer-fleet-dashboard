@@ -5,10 +5,10 @@ bar on a phone.
 
 | Screen | What is there | Who sees it |
 | --- | --- | --- |
-| [Printers](printers.md) («Принтеры») | Every printer's card, the farm row with filters and farm-wide commands, the next finishes | everyone |
-| [AMS](ams.md) | Humidity and temperature of every AMS unit, drying, the auto-drying journal | everyone |
-| [History](history.md) («История») | Prints, timeline, statistics and (administrators) the action log | everyone |
-| [Admin](admin.md) («Админ») | Printer list, automation, users, Telegram | administrators only |
+| [Printers](printers.md) («Принтеры») | Every printer's card with its job and the [job card](printers.md#job-card), the farm row with filters and farm-wide commands, the next finishes; for administrators also [files on the printer](printers.md#files-on-the-printer) | everyone |
+| [AMS](ams.md) | Humidity and temperature of every AMS and CFS unit, drying, the auto-drying journal | everyone |
+| [History](history.md) («История») | Prints, timeline, statistics, [filament used](history.md#plastic) and (administrators) the action log | everyone |
+| [Admin](admin.md) («Админ») | Printer list and [shared files by model](shared-files.md), automation, users, general settings, Telegram | administrators only |
 
 A viewer («Зритель») sees three screens and no control buttons. See
 [Users and security](../security.md) for the roles.
@@ -36,6 +36,7 @@ Settings here apply **only to this browser** on this device, for both roles («�
 | Section | What it does |
 | --- | --- |
 | Your login and **Log out** («Выйти») | |
+| **Language** («Язык», under the colour theme) | **Русский** or **English**, applied at once, without a reload; the login page has the same switch. With no choice yet the browser's languages decide. |
 | **Appearance** («Оформление») | Colour theme: Ocean («Океан»), Classic («Классика»), Light («Светлая»), Night («Ночь»), Cosmos («Космос»), Amber («Янтарь»), Glass («Стекло»). With Glass on, **Own photo…** («Своё фото…») puts any picture under the glass, kept in this browser only (**Remove photo** brings the built-in one back). **Text size** («Масштаб текста») 50–150 %. |
 | **Browser notifications** («Уведомления браузера») | **Pop-up notifications** («Всплывающие уведомления») with ticks for finish («завершение»), error («ошибка») and pause («пауза»). Off by default; the browser asks for permission. |
 | **App** («Приложение») | **Install** («Установить») — appears only when the browser offers to install the dashboard as an app. See [Phone and app](mobile-pwa.md). |

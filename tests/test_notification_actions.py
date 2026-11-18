@@ -477,7 +477,7 @@ def test_reset_skip_reason_for_the_other_kinds(fleet):
     creality = PrinterStatus(id="c1", label="c", kind=PrinterKind.CREALITY, online=True, state=PrinterState.ERROR,
                              notifications=[_rec("creality:2/5", src="creality", code="errcode 2 · key 5",
                                                  severity="fatal", actions=())])
-    assert _why(creality) == "Creality: команды сброса нет — только на экране принтера"
+    assert _why(creality) == "Creality: сброс — кнопкой в уведомлении, по одному принтеру"
     mks = PrinterStatus(id="m1", label="m", kind=PrinterKind.MKS, online=True, state=PrinterState.PRINTING)
     assert _why(mks) == "управление не подключено"
 

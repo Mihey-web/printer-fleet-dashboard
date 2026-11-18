@@ -9,6 +9,9 @@ changed. It has four sub-tabs: **Fleet** («Парк»), **Automation** («Ав�
 The printer list — adding, editing and removing printers, and **Apply and restart**
 («Применить и перезапустить»). Described in detail on [Adding printers](../printers.md).
 
+Under the table, **Shared files by model** («Общие файлы по моделям») keeps the same print files on
+every printer of a model — see [Shared files by model](shared-files.md).
+
 ## Automation («Автоматика»)
 
 ### AMS auto-drying {#ams-auto-drying}
@@ -69,5 +72,15 @@ marker.
 [Users and security](../security.md#users-and-roles).
 
 ## System («Система»)
+
+### General («Общие») {#general}
+
+Dashboard settings, saved as soon as you switch them.
+
+| Setting | Meaning | Default |
+| --- | --- | --- |
+| **Hide factory samples** («Скрывать заводские образцы») | The demo models from the printers' firmware (3DBenchy, Vase and the like) are left out of [Files on the printer](printers.md#files-on-the-printer) and of [Shared files by model](shared-files.md). The sync never copies them either way. | on |
+
+### Telegram
 
 **Telegram** — the bot, its notifications and proxies. See [Telegram and proxy](../telegram.md).

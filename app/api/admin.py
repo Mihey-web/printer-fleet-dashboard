@@ -1,16 +1,17 @@
-from fastapi import APIRouter, Body, Request, HTTPException, Cookie, Query
+from fastapi import APIRouter, Body, Request, HTTPException, Cookie, Path, Query
 from fastapi.responses import JSONResponse, Response
-from pydantic import BaseModel
-from typing import Any, Dict, List, Optional
+from pydantic import BaseModel, Field, StrictInt, constr
+from typing import Annotated, Any, Dict, List, Optional, Union
 import logging
 import re
 import sqlite3
 import time
+import unicodedata
 
 from app.domain.user_models import UserRole
-from app.services.auth_service import hash_password
+from app.services.auth_service import hash_password, password_too_long
 from app.services.audit_service import get_audit_service
-from app.services import printer_registry
+from app.services import creality_models, printer_registry, sqlite_db
 from app.api.auth import (
     get_user_by_username, get_user_by_id, get_all_users,
     USERS_DB, client_ip,
@@ -42,7 +43,7 @@ def list_users(request: Request,
     users = [u.to_dict() for u in get_all_users()]
     # Last successful login per user from the audit log (SQLite picks the bare
     # columns from the MAX(created_at) row — documented aggregate behaviour).
-    conn = sqlite3.connect(USERS_DB, timeout=10)
+    conn = sqlite_db.connect(USERS_DB)
     try:
         conn.row_factory = sqlite3.Row
         rows = conn.execute("""
@@ -58,14 +59,46 @@ def list_users(request: Request,
     return users
 
 
+MSG_PASSWORD_TOO_LONG = "Пароль — не длиннее 72 байт: 72 латинских знака или 36 русских букв"
+# A new user's name (QA 17.11 F7): letters of one alphabet, digits and . _ - @. No
+# spaces, tabs, control or direction marks (U+202E made «qa<U+202E>evil» read «qalive»
+# in the list and the journal), no Latin / Cyrillic mix («аdmin» with a Cyrillic «а»
+# passing for «admin»), at most USERNAME_MAX. Names that exist already are left as
+# they are: only «Добавить» checks.
+USERNAME_MAX = 32
+_USERNAME_PUNCT = "._@-"
+
+
+def _username_ok(name: str) -> bool:
+    """Latin or Cyrillic letters (not both), ASCII digits and _USERNAME_PUNCT."""
+    latin = cyrillic = False
+    for c in name:
+        if c.isascii() and (c.isalnum() or c in _USERNAME_PUNCT):
+            latin = latin or c.isalpha()
+        elif c.isalpha() and unicodedata.name(c, "").startswith("CYRILLIC "):
+            cyrillic = True
+        else:
+            return False
+    return not (latin and cyrillic)
+
+
+MSG_USERNAME = ("Имя: латинские или русские буквы (одного алфавита), цифры и . _ - @, "
+                "без пробелов, не длиннее %d символов" % USERNAME_MAX)
+MSG_USERNAME_TAKEN = "Такое имя уже есть: «%s» (заглавные и строчные буквы не различаются)"
+
+
 @router.post("/users")
 def create_user(body: CreateUserRequest, request: Request,
                 access_token_cookie: Optional[str] = Cookie(None, alias="access_token")):
     admin_username = request.state.username
     if not body.username or len(body.username) < 2:
         raise HTTPException(status_code=400, detail="Username must be at least 2 characters")
+    if len(body.username) > USERNAME_MAX or not _username_ok(body.username):
+        raise HTTPException(status_code=400, detail=MSG_USERNAME)
     if not body.password or len(body.password) < 8:
         raise HTTPException(status_code=400, detail="Password must be at least 8 characters")
+    if password_too_long(body.password):
+        raise HTTPException(status_code=400, detail=MSG_PASSWORD_TOO_LONG)
     if body.role not in (UserRole.ADMIN.value, UserRole.VIEWER.value):
         raise HTTPException(status_code=400, detail="Role must be 'admin' or 'viewer'")
 
@@ -73,14 +106,34 @@ def create_user(body: CreateUserRequest, request: Request,
     if existing is not None:
         raise HTTPException(status_code=409, detail="Username already exists")
 
+    # bcrypt (~1 s on the Pi) before the write transaction, never under its lock.
+    password_hash = hash_password(body.password)
     now = time.time()
-    conn = sqlite3.connect(USERS_DB, timeout=10)
-    conn.execute("""
-        INSERT INTO users (username, password_hash, role, created_at, updated_at)
-        VALUES (?, ?, ?, ?, ?)
-    """, (body.username, hash_password(body.password), body.role, now, now))
-    conn.commit()
-    conn.close()
+    # A double / triple «Добавить» passes the check above twice: the name is
+    # checked again, ignoring case («QA_VIEWER» next to «qa_viewer»), under the
+    # write lock the INSERT takes (BEGIN IMMEDIATE), so of two racing requests
+    # one gets the 409. The connection is closed (its transaction rolled back)
+    # on every path: left to the GC, it kept users.db write-locked, and every
+    # login and audit line failed with «database is locked» until a restart
+    # (QA 17.11 F1).
+    conn = sqlite_db.connect(USERS_DB)
+    try:
+        conn.execute("BEGIN IMMEDIATE")
+        folded = body.username.casefold()
+        taken = next((r[0] for r in conn.execute("SELECT username FROM users") if r[0].casefold() == folded), None)
+        if taken == body.username:
+            raise HTTPException(status_code=409, detail="Username already exists")
+        if taken is not None:
+            raise HTTPException(status_code=409, detail=MSG_USERNAME_TAKEN % taken)
+        conn.execute("""
+            INSERT INTO users (username, password_hash, role, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?)
+        """, (body.username, password_hash, body.role, now, now))
+        conn.commit()
+    except sqlite3.IntegrityError:
+        raise HTTPException(status_code=409, detail="Username already exists")
+    finally:
+        conn.close()
 
     new_user = get_user_by_username(body.username)
     source_ip = client_ip(request)
@@ -89,8 +142,13 @@ def create_user(body: CreateUserRequest, request: Request,
     return new_user.to_dict()
 
 
+# Ids in a path: an integer SQLite can bind (a bigger one was a 500, QA 17.11 F5).
+SQLITE_INT_MAX = 2 ** 63 - 1
+RowId = Annotated[int, Path(ge=-SQLITE_INT_MAX - 1, le=SQLITE_INT_MAX)]
+
+
 @router.put("/users/{user_id}")
-def update_user(user_id: int, body: UpdateUserRequest, request: Request,
+def update_user(user_id: RowId, body: UpdateUserRequest, request: Request,
                 access_token_cookie: Optional[str] = Cookie(None, alias="access_token")):
     admin_username = request.state.username
     user = get_user_by_id(user_id)
@@ -100,30 +158,33 @@ def update_user(user_id: int, body: UpdateUserRequest, request: Request,
     # leave the panel without admins) — same rule as self-delete.
     if body.role is not None and user.username == admin_username and body.role != user.role.value:
         raise HTTPException(status_code=400, detail="Cannot change your own role")
-
-    now = time.time()
-    conn = sqlite3.connect(USERS_DB, timeout=10)
-
-    if body.role is not None:
-        if body.role not in (UserRole.ADMIN.value, UserRole.VIEWER.value):
-            conn.close()
-            raise HTTPException(status_code=400, detail="Role must be 'admin' or 'viewer'")
-        # Bump tokens_valid_after so the role baked into any live access token is
-        # invalidated immediately (a demoted admin must not keep admin rights for
-        # the remainder of the token's TTL).
-        conn.execute("UPDATE users SET role = ?, updated_at = ?, tokens_valid_after = ? WHERE id = ?",
-                     (body.role, now, now, user_id))
-
+    if body.role is not None and body.role not in (UserRole.ADMIN.value, UserRole.VIEWER.value):
+        raise HTTPException(status_code=400, detail="Role must be 'admin' or 'viewer'")
     if body.password is not None:
         if len(body.password) < 8:
-            conn.close()
             raise HTTPException(status_code=400, detail="Password must be at least 8 characters")
-        # A password reset must terminate existing sessions.
-        conn.execute("UPDATE users SET password_hash = ?, updated_at = ?, tokens_valid_after = ? WHERE id = ?",
-                     (hash_password(body.password), now, now, user_id))
+        if password_too_long(body.password):
+            raise HTTPException(status_code=400, detail=MSG_PASSWORD_TOO_LONG)
 
-    conn.commit()
-    conn.close()
+    # bcrypt (~1 s on the Pi) before the write transaction: the role's UPDATE
+    # used to hold users.db write-locked for all of it.
+    password_hash = hash_password(body.password) if body.password is not None else None
+    now = time.time()
+    conn = sqlite_db.connect(USERS_DB)
+    try:
+        if body.role is not None:
+            # Bump tokens_valid_after so the role baked into any live access token is
+            # invalidated immediately (a demoted admin must not keep admin rights for
+            # the remainder of the token's TTL).
+            conn.execute("UPDATE users SET role = ?, updated_at = ?, tokens_valid_after = ? WHERE id = ?",
+                         (body.role, now, now, user_id))
+        if password_hash is not None:
+            # A password reset must terminate existing sessions.
+            conn.execute("UPDATE users SET password_hash = ?, updated_at = ?, tokens_valid_after = ? WHERE id = ?",
+                         (password_hash, now, now, user_id))
+        conn.commit()
+    finally:
+        conn.close()
 
     source_ip = client_ip(request)
     audit = get_audit_service()
@@ -132,7 +193,7 @@ def update_user(user_id: int, body: UpdateUserRequest, request: Request,
 
 
 @router.delete("/users/{user_id}")
-def delete_user(user_id: int, request: Request,
+def delete_user(user_id: RowId, request: Request,
                 access_token_cookie: Optional[str] = Cookie(None, alias="access_token")):
     admin_username = request.state.username
     user = get_user_by_id(user_id)
@@ -145,10 +206,12 @@ def delete_user(user_id: int, request: Request,
     # middleware re-checks the subject against users.db on every request
     # (token_subject_active), so a deleted user is rejected on their next call
     # instead of lingering until the access token expires.
-    conn = sqlite3.connect(USERS_DB, timeout=10)
-    conn.execute("DELETE FROM users WHERE id = ?", (user_id,))
-    conn.commit()
-    conn.close()
+    conn = sqlite_db.connect(USERS_DB)
+    try:
+        conn.execute("DELETE FROM users WHERE id = ?", (user_id,))
+        conn.commit()
+    finally:
+        conn.close()
 
     source_ip = client_ip(request)
     audit = get_audit_service()
@@ -179,12 +242,41 @@ class PrinterUpdateRequest(BaseModel):
     serial: Optional[str] = None
 
 
+# The printer's address is an IP or a host name only — the port has its own field,
+# the client adds the scheme (QA 17.11 F10: «http://…/path?x=1» and «… ; reboot»
+# were saved, and the printer just never connected). Labels: DNS letters, digits,
+# «-» and «_» (some local names have it); an all-digit name must be a real IPv4.
+_HOST_LABEL = re.compile(r"[A-Za-z0-9_](?:[A-Za-z0-9_-]{0,61}[A-Za-z0-9_])?")
+MSG_BAD_HOST = "Адрес принтера: IP или имя хоста — без http://, порта, пути и пробелов"
+# The card, the lists and the notifications show it whole (20 000 characters made
+# /api/printers 71 KB).
+LABEL_MAX = 64
+MSG_LABEL_TOO_LONG = "Название — не длиннее %d символов" % LABEL_MAX
+
+
+def _valid_host(host: str) -> bool:
+    import ipaddress
+    try:
+        ipaddress.ip_address(host)
+        return True
+    except ValueError:
+        pass
+    labels = host.split(".")
+    if len(host) > 253 or not all(_HOST_LABEL.fullmatch(p) for p in labels):
+        return False
+    return not all(p.isdigit() for p in labels)          # «192.0.2.999» is no host name
+
+
 def _validate_printer_fields(kind: str, data: dict, creating: bool):
     if creating and kind not in printer_registry.KINDS:
         raise HTTPException(status_code=400, detail="kind must be one of: " + ", ".join(printer_registry.KINDS))
     for f in ("label", "host"):
         if (creating or data.get(f) is not None) and not str(data.get(f) or "").strip():
             raise HTTPException(status_code=400, detail=f"{f} must not be empty")
+    if data.get("label") is not None and len(str(data["label"]).strip()) > LABEL_MAX:
+        raise HTTPException(status_code=400, detail=MSG_LABEL_TOO_LONG)
+    if data.get("host") is not None and not _valid_host(str(data["host"]).strip()):
+        raise HTTPException(status_code=400, detail=MSG_BAD_HOST)
     port = data.get("port")
     if port is not None and not (1 <= port <= 65535):
         raise HTTPException(status_code=400, detail="port must be 1-65535")
@@ -202,7 +294,21 @@ def _audit(request: Request, action: str):
 def _printer_with_pending(row: dict) -> dict:
     row = dict(row)
     row["pending"] = printer_registry.pending_state(row)
+    row["model_name"] = creality_models.display_name(row.get("model"))   # «Парк»: «K1C», not k1c
     return row
+
+
+def _creality_model_code(kind: str, data: dict) -> None:
+    """The form sends a Creality model as people read it («K2 Plus»): a known one is stored as
+    its code (k2plus), anything else as typed."""
+    if kind == "creality" and data.get("model"):
+        data["model"] = creality_models.code_for(data["model"])
+
+
+@router.get("/printer-models")
+def printer_models():
+    """The printer form's list of Creality models: {code: name} (app/services/creality_models.py)."""
+    return {"creality": creality_models.NAMES}
 
 
 @router.get("/printers")
@@ -220,6 +326,7 @@ def create_printer_cfg(body: PrinterCreateRequest, request: Request,
     _validate_printer_fields(body.kind, data, creating=True)
     data["label"] = data["label"].strip()
     data["host"] = data["host"].strip()
+    _creality_model_code(body.kind, data)
     row = printer_registry.create_printer(data)
     _audit(request, "printer_create")
     return _printer_with_pending(row)
@@ -237,6 +344,7 @@ def update_printer_cfg(printer_id: str, body: PrinterUpdateRequest, request: Req
         data["label"] = data["label"].strip()
     if "host" in data:
         data["host"] = data["host"].strip()
+    _creality_model_code(existing["kind"], data)
     row = printer_registry.update_printer(printer_id, data)
     _audit(request, "printer_update")
     return _printer_with_pending(row)
@@ -379,7 +487,7 @@ def _audit_filters(user, action, prefix, exclude, printer, fr, to) -> Dict[str, 
 @router.get("/audit")
 def get_audit_log(request: Request,
                   access_token_cookie: Optional[str] = Cookie(None, alias="access_token"),
-                  limit: int = Query(100, ge=1, le=500), offset: int = Query(0, ge=0),
+                  limit: int = Query(100, ge=1, le=500), offset: int = Query(0, ge=0, le=SQLITE_INT_MAX),
                   user: Optional[str] = None, action: Optional[str] = None,
                   prefix: Optional[List[str]] = Query(None), exclude: Optional[List[str]] = Query(None),
                   printer: Optional[str] = None, fr: Optional[float] = None, to: Optional[float] = None):
@@ -392,7 +500,11 @@ def get_audit_log(request: Request,
     has_more = len(entries) > limit
     if has_more:
         entries = entries[:limit]
-    return {"rows": [e.to_dict() for e in entries], "has_more": has_more}
+    from app.services import klipper_service
+    # The «Сервис» buttons' titles (klipper_service.ACTIONS, the one list): the journal names
+    # printer_command:svc_* rows with them.
+    return {"rows": [e.to_dict() for e in entries], "has_more": has_more,
+            "service_titles": {key: a[1] for key, a in klipper_service.ACTIONS.items()}}
 
 
 @router.get("/audit/counts")
@@ -442,11 +554,21 @@ def get_audit_csv(request: Request,
 # Stored in the settings table; telegram_manager hot-applies edits, so no
 # service restart is involved (unlike the printer registry).
 
+# A Telegram chat id has at most 52 significant bits (Bot API): within JavaScript's
+# safe integers, which the settings page keeps it in. 10^30 was saved (QA 17.11 F6).
+TELEGRAM_CHAT_ID_MAX = 2 ** 53 - 1
+# Telegram takes at most 4096 characters per message; a notification adds the
+# printer's name and its error text to the template.
+TELEGRAM_TEMPLATE_MAX = 1000
+
+
 def _validate_settings(values: dict):
     def _int_in(key, lo, hi):
-        v = values.get(key)
-        if v is None:
+        # Present means an integer: a null interval was saved and stopped the
+        # bot's live summary (sleep(None)) and the proxy check (QA 17.11 F6).
+        if key not in values:
             return
+        v = values[key]
         if not isinstance(v, int) or isinstance(v, bool) or not (lo <= v <= hi):
             raise HTTPException(status_code=400, detail=f"{key} must be an integer {lo}-{hi}")
 
@@ -456,12 +578,12 @@ def _validate_settings(values: dict):
 
     if "telegram_chat_id" in values:
         v = values["telegram_chat_id"]
-        if v is not None and (not isinstance(v, int) or isinstance(v, bool)):
+        if v is not None and (not isinstance(v, int) or isinstance(v, bool) or abs(v) > TELEGRAM_CHAT_ID_MAX):
             raise HTTPException(status_code=400, detail="telegram_chat_id must be an integer or null")
 
     for key in ("telegram_enabled", "telegram_notify_on_finish",
                 "telegram_notify_on_finish_repeat",
-                "telegram_notify_on_error", "telegram_notify_on_paused"):
+                "telegram_notify_on_error", "telegram_notify_on_paused", "hide_sample_files"):
         if key in values and not isinstance(values[key], bool):
             raise HTTPException(status_code=400, detail=f"{key} must be a boolean")
 
@@ -470,6 +592,8 @@ def _validate_settings(values: dict):
             v = values[key]
             if not isinstance(v, str) or not v.strip():
                 raise HTTPException(status_code=400, detail=f"{key} must be a non-empty string")
+            if len(v) > TELEGRAM_TEMPLATE_MAX:
+                raise HTTPException(status_code=400, detail="%s: не длиннее %d символов" % (key, TELEGRAM_TEMPLATE_MAX))
             try:
                 v.format(label="X")
             except (KeyError, IndexError, ValueError):
@@ -491,6 +615,13 @@ def _validate_settings(values: dict):
                 or not all(isinstance(c, str) and _re.fullmatch(r"[0-9A-F]{4}_[0-9A-F]{4}", c) for c in v)):
             raise HTTPException(status_code=400,
                                 detail="auto_ignore_print_errors: список кодов вида 0500_8062")
+
+    if "auto_light_states" in values:
+        v = values["auto_light_states"]
+        allowed = ("paused", "error", "cancelled", "finished")
+        if not isinstance(v, list) or not all(isinstance(s, str) and s in allowed for s in v):
+            raise HTTPException(status_code=400,
+                                detail="auto_light_states: список из " + ", ".join(allowed))
 
     if "proxy_list" in values:
         from urllib.parse import urlparse
@@ -657,6 +788,8 @@ def hms_catalog_status(request: Request,
 
 class PrinterCommandRequest(BaseModel):
     action: str
+    setting: Optional[str] = None
+    enabled: Optional[bool] = None
     temp: Optional[int] = None
     hours: Optional[int] = None
     level: Optional[int] = None
@@ -668,13 +801,24 @@ class PrinterCommandRequest(BaseModel):
     ams: Optional[int] = None          # AMS unit id (ams_load, dry_start, dry_stop)
     slot: Optional[int] = None         # slot within that unit (ams_load)
     filament: Optional[str] = None     # drying preset material (dry_start)
+    axis: Optional[str] = Field(None, max_length=1)   # x / y / z (move)
+    material: Optional[str] = Field(None, max_length=16)   # spool material (ams_set)
+    color: Optional[str] = Field(None, max_length=6)       # spool colour RRGGBB (ams_set)
+    tmin: Optional[int] = None         # spool nozzle range °C (ams_set)
+    tmax: Optional[int] = None
+    dist: Optional[int] = None         # mm, signed: one jog step (move), filament length (extrude)
+    # skip_objects: Bambu part ids, Creality part names (Klipper's)
+    objects: Optional[List[Union[StrictInt, constr(min_length=1, max_length=200)]]] = Field(None, max_length=500)
+    mode: Optional[int] = None         # air duct mode 0 cooling / 1 heating (airduct)
 
 
 # AMS commands record their parameters in the audit log (which unit / slot /
 # drying settings); every command line ends with its outcome (st=<status>):
 # "printer_command:<action>:<id>:[params,]st=confirmed|sent|rejected|refused".
-_AUDITED_PARAMS = {"ams_load": ("ams", "slot"), "dry_start": ("ams", "temp", "hours", "filament"),
-                   "dry_stop": ("ams",)}
+_AUDITED_PARAMS = {"feeder_setting": ("setting", "enabled"), "ams_load": ("ams", "slot"), "dry_start": ("ams", "temp", "hours", "filament"),
+                   "dry_stop": ("ams",), "move": ("axis", "dist"),
+                   "extrude": ("dist",), "ams_rfid": ("ams", "slot"),
+                   "ams_set": ("ams", "slot", "material", "color", "tmin", "tmax"), "skip_objects": ("objects",), "airduct": ("mode",)}
 
 
 @router.post("/printers/{printer_id}/command")
@@ -705,6 +849,19 @@ def printer_command(printer_id: str, body: PrinterCommandRequest, request: Reque
         return JSONResponse(status_code=400, content={"detail": r["detail"], "status": r.get("status", "rejected")})
     return {"success": True, "status": r.get("status", "sent"), "detail": r["detail"],
             "replied": r.get("replied", False)}
+
+
+@router.get("/printers/{printer_id}/service")
+def printer_service_status(printer_id: str,
+                           access_token_cookie: Optional[str] = Cookie(None, alias="access_token")):
+    """«Сервис» of a Creality with Klipper's API: the last action, its state and the printer's
+    last console lines since it started (klipper_service.status). Read-only."""
+    from app.services import klipper_service, printer_files
+    prn = printer_registry.get_printer(printer_id)
+    if prn is None:
+        raise HTTPException(status_code=404, detail="Принтер не найден")
+    klipper = printer_files.has_klipper_api(prn, wait=False)
+    return dict(klipper_service.status(printer_id, prn.get("host") if klipper else None), klipper=klipper)
 
 
 class NotificationActionRequest(BaseModel):
@@ -890,7 +1047,7 @@ def autodry_release(request: Request, body: Any = Body(None),
 # only, never the job's or the printer's name (job names are sensitive).
 
 @router.put("/history/jobs/{job_id}/verdict")
-def put_job_verdict(job_id: int, request: Request, body: Any = Body(None),
+def put_job_verdict(job_id: RowId, request: Request, body: Any = Body(None),
                     access_token_cookie: Optional[str] = Cookie(None, alias="access_token")):
     """Body {"verdict": "good" | "defect" | null}; answers the updated row in the
     /api/history/jobs format (404: no such print, 409: it still runs)."""

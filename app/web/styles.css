@@ -1183,8 +1183,7 @@
       color: var(--text-dim);
       font-size: 0.86rem;
     }
-    .dash-log-loader,
-    .dash-log-end {
+    .dash-log-loader {
       text-align: center;
       padding: 100px 14px 60px;
       color: var(--text-muted);
@@ -1253,73 +1252,6 @@
       margin-top: 5px;
       color: var(--text-dim);
       font-size: 0.86rem;
-    }
-    .panel-badge {
-      display: inline-flex;
-      align-items: center;
-      padding: 7px 11px;
-      border-radius: 999px;
-      background: var(--bg-soft);
-      border: 1px solid var(--line);
-      color: var(--text-dim);
-      font-size: 0.76rem;
-      text-transform: uppercase;
-      letter-spacing: 0.08em;
-    }
-    .live-strip {
-      display: grid;
-      grid-template-columns: repeat(4, minmax(0, 1fr));
-      gap: 12px;
-    }
-    .strip-card {
-      padding: 16px;
-      border-radius: 18px;
-      background: var(--bg-soft);
-      border: 1px solid var(--bg-soft);
-    }
-    .strip-card span {
-      display: block;
-      color: var(--text-muted);
-      font-size: 0.7rem;
-      text-transform: uppercase;
-      letter-spacing: 0.08em;
-      margin-bottom: 10px;
-    }
-    .strip-card strong {
-      display: block;
-      font-family: "IBM Plex Mono", monospace;
-      font-size: 1.4rem;
-      font-weight: 600;
-    }
-    .strip-card em {
-      display: block;
-      margin-top: 8px;
-      color: var(--text-dim);
-      font-style: normal;
-      font-size: 0.82rem;
-    }
-    .attention-list {
-      display: grid;
-      gap: 10px;
-    }
-    .attention-item {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 12px;
-      padding: 14px 16px;
-      border-radius: 16px;
-      background: var(--bg-soft);
-      border: 1px solid var(--line);
-    }
-    .attention-item strong {
-      font-size: 0.95rem;
-    }
-    .attention-item span {
-      display: block;
-      margin-top: 4px;
-      color: var(--text-dim);
-      font-size: 0.82rem;
     }
     .view-tabs {
       display: flex;
@@ -1436,14 +1368,6 @@
     .fleet-section {
       padding: 12px 14px 14px;
     }
-    .fleet-head {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 10px;
-      margin-bottom: 10px;
-      flex-wrap: wrap;
-    }
     .printer-grid {
       display: grid;
       grid-template-columns: repeat(auto-fill, minmax(min(300px, 100%), 1fr));
@@ -1452,31 +1376,6 @@
          кнопки внутри прижаты к низу (margin-top:auto), поэтому равная высота
          выглядит намеренно, а не пустой «дырой» */
       align-items: stretch;
-    }
-    .sort-btn {
-      appearance: none;
-      border: 1px solid var(--line);
-      background: var(--bg-soft);
-      color: var(--text-dim);
-      padding: 9px 14px;
-      border-radius: 999px;
-      cursor: pointer;
-      font-family: "IBM Plex Sans", sans-serif;
-      font-size: 0.74rem;
-      font-weight: 500;
-      transition: all 0.22s ease;
-      display: flex;
-      align-items: center;
-      gap: 6px;
-    }
-    .sort-btn:hover {
-      color: var(--text);
-      border-color: var(--line-strong);
-      transform: translateY(-1px);
-    }
-    .sort-btn-caret {
-      font-size: 0.65rem;
-      opacity: 0.6;
     }
     .printer-card {
       padding: 13px 14px 12px;
@@ -1745,20 +1644,24 @@
       font-family: "IBM Plex Mono", monospace;
       white-space: nowrap;
     }
+    .pc-statrow { gap: 8px; }
+    /* a narrow card (4 columns at 1400 px): the layer count goes under, never cut off */
+    .pc-pv .pc-statrow { flex-wrap: wrap; row-gap: 3px; }
     .pc-pct {
-      font-size: 1.04rem;
+      font-size: 1.32rem;
+      line-height: 1;
       font-weight: 700;
       letter-spacing: -0.03em;
       color: var(--text);
     }
     .pc-eta {
-      font-size: 0.82rem;
+      font-size: 0.8rem;
       color: var(--text-dim);
     }
-    .pc-finish { color: var(--ok); }
+    .pc-finish { color: var(--ok); font-weight: 700; font-size: 0.92rem; }
     .pc-statrow .pc-layers {
       margin-left: auto;
-      font-size: 0.82rem;
+      font-size: 0.76rem;
       color: var(--text-dim);
     }
     .progress-track {
@@ -1768,6 +1671,24 @@
       border: 1px solid var(--line);
       overflow: hidden;
     }
+    /* The job with a slicer picture (cardPreviewParts, owner's pick 16.11): the picture on the left,
+       the grams under it; beside it the part's name over the stat row and the bar. Both the picture
+       and the name are .job-preview (preview.js opens the job card): reset its box here. */
+    .pc-progress.pc-pv { grid-template-columns: auto minmax(0, 1fr); column-gap: 12px; row-gap: 8px; align-items: center; margin-top: 12px; }
+    .printer-card .pc-pv .job-preview { width: auto; margin: 0; padding: 0; gap: 0; border: 0; border-radius: 0; background: none; color: var(--text); text-align: left; }
+    .printer-card .pc-pv .job-preview:hover { background: none; }
+    .printer-card .pc-pv .pc-pv-thumb { width: 74px; flex-direction: column; align-items: center; gap: 5px; align-self: start; }
+    .printer-card .pc-pv .pc-pv-thumb .job-preview-thumb { width: 74px; height: 74px; padding: 5px; border-radius: 13px;
+      background: var(--bg-soft); border: 1px solid var(--line); transition: border-color 0.15s; }
+    .printer-card .pc-pv .pc-pv-thumb:hover .job-preview-thumb { border-color: var(--info); }
+    .printer-card .pc-pv .pc-pv-thumb.preview-missing { width: auto; }
+    .pc-pv-grams { font: 11px/1.2 "IBM Plex Mono", monospace; color: var(--text-muted); white-space: nowrap; }
+    .pc-pv-main { min-width: 0; display: grid; gap: 7px; }
+    .printer-card .pc-pv .pc-pv-name { display: flex; align-items: flex-start; gap: 8px; min-width: 0; font-size: 13px; font-weight: 600; line-height: 1.3; }
+    .pc-pv-text { flex: 1; min-width: 0; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere; }
+    .printer-card .pc-pv .pc-pv-name .job-preview-open { flex: none; font-size: 14px; line-height: 1.3; }
+    .printer-card .pc-pv .pc-pv-name:hover .pc-pv-text { color: var(--info-11); }
+    .pc-pv .stage-badge { grid-column: 1 / -1; justify-self: start; margin-top: 0; }
     .pc-jobrow {
       display: flex;
       align-items: center;
@@ -1784,6 +1705,8 @@
       gap: 4px;
       min-width: 0;
     }
+    .pc-material { flex-shrink: 0; font-family: "IBM Plex Mono", monospace; color: var(--text-dim); }
+    .jobs-table td.job-material { white-space: nowrap; font-family: "IBM Plex Mono", monospace; font-size: .76rem; }
     .pc-job-text {
       overflow: hidden;
       text-overflow: ellipsis;
@@ -1969,7 +1892,6 @@
       margin-bottom: 8px;
     }
     @media (max-width: 900px) {
-      .fleet-head,
       .panel-head {
         flex-direction: column;
         align-items: flex-start;
@@ -1982,9 +1904,6 @@
       .section-panel,
       .printer-card {
         border-radius: 22px;
-      }
-      .live-strip {
-        grid-template-columns: 1fr;
       }
       .overview {
         grid-template-columns: 1fr;
@@ -2035,39 +1954,6 @@
       border: 1px solid var(--danger-border);
       color: var(--danger);
     }
-    .settings-btn {
-      width: 38px;
-      height: 38px;
-      border-radius: 999px;
-      border: 1px solid var(--line);
-      background: var(--bg-soft);
-      color: var(--text-dim);
-      font-family: "IBM Plex Sans", sans-serif;
-      font-size: 1rem;
-      display: inline-grid;
-      place-items: center;
-      cursor: pointer;
-      backdrop-filter: blur(12px);
-      transition: background 0.2s, border-color 0.2s, color 0.2s, transform 0.15s, box-shadow 0.2s;
-      box-shadow: inset 0 1px 0 var(--bg-soft);
-    }
-    .settings-btn:hover {
-      background: var(--line);
-      border-color: var(--line-strong);
-      color: var(--text);
-      transform: translateY(-1px) rotate(12deg);
-      box-shadow: var(--shadow-lg);
-    }
-    .settings-btn:active { transform: translateY(0) rotate(0deg); }
-    .settings-popup {
-      width: min(440px, calc(100vw - 32px));
-    }
-    .settings-copy {
-      margin: -6px 0 18px;
-      color: var(--text-dim);
-      font-size: 0.82rem;
-      line-height: 1.5;
-    }
     .settings-list {
       display: flex;
       flex-direction: column;
@@ -2089,21 +1975,6 @@
       background: var(--bg-soft);
       transform: translateY(-1px);
     }
-    .setting-row.sub-setting {
-      margin-left: 18px;
-      padding-left: 18px;
-      background: var(--bg-soft);
-    }
-    .setting-row.sub-setting::before {
-      content: "";
-      width: 8px;
-      height: 8px;
-      border-radius: 50%;
-      background: var(--line-strong);
-      box-shadow: 0 0 0 4px var(--bg-soft);
-      flex: 0 0 auto;
-      margin-right: -2px;
-    }
     .setting-text {
       min-width: 0;
       display: grid;
@@ -2119,31 +1990,6 @@
       color: var(--text-muted);
       font-size: 0.72rem;
       line-height: 1.45;
-    }
-    .settings-list.master-off .sub-setting {
-      opacity: 0.48;
-      border-color: var(--bg-soft);
-      background: var(--bg-soft);
-    }
-    .settings-list.master-off .sub-setting .setting-text strong {
-      color: var(--text-dim);
-    }
-    .sdd-head {
-      padding-bottom: 10px;
-      border-bottom: 1px solid var(--line);
-    }
-    .sdd-head strong { font-size: 0.95rem; letter-spacing: -0.01em; }
-    .sdd-group {
-      padding: 12px 0;
-      border-bottom: 1px solid var(--line);
-    }
-    .sdd-cap {
-      font-size: 0.64rem;
-      text-transform: uppercase;
-      letter-spacing: 0.1em;
-      color: var(--text-muted);
-      font-weight: 600;
-      margin-bottom: 9px;
     }
     .theme-grid {
       display: grid;
@@ -2189,15 +2035,6 @@
     .theme-seg-btn[data-theme="glass"].active { border-color: transparent; box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.85), 0 0 0 2px var(--ok); }
     /* seven themes in three columns: the last one alone takes the whole row, the grid stays even */
     .theme-grid > .theme-seg-btn:last-child:nth-child(3n + 1) { grid-column: 1 / -1; }
-    .sdd-foot {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 12px;
-      margin-top: 12px;
-      padding-top: 12px;
-      border-top: 1px solid var(--line);
-    }
     .ver-chip {
       font-family: "IBM Plex Mono", monospace;
       font-size: 0.72rem;
@@ -2266,37 +2103,6 @@
     .toggle-switch input:focus-visible + .toggle-slider {
       outline: 2px solid var(--info-glow);
       outline-offset: 2px;
-    }
-    .settings-dropdown-wrap {
-      position: relative;
-      display: inline-block;
-    }
-    .settings-dropdown {
-      position: absolute;
-      top: calc(100% + 10px);
-      right: 0;
-      width: 340px;
-      max-width: calc(100vw - 32px);
-      padding: 16px;
-      background: linear-gradient(180deg, var(--bg-panel) 0%, var(--bg-panel-2) 100%);
-      border: 1px solid var(--line);
-      border-radius: var(--radius-lg);
-      box-shadow: var(--shadow-xl);
-      backdrop-filter: blur(16px);
-      z-index: 1200;
-      opacity: 0;
-      transform: translateY(-6px);
-      pointer-events: none;
-      transition: opacity 0.15s ease, transform 0.15s ease;
-    }
-    .settings-dropdown.open {
-      opacity: 1;
-      transform: translateY(0);
-      pointer-events: auto;
-    }
-    .settings-dropdown .settings-list {
-      display: grid;
-      gap: 8px;
     }
     .timeline-legend-row { margin-bottom: 4px; align-items: center; }
     .timeline-scale-label { margin-left: auto; color: var(--text-dim); font-family: "IBM Plex Mono", monospace; font-size: 0.72rem; }
@@ -2417,7 +2223,7 @@
       border-color: var(--info-border);
       background-image: linear-gradient(var(--info-soft), var(--info-soft));
     }
-    .badge-viewer, .badge-steel { color: var(--text-dim); }
+    .badge-steel { color: var(--text-dim); }
     .badge-ok {
       color: var(--ok);
       border-color: var(--ok-border);
@@ -2864,7 +2670,10 @@
       white-space: nowrap; overflow: hidden;
     }
     .pc-ctl-lock .pc-ic { width: 14px; height: 14px; }
-    .pc-ctl-lock > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+    /* the note wraps onto a second line inside the 34 px box rather than being cut (QA 17.11: «Печать:
+       доступ к управлению ещё проверяется» lost its end at every width but 1280), as .pc-confirm .q does */
+    .pc-ctl-lock > span { min-width: 0; overflow: hidden; white-space: normal; line-height: 1.2;
+      display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
     /* inline confirmation instead of window.confirm() */
     .pc-confirm { position: relative; display: flex; align-items: center; gap: 6px; margin-top: auto; padding-top: 12px; }
     /* the question wraps onto a second line inside the 34 px box rather than
@@ -2971,6 +2780,16 @@
     .pc-pop-preset.on:disabled { opacity: 1; }   /* the loaded slot stays legible */
     /* the loaded slot: aria-disabled, not disabled — its data-tip still reaches a hover and a tap */
     .pc-pop-preset[aria-disabled="true"] { cursor: default; }
+    /* the motion popover: 3 x 3 jog pad (Y / Z columns, X row, «Домой» in the middle) */
+    .pc-jog { display: grid; grid-template-columns: repeat(3, 1fr); gap: 5px; margin-bottom: 8px; }
+    .pc-jog .pc-jog-b { text-align: center; padding: 9px 4px; font-size: 0.9rem; }
+    .pc-jog .pc-jog-home { display: inline-flex; align-items: center; justify-content: center; gap: 4px; font-size: 0.78rem; }
+    .pc-jog .pc-jog-home .pc-ic { width: 14px; height: 14px; }
+    .pc-jog .is-wait { opacity: 0.6; cursor: progress; }
+    .pc-jog.pc-jog-e { grid-template-columns: repeat(2, 1fr); }
+    /* «Катушки…»: one row per slot (the slot, «Метка», «Изменить…»); the colour picker */
+    .pc-spool-row .pc-pop-slot { flex: 1 1 auto; min-width: 0; }
+    .pc-pop-color { width: 40px; height: 30px; padding: 0; border: 1px solid var(--line); border-radius: 6px; background: none; cursor: pointer; }
     .pc-pop-preset .pc-ams-slot { width: 11px; height: 11px; margin-right: 5px; vertical-align: -1px; }
     /* the AMS popover without commands (a viewer): the slots as plain labels, the loaded one marked */
     .pc-pop-slot {
@@ -3306,8 +3125,9 @@
     .bd-l1 { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
     .bd-name { font-weight: 700; font-size: 0.86rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
     .bd-model {
+      /* no text-transform: nfModel gives «P2S» already, and «K2 Plus» as people write it */
       font-family: "IBM Plex Mono", monospace; font-size: 0.68rem; color: var(--text-muted);
-      text-transform: uppercase; white-space: nowrap;
+      white-space: nowrap;
     }
     .bd-pct { font-family: "IBM Plex Mono", monospace; font-weight: 700; font-size: 0.86rem; text-align: right; }
     .bd-job { display: flex; align-items: center; gap: 4px; min-width: 0; font-size: 0.72rem; color: var(--text-dim); }
@@ -3421,7 +3241,7 @@
       cursor: pointer; white-space: nowrap; flex: none; color: inherit; background: transparent;
     }
     button.nf-badge { z-index: 1; }
-    button.nf-badge::after { content: ""; position: absolute; inset: -5px -3px; }   /* 38 px hit area */
+    button.nf-badge::after { content: ""; position: absolute; inset: -6px -3px; }   /* 40 px hit area */
     .nf-badge.fatal { background: var(--danger); color: var(--sev-fatal-ink); box-shadow: 0 0 12px var(--danger-glow); }
     .nf-badge.pause { background-color: var(--bg-elev); background-image: linear-gradient(var(--sev-pause-soft), var(--sev-pause-soft)); color: var(--sev-pause-text); border-color: var(--sev-pause-border); }
     .nf-badge.serious { background-color: var(--bg-elev); background-image: linear-gradient(var(--danger-soft), var(--danger-soft)); color: var(--danger-11); border-color: var(--danger-border-strong); }
@@ -3456,6 +3276,7 @@
       .pc-toprow-right .pc-wifi { font-size: 0; gap: 0; }
       .pc-toprow-right:has(.nf-badge) .pc-wifi { display: none; }
       .pc-ctl.pc-ctl-head { width: 24px; }
+      .pc-ctl.pc-ctl-head::before { inset: -6px -8px; }   /* its hit area stays 40 px wide */
     }
     /* still less room (≤285: 5 columns at 1366–1700, 4 at 1024, 320 px phones): Wi-Fi gives way to
        ⚠ + status; the head still keeps one line (the model, then the name give way) */
@@ -3692,11 +3513,11 @@
     /* === AMS tab === */
     .ams-toolbar { display:flex; gap:8px 12px; align-items:center; margin:4px 0 14px; flex-wrap:wrap; }
     .ams-toolbar .ams-legend { margin-left: 4px; }
-    .ams-range, .seg-range { display:flex; gap:4px; background:var(--bg-panel); border:1px solid var(--line);
+    .ams-range { display:flex; gap:4px; background:var(--bg-panel); border:1px solid var(--line);
       border-radius:10px; padding:3px; }
-    .ams-range button, .seg-range button { border:0; background:transparent; color:var(--text-muted);
+    .ams-range button { border:0; background:transparent; color:var(--text-muted);
       padding:6px 13px; border-radius:7px; font-size:13px; cursor:pointer; }
-    .ams-range button.active, .seg-range button.active { background:var(--bg-elev); color:var(--text); }
+    .ams-range button.active { background:var(--bg-elev); color:var(--text); }
     .ams-legend { display:flex; gap:14px; color:var(--text-muted); font-size:12px; align-items:center; flex-wrap:wrap; }
     .ams-legend i { display:inline-block; width:10px; height:10px; border-radius:3px; margin-right:5px; vertical-align:-1px; }
     .ams-legend i.z-ok { background:var(--ok); }
@@ -3870,7 +3691,6 @@
     .autodry .inl.on { display: inline-flex; }
     .autodry .rule .inl.on { margin-left: 4px; }
     .autodry .lim { font-size: .68rem; color: var(--text-muted); }
-    .autodry .nw { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
 
     .autodry .ad-why { border: 1px solid var(--info-border); border-radius: 16px; padding: 16px 16px 14px;
       background-color: var(--bg-elev); background-image: linear-gradient(var(--info-bg-grad-start), var(--info-bg-grad-end)); }
@@ -3981,8 +3801,6 @@
     .ad-journal .jr-rh { font-family: "IBM Plex Mono", monospace; font-size: .76rem; color: var(--text-dim); white-space: nowrap; text-align: right; }
     .ad-journal .jr-rh.none { color: var(--text-muted); }
     .ad-journal .jr-empty { color: var(--text-muted); font-size: .8rem; padding: 8px 4px; }
-    .ad-journal .jr-more { margin-top: 8px; font-size: .74rem; color: var(--text-muted); display: flex; gap: 12px; flex-wrap: wrap; align-items: baseline; }
-    .ad-journal .jr-more .ad-link { font-size: .74rem; }
     @media (max-width: 640px) {
       .ad-journal .jr-row { grid-template-columns: 52px 30px minmax(0, 1fr); }
       .ad-journal .jr-t { white-space: normal; }
@@ -4156,6 +3974,23 @@
     .jobs-day-other { background: var(--danger-soft); }
     .jobs-day-lbl { align-self: flex-start; height: 14px; margin-top: 3px; font-family: "IBM Plex Mono", monospace; font-size: .6rem;
       color: var(--text-muted); white-space: nowrap; }
+    /* «Пластик» (История): taller day columns, the value over a column, today lighter; the share bar */
+    .plastic-days .jobs-day-bar { height: 150px; }
+    .plastic-fill { background: var(--info); }
+    .plastic-today .plastic-fill, .plastic-part .plastic-fill { opacity: .5; }
+    .plastic-few .jobs-day-lbl { align-self: center; }
+    .plastic-val { height: 14px; margin-bottom: 2px; font-family: "IBM Plex Mono", monospace; font-size: .6rem;
+      color: var(--text-dim); white-space: nowrap; }
+    .plastic-tab td.plastic-num { font-family: "IBM Plex Mono", monospace; white-space: nowrap; }
+    .plastic-share { display: inline-block; width: 64px; height: 6px; margin-right: 6px; border-radius: 3px;
+      background: var(--bg-soft); overflow: hidden; vertical-align: middle; }
+    .plastic-share i { display: block; height: 100%; background: var(--info); }
+    .plastic-note { margin: 14px 0 0; font-size: .72rem; color: var(--text-muted); max-width: 72ch; }
+    @media (max-width: 480px) { .plastic-val { font-size: .5rem; } .plastic-share { width: 40px; } }
+    /* a phone's stacked table has no column heads: the prints without a weight stay in the tiles */
+    @media (max-width: 640px) {
+      .plastic-tab th:nth-child(4), .plastic-tab td:nth-child(4) { display: none; }
+    }
     /* the table of prints: a click on a row unfolds its details (IA §7); two lines per print on a phone */
     .jobs-chips { margin-bottom: 12px; }
     .jobs-table td { white-space: nowrap; }
@@ -4203,16 +4038,21 @@
       .jobs-table td.job-name { max-width: 180px; }
     }
     /* tablets and phones: two lines a print (IA §7: ≈ 60 px instead of a 150 px card) —
-       «P3 · 23:46 · Втулка» and the result, «1ч 7м · план 1ч 34м +5%» and the pauses; a running print
-       adds «Идёт 47% · осталось 3ч» as a third line. The model, the layers, the end and the full name
-       are in the unfolded details. */
+       «P3 · 23:46 · Втулка» and the result, «1ч 7м · план 1ч 34м +5%», the grams and the pauses; a
+       running print adds «Идёт 47% · осталось 3ч» as a third line. The model, the layers, the end and
+       the full name are in the unfolded details. The printer's name gives way (cut with «…») before
+       the job's, which keeps 7em at least; a phone has the job's name on a line of its own (below). */
     @media (max-width: 1100px) {
       .jobs-table-wrap { overflow: visible; }
       .jobs-table thead { display: none; }
       .jobs-table, .jobs-table tbody { display: block; width: 100%; }
-      .jobs-table tr.job-row { display: grid; grid-template-columns: auto auto minmax(0, 1fr) auto; gap: 3px 10px; align-items: baseline;
-        grid-template-areas: "printer when name state" "dur dur dur pauses"; padding: 9px 12px; border-bottom: 1px solid var(--line); }
-      .jobs-table tr.job-row.job-open { grid-template-areas: "printer when name name" "dur dur dur pauses" "state state state state"; }
+      .jobs-table tr.job-row { display: grid; grid-template-columns: minmax(0, max-content) max-content minmax(7em, 1fr) max-content;
+        gap: 3px 10px; align-items: baseline;
+        grid-template-areas: "printer when name state" "dur dur mat pauses"; padding: 9px 12px; border-bottom: 1px solid var(--line); }
+      .jobs-table tr.job-row.job-open { grid-template-areas: "printer when name name" "dur dur mat pauses" "state state state state"; }
+      .jobs-table td.job-printer { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      .jobs-table td.job-material { grid-area: mat; justify-self: end; }
+      .jobs-table td.job-material.job-nil { visibility: hidden; }   /* «—»: no grams known, nothing to say */
       .jobs-table td { display: block; padding: 0 !important; border: 0 !important; min-width: 0; }
       .jobs-table td:empty { display: none; }
       .jobs-table tr.job-open td:first-child { box-shadow: none; }
@@ -4237,6 +4077,11 @@
     }
     @media (max-width: 640px) {
       .jobs-reasons { grid-template-columns: minmax(0, 1fr); }
+      /* a phone (QA 17.11): printer · start and the result, the job's name on its own line (in one line
+         with them it came down to 0–10 px), then the duration, the grams and the pauses */
+      .jobs-table tr.job-row { grid-template-columns: minmax(0, 1fr) max-content max-content;
+        grid-template-areas: "printer when state" "name name name" "dur mat pauses"; }
+      .jobs-table tr.job-row.job-open { grid-template-areas: "printer when when" "name name name" "dur mat pauses" "state state state"; }
     }
 
     /* === 👤 «Этот браузер» and «Админ» (IA §4, §8, §9; plan step 3) === */
@@ -4683,15 +4528,15 @@
     html[data-theme="glass"] .fleet-section::before { display: none; }
 
     /* capsules: buttons, chips, badges, segments — a clear drop with the light on its upper edge */
-    html[data-theme="glass"] :is(.pc-chip, .pc-ctl, .farm-chip, .fb-btn, .farm-more, .panel-badge, .me-btn, .ghost-btn, .sort-btn,
+    html[data-theme="glass"] :is(.pc-chip, .pc-ctl, .farm-chip, .fb-btn, .farm-more, .me-btn, .ghost-btn,
       .status-badge, .nf-badge:not(.fatal), .ams-badge, .bd-btn, .ad-btn, .nf-btn:not(.primary), .scroll-top-btn, .nf-bell, .hist-btn, .logout-btn) {
       background-color: var(--glass-chip); border-color: var(--glass-chip-line); box-shadow: var(--glass-drop-light); border-radius: 999px;
     }
-    html[data-theme="glass"] :is(.fin-row, .farm-seg, .seg, .ams-range, .seg-range, .adm-seg) {
+    html[data-theme="glass"] :is(.fin-row, .farm-seg, .seg, .ams-range, .adm-seg) {
       background-color: var(--glass-chip); border-color: var(--glass-chip-line); border-radius: 999px;
     }
-    html[data-theme="glass"] :is(.farm-seg, .seg, .ams-range, .seg-range, .adm-seg) button { border-radius: 999px; border-color: transparent; }
-    html[data-theme="glass"] :is(.farm-seg button.active, .ams-range button.active, .seg-range button.active, .seg button.active, .adm-seg button.active, .farm-chip.on) {
+    html[data-theme="glass"] :is(.farm-seg, .seg, .ams-range, .adm-seg) button { border-radius: 999px; border-color: transparent; }
+    html[data-theme="glass"] :is(.farm-seg button.active, .ams-range button.active, .seg button.active, .adm-seg button.active, .farm-chip.on) {
       background-color: var(--glass-sel); background-image: none; color: var(--text); box-shadow: var(--glass-drop-light);
     }
     html[data-theme="glass"] .farm-chip.on { border-color: var(--glass-blue); }
@@ -4837,7 +4682,7 @@
     html[data-theme="night"] .status-badge::before { box-shadow: none; }
     html[data-theme="night"] :is(.status-dot-live, .ams-dot.on) { box-shadow: none; }
     html[data-theme="night"] .status-chip .status-dot-live { box-shadow: none; }
-    html[data-theme="night"] :is(.pc-chip, .farm-chip, .fb-btn, .sort-btn, .farm-seg) { background: transparent; }
+    html[data-theme="night"] :is(.pc-chip, .farm-chip, .fb-btn, .farm-seg) { background: transparent; }
     html[data-theme="night"] .pc-chip { border-radius: 6px; }
     html[data-theme="night"] .printer-visual { background: #000000; border-radius: 8px; }
     html[data-theme="night"] .printer-visual::after { display: none; }
@@ -4874,9 +4719,9 @@
     html[data-theme="dark-classic"] .status-badge { border-radius: 3px; letter-spacing: 0.04em; }
     html[data-theme="dark-classic"] .status-badge::before { box-shadow: none; border-radius: 1px; }
     html[data-theme="dark-classic"] :is(.status-dot-live, .ams-dot.on) { box-shadow: none; }
-    html[data-theme="dark-classic"] :is(.pc-chip, .pc-ctl, .farm-chip, .fb-btn, .farm-more, .panel-badge, .me-btn, .ghost-btn,
-      .sort-btn, .farm-seg, .seg, .ams-badge, .nf-badge, .nf-strip, .ams-range, .seg-range, .adm-seg, .fin-row, .nf-bell) { border-radius: 4px; }
-    html[data-theme="dark-classic"] :is(.ams-range, .seg-range) button { border-radius: 0; }
+    html[data-theme="dark-classic"] :is(.pc-chip, .pc-ctl, .farm-chip, .fb-btn, .farm-more, .me-btn, .ghost-btn,
+      .farm-seg, .seg, .ams-badge, .nf-badge, .nf-strip, .ams-range, .adm-seg, .fin-row, .nf-bell) { border-radius: 4px; }
+    html[data-theme="dark-classic"] .ams-range button { border-radius: 0; }
     html[data-theme="dark-classic"] .printer-visual { border-radius: 4px; background: #181818; }
     html[data-theme="dark-classic"] .printer-visual::after { border-radius: 2px; }
     html[data-theme="dark-classic"] .progress-track { height: 4px; border-radius: 0; border: 0; background: #2b2b2b; }
@@ -4915,7 +4760,7 @@
     html[data-theme="cosmos"] .printer-card.error { box-shadow: 0 12px 34px rgba(0, 0, 0, 0.55), 0 0 32px var(--danger-shadow-strong); }
     html[data-theme="cosmos"] .printer-card.paused { box-shadow: 0 12px 34px rgba(0, 0, 0, 0.55), 0 0 28px var(--warn-shadow); }
     html[data-theme="cosmos"] .printer-card.offline { box-shadow: 0 10px 26px rgba(0, 0, 0, 0.45); }
-    html[data-theme="cosmos"] :is(.pc-chip, .farm-chip, .fb-btn, .sort-btn) { border-radius: 10px; }
+    html[data-theme="cosmos"] :is(.pc-chip, .farm-chip, .fb-btn) { border-radius: 10px; }
     html[data-theme="cosmos"] .farm-chip { border-radius: 999px; }
     html[data-theme="cosmos"] .progress-fill { box-shadow: 0 0 10px var(--info-glow); }
     html[data-theme="cosmos"] .printer-card.paused .progress-fill { box-shadow: 0 0 10px var(--warn-shadow); }
@@ -4965,7 +4810,7 @@
     html:not([data-theme]) .pc-ctl { border-radius: 14px; }
     html:not([data-theme]) .printer-visual { border-radius: 20px; border-color: transparent; box-shadow: inset 0 1px 3px rgba(0, 6, 12, 0.5); }
     html:not([data-theme]) .printer-visual::after { border-radius: 15px; }
-    html:not([data-theme]) :is(.farm-chip, .fb-btn, .sort-btn, .farm-seg, .fin-row) { border-color: transparent; background-color: rgba(2, 14, 24, 0.40); }
+    html:not([data-theme]) :is(.farm-chip, .fb-btn, .farm-seg, .fin-row) { border-color: transparent; background-color: rgba(2, 14, 24, 0.40); }
     html:not([data-theme]) .fin-row { border-radius: 16px; }
     html:not([data-theme]) .farm-seg, html:not([data-theme]) .fb-btn { border-radius: 14px; }
     html:not([data-theme]) .farm-chip.on, html:not([data-theme]) .farm-seg button.active { background-image: linear-gradient(rgba(45, 212, 191, 0.16), rgba(45, 212, 191, 0.16)); border-color: rgba(45, 212, 191, 0.45); }
@@ -4974,4 +4819,50 @@
     /* a phone: «Принтеры» has no panel around the grid (as in every theme), the slabs lie on the sea */
     @media (max-width: 900px) {
       html:not([data-theme]) .fleet-section { background: none; box-shadow: none; border-radius: 0; }
+    }
+
+    /* === QA 17.11, part C1 === */
+    /* a [hidden] row or button stays hidden whatever its class's display (the glass photo's row in
+       👤 outside «Стекло», «Показать ещё 50» of «Действия» with everything shown) */
+    .me-row[hidden], .jobs-more[hidden] { display: none; }
+    /* a card head whose name does not fit beside its pills (cardNameFit): the name on its own line */
+    .pc-toprow[data-wrap] { flex-wrap: wrap; row-gap: 4px; }
+    .pc-toprow[data-wrap] > .printer-name { flex: 1 1 100%; }
+    /* the poll stopped answering (LIVE_DOWN_MS, two polls): the cards are the last answer, dimmed */
+    .printer-grid.fleet-stale .printer-card { opacity: 0.55; filter: saturate(0.4); transition: opacity 0.3s, filter 0.3s; }
+    /* an offline card's «Нет связи · 2ч 5м» */
+    .stage-badge.pc-off-since { color: var(--text-muted); }
+    /* the ⋯ menu's printer (a phone's sheet covers the card) */
+    .pm-title { padding: 6px 9px 4px; font-size: 0.74rem; font-weight: 700; color: var(--text-dim);
+      overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    /* «Админ → Система» read nothing: one line with «Повторить», the switches and fields off */
+    .srv-load-err { display: flex; align-items: center; justify-content: space-between; gap: 8px 12px; flex-wrap: wrap;
+      margin: 0 0 12px; padding: 10px 12px; border: 1px solid var(--danger); border-radius: 9px; font-size: 0.8rem;
+      color: var(--danger-11); background-color: var(--bg-elev);
+      background-image: linear-gradient(var(--danger-soft), var(--danger-soft)); }
+    .srv-load-err[hidden] { display: none; }
+    .srv-unknown .toggle-switch input:disabled + .toggle-slider { opacity: 0.35; cursor: default; }
+    .srv-unknown input:disabled, .srv-unknown select:disabled, .srv-unknown textarea:disabled { opacity: 0.55; }
+    /* «Управление» in «Парк»: a long list of caps wraps as a rounded box, not a pill split in two */
+    #adminPrintersTable .act-tag { white-space: normal; border-radius: 9px; line-height: 1.5; }
+    /* contrast of the small status words (4.5:1 at 11 px): «Светлая»'s «ЗАВЕРШЕНО» on a lighter green,
+       «Стекло»'s grey «ОТМЕНЕНО» / «ОФЛАЙН» in the text's own dim colour */
+    html[data-theme="light"] .status-badge.finished { background: var(--ok-2); }
+    html[data-theme="glass"] .status-badge:is(.cancelled, .offline),
+    html[data-theme="glass"] :is(.event-badge-cancelled, .event-badge-offline) { color: var(--text-dim); }
+    /* touch targets on a phone (QA 17.11): 40 px at least on the shorter side — the box keeps its
+       look, an invisible ::after around it takes the taps (as the card's ⋯ and ⚠ already do) */
+    @media (max-width: 899px) {
+      /* (the eyes in their fields are absolutely placed already: their own box holds the ::after) */
+      :is(.farm-chip, .fr-toggle, .hist-help, .adm-link, #adminPrintersTable .ghost-btn, #adminUsersTable .ghost-btn) { position: relative; }
+      :is(.farm-chip, .fr-toggle, .hist-help, .adm-link, #adminPrintersTable .ghost-btn, #adminUsersTable .ghost-btn, #tgTokenEye, #prnAccessEye)::after {
+        content: ""; position: absolute; inset: min(0px, calc(50% - 20px)) min(0px, calc(50% - 20px)); }
+      /* the chips' rows: 34 px chips 6 px apart, each taking 3 px of the gap — 40 px with no overlap
+         (a 30 px chip's 5 px would reach into the next row's) */
+      .farm-chip { min-height: 34px; }
+      .farm-chips { row-gap: 6px; }
+      .farm-chip::after { inset: -3px min(0px, calc(50% - 20px)); }
+      .nf-x { width: 40px; height: 40px; }
+      /* an AMS row's drying line takes a second line in its 60 px rather than «Сушка выклю…» at 360 px */
+      .ams-row-s { white-space: normal; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-height: 1.25; }
     }

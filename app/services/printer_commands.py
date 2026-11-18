@@ -33,16 +33,20 @@ import copy
 import json
 import logging
 import os
+import re
 import threading
 import time
 from typing import Any, Callable, Dict, Optional, Tuple
 
 from app.domain.models import PrinterKind, PrinterState, PrinterStatus
-from app.services import ams_drying, bambu_extras
+from app.services import ams_drying, bambu_extras, bambu_models, creality_features, creality_parts
 from app.services.normalizer import (TRAY_EXTERNAL, TRAY_NONE, _nozzle_range, _tray_now, normalize_bambu,
                                      normalize_ws_dict)
 from app.services.utils import as_int, map_state
-from app.vendor.pybambu.commands import AMS_FILAMENT_DRYING_TEMPLATE, SWITCH_AMS_TEMPLATE
+from app.vendor.pybambu.commands import (AMS_FILAMENT_DRYING_TEMPLATE, AMS_FILAMENT_SETTING_TEMPLATE,
+                                        AMS_READ_RFID_TEMPLATE, EXTRUDER_GCODE, MOVE_AXIS_GCODE,
+                                        SWITCH_AMS_TEMPLATE)
+from app.vendor.pybambu.const import Features
 
 logger = logging.getLogger(__name__)
 _monotonic = time.monotonic  # indirection so tests can drive the in-flight / refresh clock
@@ -75,8 +79,8 @@ _passive_distrust: set = set()
 
 # Capability keys (/api/printers "caps", see caps_for). tune = temperatures,
 # chamber M141, fans and print speed; ams = AMS load / unload / drying and the
-# external spool unload.
-CAP_KEYS = ("light", "pause", "resume", "stop", "cooldown", "eject", "tune", "ams")
+# external spool unload; motion = «Домой» (home) and the axis jog (move).
+CAP_KEYS = ("light", "pause", "resume", "stop", "cooldown", "eject", "tune", "ams", "motion")
 LIGHT_ACTIONS = ("light_on", "light_off")
 PRINT_CONTROL = ("pause", "resume", "stop")
 ACTION_CAP = {
@@ -84,14 +88,31 @@ ACTION_CAP = {
     "cooldown": "cooldown", "eject": "eject",
     "speed": "tune", "fans": "tune", "preheat": "tune", "chamber": "tune",
     "ams_load": "ams", "ams_unload": "ams", "dry_start": "ams", "dry_stop": "ams",
+    "home": "motion", "move": "motion", "extrude": "motion",
+    "ams_rfid": "ams", "ams_set": "ams", "feeder_setting": "ams", "skip_objects": "stop",
+    "airduct": "tune",
 }
 # Actions per printer kind. None = the full Bambu set (see _build_payload).
 # Creality: WS :9999 "set" — print control, the light (lightSw) and the
 # CREALITY_SET_ACTIONS (_build_creality); no chamber heat / eject / AMS (CFS).
-# Klipper: Moonraker — print control and the light pin.
-CREALITY_SET_ACTIONS = ("speed", "fans", "preheat", "cooldown")
-CREALITY_ACTIONS = ("pause", "resume", "stop", "light_on", "light_off") + CREALITY_SET_ACTIONS
-KLIPPER_ACTIONS = ("pause", "resume", "stop", "light_on", "light_off")
+# Klipper: Moonraker — print control, the light pin and MOTION_ACTIONS (G-code script).
+MOTION_ACTIONS = ("home", "move", "extrude")
+CFS_ACTIONS = ("cfs_set", "cfs_load", "cfs_unload", "cfs_rfid")
+# The error's own answers on the WebSocket, as the K1C's web page sends them (read 16.11.2026):
+# cleanErr clears the error, restartFirmware restarts it for the codes the page does that for.
+ERROR_ACTIONS = ("clear_error", "restart_firmware")
+CREALITY_SET_ACTIONS = ("feeder_setting", "speed", "fans", "preheat", "cooldown", "chamber", "eject",
+                        "skip_objects") + CFS_ACTIONS + MOTION_ACTIONS + ERROR_ACTIONS
+MSG_RESTART_PRINTING = "Перезапуск прошивки прервёт печать — сначала остановите её"
+# Creality busy (deviceState ≠ 0: homing, levelling…; feedState ≠ 0: a CFS feed): no eject, CFS or axis move.
+MSG_CREALITY_PREPARING = "Дождитесь окончания печати или подготовки принтера"
+# Creality with Klipper's API (K2 Plus): «Сервис» of the ⋯ menu, macros through Moonraker
+# (app/services/klipper_service.py: what each one runs), an idle printer only.
+SERVICE_ACTIONS = ("svc_bed_mesh", "svc_nozzle_pid", "svc_bed_pid", "svc_shaper", "svc_belts", "svc_fw_restart")
+MSG_NO_KLIPPER_API = "У этого принтера нет Klipper API — сервисные команды только с его экрана"
+MSG_SERVICE_BUSY = "Сервис — только когда принтер свободен: не печатает, не на паузе, без ошибки"
+CREALITY_ACTIONS = ("pause", "resume", "stop", "light_on", "light_off") + CREALITY_SET_ACTIONS + SERVICE_ACTIONS
+KLIPPER_ACTIONS = ("pause", "resume", "stop", "light_on", "light_off") + MOTION_ACTIONS
 SUPPORTED_ACTIONS: Dict[str, Optional[tuple]] = {
     "bambu": None,
     "creality": CREALITY_ACTIONS,
@@ -125,6 +146,8 @@ STATE_MSG = {
     "cooldown": "Во время печати остудить нельзя — сначала пауза или стоп",
     "eject": "Стол опускается, только когда принтер стоит — не во время печати и не на паузе",
     "speed": "Скорость меняется только во время печати",
+    "motion": "Оси двигаются, только когда принтер стоит — не во время печати и не на паузе",
+    "rfid": "Метку перечитывают только в простое — AMS при этом крутит катушку",
     "unknown": "Состояние принтера неизвестно — повторите через несколько секунд",
 }
 
@@ -152,6 +175,57 @@ def build_light(on: bool, node: str = "chamber_light") -> Dict[str, Any]:
 
 def build_print_action(action: str) -> Dict[str, Any]:
     return {"print": {"sequence_id": "0", "command": action, "param": ""}}
+
+
+MSG_SKIP_NONE = "Не выбраны детали"
+MSG_SKIP_NO_MAP = "Схема деталей этого задания ещё не получена"
+MSG_SKIP_UNLABELED = "В задании не включена маркировка деталей — принтер не может их пропускать"
+MSG_SKIP_UNKNOWN = "Таких деталей нет в текущем задании"
+MSG_SKIP_DONE = "Эти детали уже пропущены"
+MSG_SKIP_ALL = "Пропустить все детали нельзя — для этого есть «Стоп»"
+
+
+def build_skip_objects(params: Dict[str, Any], status: Optional[PrinterStatus]) -> Dict[str, Any]:
+    """skip_objects of the running job: only its own parts, never all of them, never twice."""
+    ids = params.get("objects")
+    if (not isinstance(ids, list) or not ids or len(ids) > 500
+            or any(not isinstance(i, int) or isinstance(i, bool) or i < 0 for i in ids)):
+        raise ValueError(MSG_SKIP_NONE)
+    if status is None:
+        raise ValueError(MSG_NO_TELEMETRY)
+    refusal = state_refusal("skip_objects", status.state.value)
+    if refusal:
+        raise ValueError(refusal)
+    from app.services import job_previews, project_summary
+    summary = {}
+    if job_previews.valid_key(status.project_key):
+        try:
+            path = job_previews.DIRECTORY / (status.project_key + ".json")
+            summary = project_summary.from_stored(json.loads(path.read_text(encoding="utf-8")))
+        except (OSError, ValueError):
+            summary = {}
+    parts = {p["id"] for p in summary.get("parts") or []}
+    if not parts:
+        raise ValueError(MSG_SKIP_NO_MAP)
+    if not summary.get("skippable"):
+        raise ValueError(MSG_SKIP_UNLABELED)
+    if not set(ids) <= parts:
+        raise ValueError(MSG_SKIP_UNKNOWN)
+    done = set(status.skipped_objects or [])
+    new = sorted(set(ids) - done)
+    if not new:
+        raise ValueError(MSG_SKIP_DONE)
+    if not parts - done - set(new):
+        raise ValueError(MSG_SKIP_ALL)
+    return {"print": {"sequence_id": "0", "command": "skip_objects", "obj_list": new}}
+
+
+MSG_NO_AIRDUCT = "У принтера нет переключаемого воздуховода"
+
+
+def build_airduct(mode: int) -> Dict[str, Any]:
+    """0 cooling (chamber air out), 1 heating (kept inside, through the filter): pybambu set_airduct_mode."""
+    return {"print": {"sequence_id": "0", "command": "set_airduct", "modeId": mode, "submode": -1}}
 
 
 def build_error_ignore(err: int, job_id: str) -> Dict[str, Any]:
@@ -225,15 +299,14 @@ CHAMBER_MAX = 65
 
 
 def has_chamber_heater(device_type: Optional[str]) -> bool:
-    return str(device_type or "").upper().startswith("H2")
+    return bambu_models.has(device_type, "chamber_heater")
 
 
 def has_second_light(model: Optional[str]) -> bool:
     """H2 / X2 have a second chamber lamp: the lib's Features.CHAMBER_LIGHT_2, a
     model-only flag (asking the lib itself logs an ERROR and says False until
     the firmware version is known)."""
-    m = str(model or "").upper()
-    return m.startswith("H2") or m.startswith("X2")
+    return bambu_models.has(model, "second_light")
 
 
 def bambu_model(printer_id: str, prn: Optional[Dict[str, Any]]) -> str:
@@ -274,6 +347,92 @@ def build_cooldown(model: Optional[str] = None) -> Dict[str, Any]:
 def build_eject() -> Dict[str, Any]:
     """Отвести стол вниз на 30 мм относительным ходом — без хоуминга, безопасно на простое."""
     return build_gcode(["M17", "G91", "G1 Z30 F900", "G90", "M400"])
+
+
+# The axis jog: one relative step per press. Feed rates mm/min: Bambu Studio's
+# own jog (XY 3000, Z 900 as the eject); Creality / Klipper Z 600 (their own UIs).
+MOVE_AXES = ("x", "y", "z")
+MOVE_MAX_MM = 100
+MOVE_FEED_XY = 3000
+MOVE_FEED_Z_BAMBU = 900
+MOVE_FEED_Z = 600
+MSG_BAD_STEP = "Шаг: целое от -100 до 100 мм, не 0"   # = MOVE_MAX_MM
+# Filament push (+) / retract (−) at the nozzle: only a hot nozzle extrudes (the
+# firmware's cold-extrusion floor; Bambu Studio greys its buttons out below 170 °C).
+EXTRUDE_MAX_MM = 50
+EXTRUDE_TEMP_MIN = 170
+EXTRUDE_FEED = 300
+MSG_BAD_EXTRUDE = "Длина: целое от -50 до 50 мм, не 0"   # = EXTRUDE_MAX_MM
+MSG_CREALITY_NO_EXTRUDE = "Creality: подача и втягивание только с экрана принтера"
+MSG_COLD_NOZZLE = "Сопло холодное — подача и втягивание только от 170 °C, сначала нагрев"
+# «Нагрев» to less than these is a cooldown in effect, under the cooldown's state
+# rules (not mid-print; QA 17.11: only exactly 0 was, so «1» or a typo «20» for
+# «200» cooled the nozzle under a running print). Nozzle: EXTRUDE_TEMP_MIN, the
+# firmware's cold-extrusion floor: below it the extruder stops and the print
+# starves just as after «Выкл». Bed: 30 °C, the lowest bed temperature of the
+# stock filament profiles (TPU 30, PLA on a cool plate 35): below it the bed is
+# at room temperature, i.e. off, and the part may come loose. A dropped digit
+# lands under both («6» for «60», «10» for «100», «25» for «250»); any working
+# temperature is above them, so a normal change mid-print still goes.
+PREHEAT_NOZZLE_MIN = EXTRUDE_TEMP_MIN
+PREHEAT_BED_MIN = 30
+
+
+def preheat_cools(params: Dict[str, Any]) -> bool:
+    """Does a «preheat» set the nozzle or the bed under its working floor?"""
+    nozzle, bed = params.get("nozzle"), params.get("bed")
+    return ((_is_int(nozzle) and nozzle < PREHEAT_NOZZLE_MIN)
+            or (_is_int(bed) and bed < PREHEAT_BED_MIN))
+
+
+def move_params(params: Dict[str, Any]) -> Tuple[str, int]:
+    """(axis, mm) of a «move» command; ValueError (ru) on a bad one."""
+    axis = str(params.get("axis") or "").lower()
+    if axis not in MOVE_AXES:
+        raise ValueError("Ось: X, Y или Z")
+    dist = params.get("dist")
+    if not _is_int(dist) or dist == 0 or abs(dist) > MOVE_MAX_MM:
+        raise ValueError(MSG_BAD_STEP)
+    return axis, dist
+
+
+def extrude_params(params: Dict[str, Any]) -> int:
+    """mm of an «extrude» command (+ push, − retract); ValueError (ru) on a bad one."""
+    dist = params.get("dist")
+    if not _is_int(dist) or dist == 0 or abs(dist) > EXTRUDE_MAX_MM:
+        raise ValueError(MSG_BAD_EXTRUDE)
+    return dist
+
+
+def build_extrude(dist: int) -> Dict[str, Any]:
+    """Подать (+) / втянуть (−) филамент на dist мм — G-code кнопок экструдера Bambu Studio."""
+    return {"print": {"sequence_id": "0", "command": "gcode_line",
+                      "param": EXTRUDER_GCODE.format(distance=dist)}}
+
+
+def build_home() -> Dict[str, Any]:
+    """Хоуминг всех осей (G28), как кнопка «Домой» в Bambu Studio."""
+    return build_gcode(["G28"])
+
+
+def build_move(axis: str, dist: int) -> Dict[str, Any]:
+    """Сдвиг оси на dist мм относительным ходом с программными упорами
+    (M211 + ref mode) — ровно то, что шлёт Bambu Studio (pybambu MOVE_AXIS_GCODE)."""
+    speed = MOVE_FEED_Z_BAMBU if axis == "z" else MOVE_FEED_XY
+    return {"print": {"sequence_id": "0", "command": "gcode_line",
+                      "param": MOVE_AXIS_GCODE.format(axis=axis.upper(), distance=dist, speed=speed)}}
+
+
+def motion_gcode(action: str, params: Dict[str, Any]) -> str:
+    """The plain G-code of home / move / extrude for Creality and Klipper (both run Klipper:
+    it keeps its own soft limits and refuses a move of an axis not homed)."""
+    if action == "home":
+        return "G28"
+    if action == "extrude":
+        return "M83\nG1 E%d F%d" % (extrude_params(params), EXTRUDE_FEED)
+    axis, dist = move_params(params)
+    feed = MOVE_FEED_Z if axis == "z" else MOVE_FEED_XY
+    return "G91\nG1 %s%d F%d\nG90" % (axis.upper(), dist, feed)
 
 
 def build_ams_load(ams_id: int, slot_id: int, curr_temp: int, tar_temp: int) -> Dict[str, Any]:
@@ -344,6 +503,14 @@ def _build_payload(action: str, params: Dict[str, Any], model: Optional[str] = N
         return build_cooldown(model)
     if action == "eject":
         return build_eject()
+    if action == "airduct":
+        return build_airduct(_req_int(params, "mode", 0, 1, "Режим воздуховода"))
+    if action == "home":
+        return build_home()
+    if action == "move":
+        return build_move(*move_params(params))
+    if action == "extrude":
+        return build_extrude(extrude_params(params))
     raise ValueError(f"Неизвестная команда: {action}")
 
 
@@ -365,10 +532,15 @@ CREALITY_FAN_P = {"part": 0, "chamber": 1, "aux": 2}
 CREALITY_FAN_FIELD = {"part": "fan_speed_pct", "aux": "aux_fan_pct", "chamber": "case_fan_pct"}
 FAN_NAMES = {"part": "Обдув детали", "aux": "Вспомогательный обдув", "chamber": "Обдув камеры"}
 # (nozzle, bed) ceilings °C per registry model (Creality specs; the K1C reports
-# maxNozzleTemp 300 / maxBedTemp 100 itself); an unknown model gets the lower
-# fallback. A lower ceiling the printer reports wins (creality_temp_limits).
-CREALITY_TEMP_MAX = {"k1max": (300, 100), "k1c": (300, 100), "ender5max": (300, 100)}
+# maxNozzleTemp 300 / maxBedTemp 100 itself). A lower ceiling the printer
+# reports wins (creality_temp_limits). A model not listed (K2, K2 Pro, the
+# Ender-3 V3 line…) takes the ceiling the printer reports, at most the highest
+# listed one; the lower fallback only when it reports none (QA 17.11: a K1 was
+# held at 260 °C).
+CREALITY_TEMP_MAX = {"k2plus": (350, 120), "k1max": (300, 100), "k1c": (300, 100), "k1": (300, 100),
+                     "k1se": (300, 100), "ender5max": (300, 100)}
 CREALITY_TEMP_FALLBACK = (260, 100)
+CREALITY_TEMP_TOP = tuple(max(v[i] for v in CREALITY_TEMP_MAX.values()) for i in (0, 1))
 
 
 def build_creality_nozzle(temp: int) -> Dict[str, Any]:
@@ -396,11 +568,16 @@ def build_creality_cooldown() -> list:
 
 def creality_temp_limits(model: Optional[str], data: Optional[Dict[str, Any]] = None) -> Tuple[int, int]:
     """(nozzle, bed) ceilings °C: the model's, lowered to the printer's own
-    maxNozzleTemp / maxBedTemp when it reports a lower one."""
-    nozzle, bed = CREALITY_TEMP_MAX.get(str(model or "").lower(), CREALITY_TEMP_FALLBACK)
+    maxNozzleTemp / maxBedTemp when it reports a lower one; a model not in
+    CREALITY_TEMP_MAX takes the reported one (at most CREALITY_TEMP_TOP), else
+    the fallback."""
+    known = CREALITY_TEMP_MAX.get(str(model or "").lower())
     data = data or {}
     reported = [data.get("max_nozzle_temp"), data.get("max_bed_temp")]
-    nozzle, bed = [min(lim, r) if _is_int(r) and r > 0 else lim for lim, r in zip((nozzle, bed), reported)]
+    if known is None:
+        return tuple(min(top, r) if _is_int(r) and r > 0 else low
+                     for top, low, r in zip(CREALITY_TEMP_TOP, CREALITY_TEMP_FALLBACK, reported))
+    nozzle, bed = [min(lim, r) if _is_int(r) and r > 0 else lim for lim, r in zip(known, reported)]
     return nozzle, bed
 
 
@@ -408,6 +585,12 @@ def _build_creality(action: str, params: Dict[str, Any], model: Optional[str], d
     """The "set" frames of a CREALITY_SET_ACTIONS command; `data` is the
     client's live snapshot (the fans it reports, its heater ceilings).
     ValueError (ru) on a parameter error."""
+    if action == "feeder_setting":
+        return [creality_features.settings_frame(params, data)]
+    if action == "clear_error":
+        return [{"cleanErr": 1}]
+    if action == "restart_firmware":
+        return [{"restartFirmware": 1}]
     if action == "speed":
         level = params.get("level")
         if not _is_int(level) or level not in CREALITY_SPEED_PCT:
@@ -421,7 +604,12 @@ def _build_creality(action: str, params: Dict[str, Any], model: Optional[str], d
                 continue
             if data.get(CREALITY_FAN_FIELD[key]) is None:
                 raise ValueError("%s: принтер не сообщает об этом вентиляторе" % FAN_NAMES[key])
-            frames.append(build_creality_fan(key, pct))
+            if str(model).lower() == "ender5max":
+                if key == "aux" or pct not in (0, 100):
+                    raise ValueError("Ender-5 Max: обдув детали и корпуса — только вкл/выкл")
+                frames.append({("fan" if key == "part" else "fanCase"): int(pct > 0)})
+            else:
+                frames.append(build_creality_fan(key, pct))
         if not frames:
             raise ValueError("Не задан ни один вентилятор")
         return frames
@@ -434,7 +622,36 @@ def _build_creality(action: str, params: Dict[str, Any], model: Optional[str], d
         return ([build_creality_nozzle(nozzle)] if nozzle is not None else []) + \
                ([build_creality_bed(bed)] if bed is not None else [])
     if action == "cooldown":
-        return build_creality_cooldown()
+        frames = build_creality_cooldown()
+        if creality_features.chamber_limit(model, data):
+            frames.append({"boxTempControl": 0})
+        return frames
+    if action == "chamber":
+        maximum = creality_features.chamber_limit(model, data)
+        if not maximum:
+            raise ValueError("Принтер не сообщает о нагревателе камеры")
+        return [{"boxTempControl": _req_int(params, "temp", 0, maximum, "Камера")}]
+    if action in CFS_ACTIONS:
+        return [creality_features.slot_frame(action, params, data)]
+    if action == "eject":
+        if data.get("axes_homed") != "X:1 Y:1 Z:1":
+            raise ValueError("Сначала выполните «Домой»")
+        return [{"setPosition": "Z30 F600"}]
+    if action == "home":
+        # the firmware's own homing (Creality Print's); a G28 in gcodeCmd is ignored
+        # (E5, 03.11: autohome stayed X:0 Y:0 Z:0, the head never moved)
+        return [{"autohome": "X Y Z"}]
+    if action == "move":
+        # the firmware's own relative jog (E5, 03.11: «X50» moved the head 50 mm right;
+        # G91 / G1 / G90 in gcodeCmd, one frame or three, were ignored)
+        axis, dist = move_params(params)
+        return [{"setPosition": "%s%d F%d" % (axis.upper(), dist, MOVE_FEED_Z if axis == "z" else MOVE_FEED_XY)}]
+    if action == "skip_objects":
+        # the printer's own web page: excludeObjects, one part name per frame
+        return creality_parts.skip_frames(params.get("objects"), data)
+    if action == "extrude":
+        # gcodeCmd G-code is ignored by the E5 and no own extrude command is known
+        raise ValueError(MSG_CREALITY_NO_EXTRUDE)
     raise ValueError(f"Неизвестная команда: {action}")
 
 
@@ -453,18 +670,22 @@ def state_refusal(action: str, state: Optional[str], gcode_state: Optional[str] 
         return None if state == "paused" else STATE_MSG["resume"]
     if action == "stop":
         return None if state in ("printing", "paused") else STATE_MSG["stop"]
+    if action == "skip_objects":
+        return None if state in ("printing", "paused") else STATE_MSG["pause_other"]
     if action == "speed":
         return None if state in ("printing", "paused") else STATE_MSG["speed"]
-    if action in ("cooldown", "eject"):
+    if action in ("cooldown", "eject") + MOTION_ACTIONS:
+        # home / move: the eject's rules (the head and the bed stay put during a print and a pause)
+        msg = STATE_MSG["motion" if action in MOTION_ACTIONS else action]
         allowed = COOLDOWN_GCODE_STATES if action == "cooldown" else EJECT_GCODE_STATES
         if gcode_state is not None:
             if gcode_state in allowed:
                 return None
-            busy = RUNNING_GCODE_STATES | ({"PAUSE"} if action == "eject" else set())
-            return STATE_MSG[action] if gcode_state in busy else STATE_MSG["unknown"]
+            busy = RUNNING_GCODE_STATES | (set() if action == "cooldown" else {"PAUSE"})
+            return msg if gcode_state in busy else STATE_MSG["unknown"]
         blocked = ("printing",) if action == "cooldown" else ("printing", "paused")
         if state in blocked:
-            return STATE_MSG[action]
+            return msg
         return STATE_MSG["unknown"] if state in (None, "unknown", "offline") else None
     return None
 
@@ -589,9 +810,14 @@ def _publish_nowait(printer_id: str, payload: Dict[str, Any], waiter: Optional[D
 
 
 def _apply_light_mode(printer_id: str, nodes, on: bool) -> None:
-    """Write the confirmed mode into the lib's lights object as its own
-    TurnChamberLight* do (value + *_override), so the next normalize reads it
-    even if no lights_report follows (delta-only printers: minutes)."""
+    """Write the confirmed mode into the lib's lights object, so the next
+    normalize reads it even if no lights_report follows (delta-only printers:
+    minutes). The value only, and any *_override cleared: the lib's own
+    TurnChamberLight* keep an override until a report says that very mode, so
+    a lamp the printer lit itself later (P4 03.11.2026: «off» from the panel,
+    the P2S lit it again mid-print) stayed «off» on the card while it shone.
+    The printer has already confirmed the command: its reports from here on
+    are the truth."""
     collector = _store.get_collector(printer_id) if _store is not None else None
     try:
         live_device = getattr(collector, "live_device", None)
@@ -602,7 +828,7 @@ def _apply_light_mode(printer_id: str, nodes, on: bool) -> None:
         mode = "on" if on else "off"
         for node in nodes:                                   # "chamber_light", "chamber_light2"
             setattr(lights, node, mode)
-            setattr(lights, node + "_override", mode)
+            setattr(lights, node + "_override", "")
     except Exception:
         logger.warning("[commands] %s light state not applied", printer_id, exc_info=True)
 
@@ -642,14 +868,17 @@ def _send_bambu_light(printer_id: str, prn: Dict[str, Any], on: bool) -> Dict[st
     return r
 
 
-def _send_klipper(printer_id: str, action: str) -> Dict[str, Any]:
+def _send_klipper(printer_id: str, action: str, script: Optional[str] = None) -> Dict[str, Any]:
     """Klipper: Moonraker JSON-RPC through the collector's live WS session;
-    Moonraker's reply (or its silence) is the verdict."""
+    Moonraker's reply (or its silence) is the verdict. `script`: a G-code
+    script (home / move) instead of the client's own action."""
     collector = _store.get_collector(printer_id) if _store is not None else None
     client = getattr(collector, "client", None)
     if client is None or not hasattr(client, "run_action"):
         return {"success": False, "detail": MSG_NO_COLLECTOR, "replied": False}
     try:
+        if script is not None:
+            return client.run_gcode(script, timeout=REPLY_TIMEOUT)
         return client.run_action(action, timeout=REPLY_TIMEOUT)
     except Exception as e:
         logger.error("[commands] %s klipper %s failed", printer_id, action, exc_info=True)
@@ -776,7 +1005,35 @@ def _send_creality(printer_id: str, action: str, frames: Optional[list] = None) 
     if r.get("partial"):
         # some "set" frames went out before the socket failed: «sent», with how many
         return {"success": True, "detail": r.get("detail") or "отправлено частично"}
+    if action in LIGHT_ACTIONS and _creality_light_follows(collector, action == "light_on"):
+        # no reply to the command, but the printer pushed the lamp's new state:
+        # «confirmed», not «sent» (a fleet «Свет всем» counted every E5 as failed)
+        return {"success": True, "replied": True, "detail": MSG_LIGHT_SEEN}
     return {"success": True, "detail": "отправлено (без подтверждения)"}
+
+
+# Creality pushes lightSw within ~1 s of a change; waited for up to this long.
+CREALITY_LIGHT_WAIT_S = 4.0
+MSG_LIGHT_SEEN = "подтверждено принтером"   # the card shows no note for it (cmdResult)
+
+
+def _creality_light_follows(collector, want: bool) -> bool:
+    """Whether the Creality client's live data reports the lamp at `want`
+    within CREALITY_LIGHT_WAIT_S (polled every 0.25 s)."""
+    get_data = getattr(getattr(collector, "client", None), "get_data", None)
+    if not callable(get_data):
+        return False
+    deadline = _monotonic() + CREALITY_LIGHT_WAIT_S
+    while True:
+        try:
+            if (get_data() or {}).get("light_on") is want:
+                return True
+        except Exception:
+            logger.debug("creality light read failed", exc_info=True)
+            return False
+        if _monotonic() >= deadline:
+            return False
+        _sleep(0.25)
 
 
 def _persist_capabilities() -> None:
@@ -892,7 +1149,7 @@ SWAP_TEMP_MIN = 170
 
 def _swap_temp_max(model: Optional[str]) -> int:
     # The H2 series hotend goes to 350 °C, the others to 300 °C.
-    return 350 if str(model or "").upper().startswith("H2") else 300
+    return 350 if bambu_models.has(model, "hotend_350") else 300
 
 
 MSG_NO_TELEMETRY = "Нет свежей телеметрии принтера — повторите через несколько секунд"
@@ -935,7 +1192,11 @@ def _change_refusal_text(errno: Any, soft_temp: Any) -> Optional[str]:
     return None
 
 _inflight_lock = threading.Lock()
-_ams_inflight: Dict[str, tuple] = {}   # printer_id -> (sent at, RawReport changes_done then)
+# printer_id -> (sent at, RawReport changes_done then, action). A tag re-read
+# (ams_rfid) turns an AMS spool too: it takes the mark as a load does, so the
+# one waits for the other (QA 17.11 hunt №9); it does not hold back cooldown,
+# eject or the axes (_inflight_blocks), which never waited for an RFID read.
+_ams_inflight: Dict[str, tuple] = {}
 
 
 class _LiveView:
@@ -1024,33 +1285,41 @@ def _locate(units: list, tray_now: Optional[int]):
     return None, None
 
 
-def _inflight_held(printer_id: str, raw: Dict[str, Any]) -> bool:
-    """Is a load / unload still on its way? Drops a mark that lapsed or that a
-    finished change settled. The caller holds _inflight_lock."""
+def _inflight_held(printer_id: str, raw: Dict[str, Any]) -> Optional[str]:
+    """The action of a load / unload / tag re-read still on its way, or None.
+    Drops a mark that lapsed or that a finished change settled. The caller
+    holds _inflight_lock."""
     mark = _ams_inflight.get(printer_id)
     if mark is None:
-        return False
-    sent_at, done_then = mark
+        return None
+    sent_at, done_then, action = mark
     if _monotonic() - sent_at >= INFLIGHT_SECONDS or raw.get("changes_done", 0) > done_then:
         del _ams_inflight[printer_id]
-        return False
-    return True
+        return None
+    return action
+
+
+def _inflight_msg(action: str) -> str:
+    """Why an AMS command waits for the one in flight (ru)."""
+    return MSG_AMS_BUSY if action == "ams_rfid" else MSG_INFLIGHT
 
 
 def _inflight_blocks(printer_id: str, raw: Dict[str, Any]) -> bool:
+    """A load / unload on its way (a tag re-read does not count here)."""
     with _inflight_lock:
-        return _inflight_held(printer_id, raw)
+        return _inflight_held(printer_id, raw) in AMS_ACTIONS
 
 
-def _claim_inflight(printer_id: str, raw: Dict[str, Any]) -> Optional[tuple]:
-    """Take the in-flight mark for a load / unload about to be published: the
-    new mark, or None when another one holds it."""
+def _claim_inflight(printer_id: str, raw: Dict[str, Any], action: str) -> Tuple[Optional[tuple], Optional[str]]:
+    """Take the in-flight mark for a load / unload / tag re-read about to be
+    published: (the new mark, None), or (None, the action holding it)."""
     with _inflight_lock:
-        if _inflight_held(printer_id, raw):
-            return None
-        mark = (_monotonic(), raw.get("changes_done", 0))
+        held = _inflight_held(printer_id, raw)
+        if held:
+            return None, held
+        mark = (_monotonic(), raw.get("changes_done", 0), action)
         _ams_inflight[printer_id] = mark
-        return mark
+        return mark, None
 
 
 def _release_inflight(printer_id: str, mark: tuple) -> None:
@@ -1138,14 +1407,110 @@ def _plan_filament_change(printer_id: str, action: str, params: Dict[str, Any], 
         return MSG_PRINTING
     if st.filament_change is not None or raw.get("busy"):
         return MSG_CHANGE_RUNNING
-    if _inflight_blocks(printer_id, raw):
-        return MSG_INFLIGHT
+    with _inflight_lock:
+        held = _inflight_held(printer_id, raw)
+    if held:
+        return _inflight_msg(held)
     ams_status = raw.get("ams_status")
     if ams_status is not None and (ams_status >> 8) & 0xFF not in AMS_FREE_MAIN_STATES:
         return MSG_AMS_BUSY
     if action == "ams_load":
         return _plan_load(params, view, model)
     return _plan_unload(view, model)
+
+
+# --- AMS: one slot — re-read its spool tag, set its spool by hand ----------------
+#
+# ams_rfid: Bambu Studio's «перечитать метку» (ams_get_rfid; firmware without
+# it: M620 R<global tray>) — it turns the AMS feeder, so only in idle, like a
+# load. ams_set: Bambu Studio's slot editor (ams_filament_setting): a generic
+# Bambu profile, the colour and the nozzle range; any time but on the slot
+# that feeds a running print.
+
+SLOT_ACTIONS = ("ams_rfid", "ams_set")
+# material -> (Bambu's generic profile id, tray_type, nozzle min, nozzle max °C)
+SPOOL_MATERIALS = {
+    "PLA": ("GFL99", "PLA", 190, 230), "PLA-CF": ("GFL98", "PLA-CF", 210, 240),
+    "PETG": ("GFG99", "PETG", 220, 260), "PETG-CF": ("GFG98", "PETG-CF", 240, 270),
+    "PCTG": ("GFG97", "PCTG", 240, 270),
+    "ABS": ("GFB99", "ABS", 240, 270), "ASA": ("GFB98", "ASA", 240, 270),
+    "TPU": ("GFU99", "TPU", 200, 250), "PA": ("GFN99", "PA", 260, 290), "PA-CF": ("GFN98", "PA-CF", 260, 290),
+    "PC": ("GFC99", "PC", 260, 280), "PVA": ("GFS99", "PVA", 190, 210), "HIPS": ("GFS98", "HIPS", 220, 250),
+}
+SPOOL_TEMP_MIN, SPOOL_TEMP_MAX = 150, 350
+MSG_SPOOL_MATERIAL = "Материал: " + ", ".join(SPOOL_MATERIALS)
+MSG_SPOOL_COLOR = "Цвет: шесть знаков RRGGBB"
+MSG_SPOOL_TEMPS = "Температура сопла: целые от 150 до 350 °C, нижняя не выше верхней"
+MSG_SPOOL_FEEDING = "Этот слот сейчас подаёт филамент в печать — сначала дождитесь конца печати"
+MSG_RFID_EXTERNAL = "У внешней катушки нет метки — только у слотов AMS"
+
+
+def build_ams_rfid(ams_id: int, slot: int, command: bool = True) -> Dict[str, Any]:
+    """Re-read a slot's spool tag: the ams_get_rfid command, or (firmware
+    without it) M620 R<global tray>."""
+    if not command:
+        return build_gcode(["M620 R%d" % (ams_id * 4 + slot)])
+    payload = copy.deepcopy(AMS_READ_RFID_TEMPLATE)
+    payload["print"].update({"ams_id": ams_id, "slot_id": slot})
+    return payload
+
+
+def build_ams_set(ams_id: int, slot: int, material: str, color: str, tmin: int, tmax: int) -> Dict[str, Any]:
+    """Set a slot's spool by hand (Bambu Studio's slot editor)."""
+    idx, tray_type, _lo, _hi = SPOOL_MATERIALS[material]
+    payload = copy.deepcopy(AMS_FILAMENT_SETTING_TEMPLATE)
+    payload["print"].update({"ams_id": ams_id, "tray_id": slot, "slot_id": slot, "tray_info_idx": idx,
+                             "tray_color": color.upper() + "FF", "nozzle_temp_min": tmin,
+                             "nozzle_temp_max": tmax, "tray_type": tray_type})
+    return payload
+
+
+def _plan_slot(action: str, params: Dict[str, Any], view: _LiveView):
+    """ams_get_rfid / ams_filament_setting payload, or the reason (ru) why not."""
+    ams_id, slot = params.get("ams"), params.get("slot")
+    if not _is_int(ams_id) or not _is_int(slot):
+        return MSG_PICK_SLOT
+    if ams_id in bambu_extras.EXTERNAL_SPOOLS:
+        return MSG_RFID_EXTERNAL if action == "ams_rfid" else MSG_PICK_SLOT
+    name = bambu_extras.ams_unit_name(ams_id)
+    base, unit = 0, None
+    for u in view.units:
+        if u.get("index") == ams_id:
+            unit = u
+            break
+        base += len(u.get("slots") or [])
+    if unit is None:
+        return "%s не найден" % name
+    slots = unit.get("slots") or []
+    if not 0 <= slot < len(slots):
+        return "%s: нет такого слота" % name
+    st, raw = view.status, view.raw
+    if st.filament_change is not None or raw.get("busy"):
+        return MSG_CHANGE_RUNNING
+    if action == "ams_rfid":
+        if view.gcode_state in UNKNOWN_GCODE_STATES:
+            return MSG_STATE_UNKNOWN
+        if view.gcode_state not in SWAP_GCODE_STATES:
+            return STATE_MSG["rfid"]
+        ams_status = raw.get("ams_status")
+        if ams_status is not None and (ams_status >> 8) & 0xFF not in AMS_FREE_MAIN_STATES:
+            return MSG_AMS_BUSY
+        if slots[slot].get("empty"):
+            return "Слот %d пуст" % (base + slot + 1)
+        supports = getattr(view.device, "supports_feature", None)
+        return build_ams_rfid(ams_id, slot, bool(supports(Features.AMS_READ_RFID_COMMAND)) if callable(supports) else True)
+    material = params.get("material")
+    if material not in SPOOL_MATERIALS:
+        return MSG_SPOOL_MATERIAL
+    color = params.get("color")
+    if not isinstance(color, str) or not re.fullmatch(r"[0-9A-Fa-f]{6}", color):
+        return MSG_SPOOL_COLOR
+    tmin, tmax = params.get("tmin"), params.get("tmax")
+    if not (_is_int(tmin) and _is_int(tmax) and SPOOL_TEMP_MIN <= tmin <= tmax <= SPOOL_TEMP_MAX):
+        return MSG_SPOOL_TEMPS
+    if view.gcode_state not in SWAP_GCODE_STATES and view.tray_now == base + slot and st.filament_loaded is not False:
+        return MSG_SPOOL_FEEDING
+    return build_ams_set(ams_id, slot, material, color, tmin, tmax)
 
 
 # --- AMS: drying ----------------------------------------------------------------
@@ -1386,12 +1751,15 @@ def _send_ams(printer_id: str, prn: Dict[str, Any], action: str, params: Dict[st
     if view is None:
         return _refused(MSG_NO_TELEMETRY)
     mark = None
-    if action in AMS_ACTIONS:
-        plan = _plan_filament_change(printer_id, action, params, view, prn.get("model"))
+    if action in AMS_ACTIONS or action == "ams_rfid":
+        plan = (_plan_filament_change(printer_id, action, params, view, prn.get("model"))
+                if action in AMS_ACTIONS else _plan_slot(action, params, view))
         if not isinstance(plan, str):
-            mark = _claim_inflight(printer_id, view.raw)
+            mark, held = _claim_inflight(printer_id, view.raw, action)
             if mark is None:
-                plan = MSG_INFLIGHT
+                plan = _inflight_msg(held)
+    elif action in SLOT_ACTIONS:
+        plan = _plan_slot(action, params, view)
     else:
         plan = _plan_drying(action, params, view)
     if isinstance(plan, str):
@@ -1441,16 +1809,17 @@ def caps_for(d: Dict[str, Any]) -> Tuple[Dict[str, Optional[bool]], Optional[str
     if kind == "bambu":
         pc = get_capability(pid)                 # print-class verdict (fun / probe / persisted)
         caps["light"] = True                     # ledctrl is system class: no signature needed
-        for k in ("pause", "resume", "stop", "cooldown", "eject", "tune", "ams"):
+        for k in ("pause", "resume", "stop", "cooldown", "eject", "tune", "ams", "motion"):
             caps[k] = pc
         note = None if pc is True else (NOTE_BLOCKED if pc is False else NOTE_UNKNOWN)
     elif kind == "creality":
         # WS :9999 "set": no signature, no capability probe; eject and the CFS are not wired yet
-        caps.update(pause=True, resume=True, stop=True, cooldown=True, tune=True)
+        caps.update(pause=True, resume=True, stop=True, cooldown=True, tune=True, motion=True)
+        caps["eject"] = str(d.get("device_type") or "").lower() in ("k2plus", "ender5max", "k1c", "k1max", "k1")
         caps["light"] = pid not in _light_disabled()
     elif kind == "klipper":
         ready = d.get("ctl_ready") if online else None       # True / False / None (no host state yet)
-        caps.update(pause=ready, resume=ready, stop=ready)
+        caps.update(pause=ready, resume=ready, stop=ready, motion=ready)
         if ready is True:
             caps["light"] = d.get("light_ctl")               # True pin / False none / None not looked up yet
         else:
@@ -1472,7 +1841,7 @@ def _cap_refusal(printer_id: str, kind: Optional[str], action: str) -> Optional[
     is left to the printer (its reply settles the verdict: do not block the
     learning); an unknown capability is left to the channel."""
     cap = ACTION_CAP.get(action)
-    if cap is None or kind == "bambu":
+    if cap is None or kind == "bambu" or (kind == "creality" and action == "feeder_setting"):
         return None
     caps, note = _caps_now(printer_id, kind)
     if caps.get(cap) is True:
@@ -1522,6 +1891,14 @@ def _ws_live(printer_id: str, prn: Dict[str, Any]) -> Optional[Tuple[PrinterStat
     return (st, data) if st.online else None
 
 
+def _cold_refusal(action: str, st: PrinterStatus) -> Optional[str]:
+    """«extrude» with the nozzle under EXTRUDE_TEMP_MIN (or its temperature unknown)."""
+    if action != "extrude":
+        return None
+    t = st.nozzle_temp
+    return MSG_COLD_NOZZLE if t is None or t < EXTRUDE_TEMP_MIN else None
+
+
 def _state_check(printer_id: str, prn: Dict[str, Any], action: str,
                  live: Optional[Tuple[PrinterStatus, Dict[str, Any]]] = None) -> Optional[str]:
     """Why the printer's live state forbids `action`, or None. Cooldown / eject
@@ -1531,9 +1908,23 @@ def _state_check(printer_id: str, prn: Dict[str, Any], action: str,
     if prn.get("kind") == "creality" and action in CREALITY_SET_ACTIONS:
         if live is None:
             return MSG_NO_TELEMETRY
-        if action not in ("cooldown", "speed"):
+        if action == "restart_firmware":
+            return MSG_RESTART_PRINTING if live[0].state in (PrinterState.PRINTING, PrinterState.PAUSED) else None
+        if action in CFS_ACTIONS or action == "eject":
+            if (live[0].state not in (PrinterState.IDLE, PrinterState.FINISHED, PrinterState.CANCELLED)
+                    or live[1].get("device_state") != 0 or live[1].get("feed_state", 0) not in (0, None)):
+                return MSG_CREALITY_PREPARING
+            return None
+        if action not in ("cooldown", "speed", "skip_objects") + MOTION_ACTIONS:
             return None
         state, data = live[0].state.value, live[1]
+        if action in MOTION_ACTIONS:
+            # Homing or a CFS feed running: the eject's busy rule (QA 17.11: «Ось Z +30»
+            # went out where «Опустить стол» was refused). An unreported deviceState
+            # is left to Klipper (it refuses an unhomed axis), as for a file start.
+            busy = data.get("device_state") not in (0, None) or data.get("feed_state", 0) not in (0, None)
+            return (state_refusal(action, state) or (MSG_CREALITY_PREPARING if busy else None)
+                    or _cold_refusal(action, live[0]))
         # A pause the firmware does not report itself is the normalizer's runout
         # demotion (any non-zero materialStatus); only 1 is the documented runout,
         # so with another value the print may still run: no cooldown (fail closed).
@@ -1542,7 +1933,10 @@ def _state_check(printer_id: str, prn: Dict[str, Any], action: str,
                 and as_int(data.get("material_status")) != 1:
             return STATE_MSG["cooldown"]
         return state_refusal(action, state)
-    if action in ("cooldown", "eject"):
+    if prn.get("kind") == "klipper" and action in MOTION_ACTIONS:
+        st = live_status(printer_id, prn)
+        return state_refusal(action, st.state.value) or _cold_refusal(action, st) if st is not None else MSG_NO_TELEMETRY
+    if action in ("cooldown", "eject") + MOTION_ACTIONS:
         view = _live_view(printer_id, prn)
         if view is None:
             return MSG_NO_TELEMETRY
@@ -1551,7 +1945,9 @@ def _state_check(printer_id: str, prn: Dict[str, Any], action: str,
         # a load / unload sent moments ago that the printer does not report yet
         if _inflight_blocks(printer_id, view.raw):
             return MSG_INFLIGHT
-        return state_refusal(action, view.status.state.value, view.gcode_state)
+        # No «home first» check on Bambu: home_flag's axis bits are not that (a P2S /
+        # X1C reports X «not homed» mid-print); the jog's M211 soft limits guard it.
+        return state_refusal(action, view.status.state.value, view.gcode_state) or _cold_refusal(action, view.status)
     if action in PRINT_CONTROL:
         if prn.get("kind") == "bambu" and action == "resume":
             # A laser / cutter job resumes only on the printer's screen — for a
@@ -1588,6 +1984,47 @@ def _release_eject(printer_id: str, mark: float) -> None:
             del _eject_marks[printer_id]
 
 
+
+def build_feeder_setting(params, view):
+    # BambuStudio DeviceManager.cpp: command_ams_user_settings / command_ams_switch_filament.
+    if view is None:
+        raise ValueError(MSG_NO_TELEMETRY)
+    key, enabled = params.get("setting"), params.get("enabled")
+    if type(enabled) is not bool or key not in (view.status.feeder_settings or {}):
+        raise ValueError("Настройка AMS недоступна или значение неверно")
+    if key == "auto_refill":
+        return {"print": {"command": "print_option", "sequence_id": "0", "auto_switch_filament": enabled}}
+    options = view.raw.get("ams_options", {})
+    if not all(isinstance(options.get(k), bool) for k in ("insert_flag", "power_on_flag")):
+        raise ValueError(MSG_NO_TELEMETRY)
+    return {"print": {"command": "ams_user_setting", "sequence_id": "0", "ams_id": -1,
+                      "startup_read_option": options["power_on_flag"],
+                      "tray_read_option": options["insert_flag"], "calibrate_remain_flag": enabled}}
+
+
+def _send_service(printer_id: str, prn: Dict[str, Any], action: str) -> Dict[str, Any]:
+    """A «Сервис» macro (klipper_service): the printer must have Klipper's API, stand idle by its WS
+    status and by Klipper's own state, and run no other service action. Fails closed."""
+    from app.services import klipper_service, printer_files
+    if not printer_files.has_klipper_api(prn):
+        return _refused(MSG_NO_KLIPPER_API)
+    live = _ws_live(printer_id, prn)
+    if live is None:
+        return _refused(MSG_NO_TELEMETRY)
+    if printer_files.creality_start_refusal(live) or live[1].get("err_code") not in (0, None):
+        return _refused(MSG_SERVICE_BUSY)
+    job = klipper_service.running(printer_id)
+    if job is not None:
+        return _refused(klipper_service.MSG_RUNNING % job["title"])
+    why = klipper_service.klipper_refusal(prn["host"])
+    if why:
+        return _refused(why)
+    r = klipper_service.start(printer_id, prn["host"], action)
+    if r.get("refused"):
+        return _refused(r["detail"])
+    return _outcome(r)
+
+
 def send(printer_id: str, action: str, params: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     """Send one command; returns {"success", "status", "detail", "replied"} (see _outcome)."""
     from app.services import printer_registry
@@ -1601,15 +2038,38 @@ def send(printer_id: str, action: str, params: Optional[Dict[str, Any]] = None) 
     if allowed is not None and action not in allowed:
         return _refused("%s не принимает команду «%s»" % (KIND_TITLES.get(kind, kind), action))
     model = bambu_model(printer_id, prn) if kind == "bambu" else ""
-    if action == "chamber" and not has_chamber_heater(model):
+    if kind == "bambu" and action == "chamber" and not has_chamber_heater(model):
         return _refused("Активный подогрев камеры есть только у H2-серии")
     refusal = _cap_refusal(printer_id, kind, action)
     if refusal:
         return _refused(refusal)
-    if kind == "bambu" and (action in AMS_ACTIONS or action in DRY_ACTIONS):
+    if kind == "bambu" and (action in AMS_ACTIONS or action in DRY_ACTIONS or action in SLOT_ACTIONS):
         return _send_ams(printer_id, prn, action, params)
+    if kind == "creality" and action in SERVICE_ACTIONS:
+        return _send_service(printer_id, prn, action)
     payload = frames = live = None
-    if kind == "bambu" and action not in LIGHT_ACTIONS:
+    if kind == "bambu" and action == "feeder_setting":
+        view = _live_view(printer_id, prn)
+        try:
+            payload = build_feeder_setting(params, view)
+        except ValueError as e:
+            return _refused(str(e))
+    elif kind == "bambu" and action == "airduct":
+        st = live_status(printer_id, prn)
+        if st is None:
+            return _refused(MSG_NO_TELEMETRY)
+        if not st.airduct:
+            return _refused(MSG_NO_AIRDUCT)
+        try:
+            payload = _build_payload(action, params, model)
+        except ValueError as e:
+            return _refused(str(e))
+    elif kind == "bambu" and action == "skip_objects":
+        try:   # the live job decides: its parts, what is skipped already, printing or paused
+            payload = build_skip_objects(params, live_status(printer_id, prn))
+        except ValueError as e:
+            return _refused(str(e))
+    elif kind == "bambu" and action not in LIGHT_ACTIONS:
         try:
             payload = _build_payload(action, params, model)     # parameter errors first, no I/O
         except ValueError as e:
@@ -1623,9 +2083,18 @@ def send(printer_id: str, action: str, params: Optional[Dict[str, Any]] = None) 
             frames = _build_creality(action, params, live[0].device_type or prn.get("model"), live[1])
         except ValueError as e:
             return _refused(str(e))
-    # A heater set to 0 is that heater's cooldown: the same state rules (no
-    # cooling mid-print), or «Нагрев 0» would get round the cooldown refusal.
-    check = "cooldown" if action == "preheat" and 0 in (params.get("nozzle"), params.get("bed")) else action
+    # A heater set under its working floor (0 included) is that heater's
+    # cooldown: the same state rules (no cooling mid-print), or «Нагрев 0» /
+    # «Нагрев 20» would get round the cooldown refusal (preheat_cools).
+    check = "cooldown" if action == "preheat" and preheat_cools(params) else action
+    if kind == "creality" and action == "chamber" and params.get("temp") == 0:
+        check = "cooldown"
+    script = None
+    if kind == "klipper" and action in MOTION_ACTIONS:
+        try:
+            script = motion_gcode(action, params)                # parameter errors first, no I/O
+        except ValueError as e:
+            return _refused(str(e))
     refusal = _state_check(printer_id, prn, check, live)
     if refusal:
         return _refused(refusal)
@@ -1639,7 +2108,7 @@ def send(printer_id: str, action: str, params: Optional[Dict[str, Any]] = None) 
         if kind == "creality":
             r = _send_creality(printer_id, action, frames)
         elif kind == "klipper":
-            r = _send_klipper(printer_id, action)
+            r = _send_klipper(printer_id, action, script)
         elif action in LIGHT_ACTIONS:
             r = _send_bambu_light(printer_id, prn, action == "light_on")
         else:

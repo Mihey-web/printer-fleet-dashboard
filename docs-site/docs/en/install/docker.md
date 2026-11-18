@@ -10,12 +10,14 @@ the source code.
 git clone https://github.com/mihey-web/printer-fleet-dashboard.git kuznitsa
 cd kuznitsa
 touch printer_history.db users.db ams_history.db   # so Docker mounts them as files
+mkdir -p data                          # job previews and cards, the shared file pool
 docker compose up -d --build
 docker compose logs -f                 # read the first-run admin password once
 ```
 
 The `touch` line matters: it creates three empty database files, so that Docker connects them into
-the container as files and your data stays on the host.
+the container as files and your data stays on the host. `mkdir -p data` creates the folder for the
+job previews and cards and the shared file pool — on the host as well, not inside the container.
 
 Open `http://<host>:8000` and log in as `admin` with the password from the log
 (see [First run](first-run.md)). Press ++ctrl+c++ to stop watching the log — the dashboard keeps
@@ -36,6 +38,8 @@ running.
 - `printer_history.db`, `users.db` and `ams_history.db` in the project folder are mounted into the
   container, so the printer list, settings, history, users and the AMS humidity history (auto-drying
   decides on it) survive updates.
+- The project's `data/` folder is mounted too: the history's job previews and cards and the shared
+  file pool survive a rebuild. `data/` never goes into the image itself (`.dockerignore`).
 
 ## Settings
 
@@ -94,7 +98,17 @@ such as `172.16.0.0/12` also trusts every other container on the computer.
 cd kuznitsa
 git pull
 touch printer_history.db users.db ams_history.db   # existing files are kept as they are
+mkdir -p data
 docker compose up -d --build
+```
+
+Versions before this one did not mount `data/`: the previews, job cards and shared pool files lived
+inside the container. To keep them, copy the folder out of the old container **before**
+`docker compose up -d --build`, after `mkdir -p data`:
+
+```bash
+docker compose stop
+docker cp kuznitsa:/app/data/. ./data/
 ```
 
 Versions before this one did not mount `ams_history.db`. Without the `touch` line Docker creates a

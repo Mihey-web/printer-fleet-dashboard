@@ -14,12 +14,13 @@ from app.services.auth_service import (
     hash_password, verify_password, create_access_token,
     create_refresh_token, decode_token, get_user_from_token, generate_secret,
 )
+from app.services import data_dir, sqlite_db
 from app.services.audit_service import get_audit_service
 from starlette.concurrency import run_in_threadpool
 
 logger = logging.getLogger(__name__)
 
-USERS_DB = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "users.db")
+USERS_DB = data_dir.USERS_DB
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 
@@ -119,7 +120,7 @@ def _revoke_jti(jti: str, exp: float) -> bool:
     """
     if not jti:
         return False
-    conn = sqlite3.connect(USERS_DB, timeout=10)
+    conn = sqlite_db.connect(USERS_DB)
     try:
         cur = conn.execute("INSERT OR IGNORE INTO revoked_tokens (jti, exp) VALUES (?, ?)",
                            (jti, float(exp or 0)))
@@ -132,7 +133,7 @@ def _revoke_jti(jti: str, exp: float) -> bool:
 def _is_jti_revoked(jti: str) -> bool:
     if not jti:
         return False
-    conn = sqlite3.connect(USERS_DB, timeout=10)
+    conn = sqlite_db.connect(USERS_DB)
     try:
         row = conn.execute("SELECT 1 FROM revoked_tokens WHERE jti = ?", (jti,)).fetchone()
         return row is not None
@@ -141,7 +142,7 @@ def _is_jti_revoked(jti: str) -> bool:
 
 
 def _purge_expired_jtis():
-    conn = sqlite3.connect(USERS_DB, timeout=10)
+    conn = sqlite_db.connect(USERS_DB)
     try:
         conn.execute("DELETE FROM revoked_tokens WHERE exp < ?", (time.time(),))
         conn.commit()
@@ -150,7 +151,7 @@ def _purge_expired_jtis():
 
 
 def init_users_db():
-    conn = sqlite3.connect(USERS_DB, timeout=10)
+    conn = sqlite_db.connect(USERS_DB)
     conn.execute("""
         CREATE TABLE IF NOT EXISTS users (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -190,7 +191,7 @@ def init_users_db():
 
 
 def _get_app_secret(key: str) -> Optional[str]:
-    conn = sqlite3.connect(USERS_DB, timeout=10)
+    conn = sqlite_db.connect(USERS_DB)
     try:
         row = conn.execute("SELECT value FROM app_secrets WHERE key = ?", (key,)).fetchone()
         return row[0] if row else None
@@ -201,7 +202,7 @@ def _get_app_secret(key: str) -> Optional[str]:
 def _set_app_secret(key: str, value: str) -> None:
     # INSERT OR IGNORE so a concurrent boot that already wrote the secret wins;
     # the caller re-reads to converge on the single stored value.
-    conn = sqlite3.connect(USERS_DB, timeout=10)
+    conn = sqlite_db.connect(USERS_DB)
     try:
         conn.execute("INSERT OR IGNORE INTO app_secrets (key, value) VALUES (?, ?)", (key, value))
         conn.commit()
@@ -236,30 +237,34 @@ def get_or_create_jwt_secret() -> str:
     return _get_app_secret("jwt_secret") or new_secret
 
 
-def token_subject_active(username: str, iat: float) -> bool:
+def token_subject_active(username: str, iat: float, jti: Optional[str] = None) -> bool:
     """Is an access token for `username` issued at `iat` still valid?
 
-    False when the user no longer exists (deleted → tokens revoked) or when the
+    False when the user no longer exists (deleted → tokens revoked), when the
     token was issued before the user's tokens_valid_after watermark (forced
-    invalidation on role/password change). This is what closes the window where
-    a stateless access token outlives the account it was minted for.
+    invalidation on role/password change), or when its id `jti` was revoked by
+    «Выйти» (logout; only that session — the user's other devices stay signed
+    in). This is what closes the window where a stateless access token
+    outlives the account or the session it was minted for. One indexed query:
+    the revocation is read with the watermark, no extra round trip per request.
     """
     if not username:
         return False
-    conn = sqlite3.connect(USERS_DB, timeout=10)
+    conn = sqlite_db.connect(USERS_DB)
     try:
         row = conn.execute(
-            "SELECT tokens_valid_after FROM users WHERE username = ?", (username,)
+            "SELECT tokens_valid_after, EXISTS(SELECT 1 FROM revoked_tokens WHERE jti = ?)"
+            " FROM users WHERE username = ?", (jti or "", username)
         ).fetchone()
     finally:
         conn.close()
-    if row is None:
+    if row is None or (jti and row[1]):
         return False
     return float(iat or 0) >= float(row[0] or 0)
 
 
 def get_user_by_username(username: str) -> Optional[User]:
-    conn = sqlite3.connect(USERS_DB, timeout=10)
+    conn = sqlite_db.connect(USERS_DB)
     conn.row_factory = sqlite3.Row
     row = conn.execute("SELECT * FROM users WHERE username = ?", (username,)).fetchone()
     conn.close()
@@ -272,7 +277,7 @@ def get_user_by_username(username: str) -> Optional[User]:
 
 
 def get_user_by_id(user_id: int) -> Optional[User]:
-    conn = sqlite3.connect(USERS_DB, timeout=10)
+    conn = sqlite_db.connect(USERS_DB)
     conn.row_factory = sqlite3.Row
     row = conn.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
     conn.close()
@@ -285,7 +290,7 @@ def get_user_by_id(user_id: int) -> Optional[User]:
 
 
 def get_all_users() -> list[User]:
-    conn = sqlite3.connect(USERS_DB, timeout=10)
+    conn = sqlite_db.connect(USERS_DB)
     conn.row_factory = sqlite3.Row
     rows = conn.execute("SELECT * FROM users ORDER BY id").fetchall()
     conn.close()
@@ -433,8 +438,15 @@ def refresh_token(request: Request, response: Response,
 
 @router.post("/logout")
 def logout(request: Request, response: Response,
-           refresh_token_cookie: Optional[str] = Cookie(None, alias="refresh_token")):
+           refresh_token_cookie: Optional[str] = Cookie(None, alias="refresh_token"),
+           access_token_cookie: Optional[str] = Cookie(None, alias="access_token")):
     audit = get_audit_service()
+    if access_token_cookie:
+        # The access token too: a copied cookie kept working for the rest of
+        # its ~15 min after «Выйти» (QA 17.11 F8). Only this session's token.
+        access = decode_token(access_token_cookie, JWT_SECRET)
+        if access and access.get("type") == "access" and access.get("jti"):
+            _revoke_jti(access["jti"], access.get("exp", 0))
     if refresh_token_cookie:
         payload = decode_token(refresh_token_cookie, JWT_SECRET)
         if payload and payload.get("jti"):
@@ -465,7 +477,7 @@ def me(request: Request,
     # /api/auth/* is public to the middleware, so its watermark check (a
     # password reset / role change ends the session) is not applied here: do it.
     payload = decode_token(access_token_cookie, JWT_SECRET) or {}
-    if not token_subject_active(username, payload.get("iat", 0)):
+    if not token_subject_active(username, payload.get("iat", 0), payload.get("jti")):
         raise HTTPException(status_code=401, detail="Invalid or expired token")
     user = get_user_by_username(username)
     if user is None:

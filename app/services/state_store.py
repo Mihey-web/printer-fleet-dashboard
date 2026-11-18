@@ -6,14 +6,14 @@ from threading import Lock
 from typing import Callable, Dict, List, Optional, Any, TYPE_CHECKING
 
 from app.domain.models import PrinterStatus
-from app.services import job_journal, notification_tracker, notifications
+from app.services import data_dir, job_journal, notification_tracker, notifications, sqlite_db
 
 logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from app.collectors.bambu_collector import BambuCollector
 
-DB_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "printer_history.db")
+DB_PATH = data_dir.HISTORY_DB
 
 # History older than this is pruned so printer_history.db can't grow without
 # bound and eventually SQLITE_FULL (at which point record_snapshot would fail
@@ -56,7 +56,7 @@ class StateStore:
         # check_same_thread is safe to disable. synchronous=NORMAL is crash-safe
         # under WAL (may lose only the last commit on power loss — acceptable for
         # a 60s snapshot).
-        self._db = sqlite3.connect(DB_PATH, timeout=10, check_same_thread=False)
+        self._db = sqlite_db.connect(DB_PATH, check_same_thread=False)
         self._db.execute("PRAGMA journal_mode=WAL")
         self._db.execute("PRAGMA synchronous=NORMAL")
         self._init_db()
@@ -112,6 +112,8 @@ class StateStore:
         for col in HISTORY_TEMP_COLUMNS:
             if col not in existing:
                 conn.execute("ALTER TABLE printer_history ADD COLUMN %s REAL" % col)
+        if "planned_filament_g" not in existing:
+            conn.execute("ALTER TABLE printer_history ADD COLUMN planned_filament_g REAL")
         # Why a printer stands (notifications.top_reason): a nullable column
         # without a default, so SQLite only edits the schema, no table rewrite.
         if "reason" not in existing:
@@ -160,8 +162,8 @@ class StateStore:
                     (printer_id, label, kind, online, state, progress, job_name,
                      eta_sec, print_time, nozzle_temp, bed_temp, layer, total_layer,
                      last_error, device_type, recorded_at, grace_period_active, last_successful_fetch,
-                     reason, chamber_temp, target_nozzle_temp, target_bed_temp, target_chamber_temp)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                     reason, chamber_temp, target_nozzle_temp, target_bed_temp, target_chamber_temp, planned_filament_g)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """, (
                     status.id, status.label, status.kind.value, int(status.online),
                     state, status.progress_pct, status.job_name,
@@ -170,7 +172,7 @@ class StateStore:
                     status.last_error, status.device_type, now,
                     int(status.grace_period_active), status.last_successful_fetch,
                     reason, status.chamber_temp, status.target_nozzle_temp,
-                    status.target_bed_temp, status.target_chamber_temp
+                    status.target_bed_temp, status.target_chamber_temp, status.planned_filament_g
                 ))
                 self._db.commit()
                 self._prune_locked(now)

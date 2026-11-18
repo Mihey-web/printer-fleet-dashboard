@@ -104,6 +104,7 @@ class RawReport:
         self._fun_seen = False
         self._fun2: Optional[int] = None
         self._home_flag_seen = False
+        self._ams_options = {}
         self._job_id: Optional[str] = None
         self._seq_gstate: Optional[str] = None       # last idle / working gcode_state seen
         self._job_seq = 0                             # job starts seen by this process
@@ -157,6 +158,11 @@ class RawReport:
                 self._fun2 = fun2
         if "home_flag" in p and _int(p["home_flag"]) is not None:
             self._home_flag_seen = True
+        ams = p.get("ams")
+        if isinstance(ams, dict):
+            for key in ("insert_flag", "power_on_flag"):
+                if isinstance(ams.get(key), bool):
+                    self._ams_options[key] = ams[key]
         # The print-error dialog answers (ignore / resume) carry the job id.
         if p.get("job_id") not in (None, ""):
             self._job_id = str(p["job_id"])
@@ -309,6 +315,7 @@ class RawReport:
                 "fun_seen": self._fun_seen,
                 "fun2": self._fun2,
                 "home_flag_seen": self._home_flag_seen,
+                "ams_options": dict(self._ams_options),
                 "job_id": self._job_id,
                 "job_seq": self._job_seq,
                 "job_started_at": self._job_started_at,

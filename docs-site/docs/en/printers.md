@@ -34,7 +34,7 @@ The server checks the form: the **Name** and **IP address** must not be empty, a
 | Field | What to enter |
 | --- | --- |
 | **Name** («Название») | Any name you like, e.g. `P1S-1`. |
-| **Model** («Модель») | Pick from the list: X1, X1 Carbon, X1E, P1P, P1S, P2S, A1, A1 mini, H2D, H2S. |
+| **Model** («Модель») | Pick from the list: X1, X1 Carbon, X1E, P1P, P1S, P2S, A1, A1 mini, A2L, H2C, H2D, H2D Pro, H2S, X2D. |
 | **IP address** («IP-адрес») | The printer's address in your network. |
 | **Access code** («Код доступа») | The code from the printer's screen. The hint under the field says: *printer screen → Settings → Network* («Экран принтера → Настройки → Сеть»). The 👁 button shows what you typed. |
 | **Serial number** («Серийный номер») | The printer's serial number. |
@@ -57,19 +57,87 @@ What the printer needs:
 Out of the box Kuznitsa automatically presses *Ignore and resume* on two Bambu print errors
 (build-plate marker not detected). See [Admin → Automation](interface/admin.md#auto-skip-errors).
 
+What depends on the Bambu model:
+
+| | X1 | P1, A1 | P2S, H2 series, X2D |
+| --- | --- | --- | --- |
+| [Job card](interface/printers.md#where-the-job-card-comes-from) | from the printer's memory; print settings when the job's file is on the SD card | from the SD card | from the printer's memory; print settings when the job's file is on a USB stick |
+| [Files on the printer](interface/printers.md#files-on-the-printer) | listed and started | SD card: listed and started | internal storage listed but started only from the printer's screen; a USB stick listed and started. The H2S keeps its internal storage closed — only a USB stick |
+| [Shared files](interface/shared-files.md) | source and target (needs an SD card) | source and target (needs an SD card) | source and target only through a USB stick |
+| Air duct mode | — | — | P2S and H2 series ([fans pop-up](interface/printers.md#air-duct)) |
+| Chamber heater | — | — | H2 series |
+
+Starting a file needs Developer Mode like every other print command. Printers with two nozzles
+(H2D, H2C, X2D) cannot start files from the panel yet, nor load / unload AMS filament. To
+[skip parts mid-print](interface/printers.md#skip-parts) the job must be sliced with object
+labelling on.
+
 ## Creality
 
 | Field | What to enter |
 | --- | --- |
 | **Name** | Any name. |
-| **Model** | K1 Max, K1C or Ender-5 Max. |
+| **Model** | Select K1, K1 Max, K1C, K1 SE, K2, K2 Plus, K2 Pro, K2 SE, Ender-3 V3, Ender-3 V3 KE, Ender-3 V3 Plus, Ender-5 Max, CR-10 SE, Hi, SPARKX i7 or enter a model name. Monitoring requires compatible telemetry on port 9999. |
 | **IP address** | The printer's address in your network. |
 | **Allow light control** («Разрешить управление светом») | On by default. Turn it off for a printer without a controllable lamp: its 💡 button and the farm's light command skip it. This switch is saved at once, without a restart. |
 
 The dashboard connects to the printer's WebSocket on port **9999**; no password or code is needed.
-On Creality the card offers pause / resume / stop, light, cool-down, nozzle and bed temperatures,
-speed modes and fans. Creality never confirms a command, so the result says "sent" («отправлено»),
-never "confirmed" («подтверждено»).
+It uses a standalone client copied from [ha_creality_ws](https://github.com/3dg1luk43/ha_creality_ws)
+(AGPL-3.0, in `app/vendor/ha_creality_ws`). On Creality the card offers:
+
+- pause / resume / stop, light, cool-down, speed modes and fans;
+- nozzle and bed temperatures up to the model's limits: 350 / 120 °C on the K2 Plus, 300 / 100 °C
+  on the K1, K1C, K1 SE, K1 Max and Ender-5 Max; other models up to what the printer reports;
+- the chamber temperature where the printer reports it, and the chamber heater on a K2 Plus /
+  K2 Pro that reports a chamber target;
+- **bed down** on the K1, K1C, K1 Max, K2 Plus and Ender-5 Max, once the axes are homed («Сначала
+  выполните «Домой»» otherwise);
+- **home** and **axis jog** ([move pop-up](interface/printers.md#motion)) with the firmware's own
+  commands, the ones Creality Print sends. Filament push / retract is not available on Creality —
+  use the printer's screen;
+- the **CFS**: slots with material and remaining percent, humidity and temperature, load / unload,
+  tag re-read, setting a spool by hand and the backup-spool setting
+  ([Creality CFS](interface/printers.md#creality-cfs));
+- **files on the printer** with a print start ([Files on the printer](interface/printers.md#files-on-the-printer))
+  and the [job card](interface/printers.md#where-the-job-card-comes-from) from the printer's file
+  list;
+- **skipping parts** mid-print where the printer reports the job's parts (K2 Plus, K1C, Ender-5 Max)
+  — see [Skipping parts](interface/printers.md#skip-parts);
+- the error code in a notification with **Clear the error** («Сбросить ошибку») or **Restart the
+  firmware** («Перезапустить прошивку») — see
+  [Printer notifications](interface/printers.md#printer-notifications).
+
+Creality does not confirm most commands, so their result says "sent" («отправлено»), not
+"confirmed" («подтверждено»). The light is the exception: it is confirmed once the printer reports
+the lamp's new state.
+
+### K2 Plus: Klipper's API {#k2-plus}
+
+Some Creality printers, such as the K2 Plus, also run Klipper's API (Moonraker) on port **7125**.
+The dashboard finds it by itself; there is nothing to set in the form, but Moonraker has to accept
+connections from the dashboard's computer without an API key. The K1C and the Ender-5 Max have no
+such API. Through it:
+
+- **files on the printer** are listed with their pictures, times and grams, can be deleted
+  (**Delete from the printer**, «Удалить с принтера») and are a source and a target of
+  [shared files by model](interface/shared-files.md) without a USB stick;
+- the **job card** also gets the print settings from the job's G-code: layer height, infill, walls,
+  supports and their weight, bed, filament profiles and the slicer's version;
+- a paused print's notification gets **Resume print** («Продолжить печать»);
+- **⋯ → Service ›** («Сервис ›») runs the printer's calibrations and a firmware restart — see
+  [Service](interface/printers.md#k2-service).
+
+### Ender-5 Max {#ender-5-max}
+
+- **Weight from the length.** Its file list gives the filament's length, not its weight. The
+  dashboard works the weight out: the length × the section of 1.75 mm filament × the material's
+  density (Creality Print's own: PLA 1.24, PETG 1.27, ABS 1.04, ASA 1.07, TPU 1.21, PC 1.20 g/cm³).
+  The material comes from the file name as Creality Print writes it, for example
+  `Кронштейн_PETG_2h5m.gcode`; a name without one counts as PETG. So the weight on the card and in
+  [History → Filament](interface/history.md#plastic) is close to the slicer's, not exact.
+- **Job card:** the picture and that weight only — its file list has no print settings.
+- **Fans:** part and case fans are only on or off; it has no auxiliary fan.
+- **Bed down** needs homed axes; **Home** uses the firmware's own homing.
 
 ## Klipper / Moonraker
 
@@ -83,7 +151,8 @@ never "confirmed" («подтверждено»).
 The dashboard connects to `ws://<IP>:<port>/websocket`. The form has no field for an API key, so
 Moonraker has to accept connections from the dashboard's computer without one.
 
-On Klipper the card offers pause / resume / cancel once Klipper reports it is ready, and a light
+On Klipper the card offers pause / resume / cancel and the [move pop-up](interface/printers.md#motion)
+(home, axis jog, filament push / retract) once Klipper reports it is ready, and a light
 button if the printer has a light: the dashboard looks for an `output_pin` whose name says
 `caselight` / `case_light`, then a name with the word `light`, then `led`, then `lamp`. When Klipper
 shuts down (for example *mcu: Unable to connect*) the printer stays online in the error state with

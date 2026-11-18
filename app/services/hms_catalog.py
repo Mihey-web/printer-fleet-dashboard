@@ -23,6 +23,8 @@ import urllib.request
 import zlib
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
+from app.services import data_dir
+
 logger = logging.getLogger(__name__)
 
 ACTION_URL = "https://e.bambulab.com/hms/GetActionImage.php"
@@ -45,8 +47,7 @@ LOOP_S = 3600                   # registry re-read + staleness check; a failed r
 REFRESH_S = 24 * 3600
 NOT_MODIFIED = 201              # {"result":201,"ver":0}: the v=<ver> we sent is current
 
-CACHE_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
-                         "data", "hms")
+CACHE_DIR = os.path.abspath(data_dir.HMS_DIR)
 META_FILE = "meta.json"
 FILES = {"action": "action_%s.json", "text": "text_" + LANG + "_%s.json", "text_en": "text_" + EN + "_%s.json"}
 # kind -> (index keys, version slot, query.php language)

@@ -15,7 +15,7 @@ from app.services import auth_service, printer_commands, settings_service
 from app.services.normalizer import normalize_ws_dict
 
 ALL_FALSE = dict.fromkeys(printer_commands.CAP_KEYS, False)
-PRINT_CLASS = ("pause", "resume", "stop", "cooldown", "eject", "tune", "ams")
+PRINT_CLASS = ("pause", "resume", "stop", "cooldown", "eject", "tune", "ams", "motion")
 
 REGISTRY = [
     {"id": "b-ok", "label": "P1", "kind": "bambu", "model": "P2S", "access_code": "12345678", "serial": "SN-1"},
@@ -106,7 +106,8 @@ def test_bambu_caps_follow_the_print_class_verdict(rows):
 def test_creality_caps_and_the_light_setting(rows):
     # 27.10: light, temperatures / fans / speed (tune) and cooldown; eject / CFS not yet
     r = rows()["c-1"]
-    assert r["caps"] == dict(ALL_FALSE, pause=True, resume=True, stop=True, light=True, tune=True, cooldown=True)
+    assert r["caps"] == dict(ALL_FALSE, pause=True, resume=True, stop=True, light=True, tune=True, cooldown=True,
+                             motion=True)
     assert (r["caps_note"], r["print_cmds"]) == (None, True)
     assert rows(light_disabled=["c-1"])["c-1"]["caps"]["light"] is False
 
@@ -115,12 +116,12 @@ def test_klipper_caps_while_idle(rows):
     r = rows()
     ready = r["k-ready"]
     assert ready["state"] == "idle" and "debug" not in ready
-    assert ready["caps"] == dict(ALL_FALSE, pause=True, resume=True, stop=True, light=True)
+    assert ready["caps"] == dict(ALL_FALSE, pause=True, resume=True, stop=True, light=True, motion=True)
     assert (ready["caps_note"], ready["print_cmds"], ready["ctl_ready"], ready["light_ctl"]) == (None, True, True, True)
     down = r["k-down"]
     assert (down["caps"], down["caps_note"], down["print_cmds"]) == (ALL_FALSE, "Klipper не готов", False)
     off = r["k-off"]
-    assert off["caps"] == dict(ALL_FALSE, pause=None, resume=None, stop=None, light=None)
+    assert off["caps"] == dict(ALL_FALSE, pause=None, resume=None, stop=None, light=None, motion=None)
     assert (off["caps_note"], off["print_cmds"]) == (None, None)
 
 

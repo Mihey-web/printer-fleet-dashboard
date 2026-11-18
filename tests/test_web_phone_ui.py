@@ -510,7 +510,7 @@ AMS_BLOCK = re.search(r"/\* ams-ui:begin \*/(.*?)/\* ams-ui:end \*/", JS, re.S).
 
 
 def ams_row(unit, auto=None):
-    lib = "\n".join(_simple_function(n) for n in ("safeText", "icon", "amsUnitName", "amsFmtMin")) + AMS_BLOCK
+    lib = "\n".join(_simple_function(n) for n in ("safeText", "icon", "amsUnitName", "amsFmtMin", "timeFmt")) + AMS_BLOCK
     return _node(lib + "\nconsole.log(JSON.stringify(amsRowText(%s, %s)));" % (json.dumps(unit), json.dumps(auto)))
 
 
@@ -518,11 +518,11 @@ DRY_ON = {"type": "n3f", "status": "drying", "active": True, "remaining_min": 57
 
 
 @pytest.mark.parametrize("unit,auto,want", [
-    ({"dry": DRY_ON, "online": True}, {"card": "x", "status": {"kind": "dry", "origin": "auto", "series": 2}}, "🔥 авто · ещё 9:31"),
-    ({"dry": DRY_ON, "online": True}, {"card": "x", "status": {"kind": "dry", "origin": "manual"}}, "🔥 вручную · ещё 9:31"),
-    ({"dry": DRY_ON, "online": True}, {"card": "x", "status": {"kind": "foreign"}}, "🔥 чужая · ещё 9:31"),
-    ({"dry": DRY_ON, "online": True}, None, "🔥 сушка · ещё 9:31"),
-    ({"dry_time": 45, "online": True}, None, "🔥 сушка · ещё 45 мин"),               # an AMS without the dry block
+    ({"dry": DRY_ON, "online": True}, {"card": "x", "status": {"kind": "dry", "origin": "auto", "series": 2}}, "🔥 авто · ещё 9ч 31м"),
+    ({"dry": DRY_ON, "online": True}, {"card": "x", "status": {"kind": "dry", "origin": "manual"}}, "🔥 вручную · ещё 9ч 31м"),
+    ({"dry": DRY_ON, "online": True}, {"card": "x", "status": {"kind": "foreign"}}, "🔥 чужая · ещё 9ч 31м"),
+    ({"dry": DRY_ON, "online": True}, None, "🔥 сушка · ещё 9ч 31м"),
+    ({"dry_time": 45, "online": True}, None, "🔥 сушка · ещё 45м"),               # an AMS without the dry block
     ({"dry": dict(DRY_ON, remaining_min=0), "online": True}, None, "🔥 сушка"),
     ({"dry": {"status": "off", "active": False}, "online": True, "maintenance": True}, None, "на обслуживании"),
     ({"dry": {"status": "off", "active": False}, "online": False}, None, "нет связи"),
@@ -547,7 +547,8 @@ def test_the_ams_card_has_its_row_on_a_phone():
     assert ("'<button type=\"button\" class=\"ams-row' + (dryActive(u) ? ' drying' : '') + '\" data-ams-row=\"' + key +"
             in shell)
     assert "'\" aria-expanded=\"' + (open ? 'true' : 'false') + '\"><span class=\"ams-row-n\">' + escHtml(u.label) +" in shell
-    assert "(multi ? ' · ' + amsUnitName(u.unit_index) : '')" in shell and "amsRowText(u, auto)" in shell
+    # a CFS (Creality) always names its unit: "K2 · CFS 1"
+    assert "(multi || u.system === 'cfs' ? ' · ' + unitName : '')" in shell and "amsRowText(u, auto)" in shell
     assert "return row + '<div class=\"ams-card' + cls.slice(8) + (open ? '' : ' ph-closed') + '\" data-key=\"' + key" in shell
     load = _js_function("loadAms")
     assert "return amsCardShell(u, perPrinter[u.printer_id] > 1);" in load        # «H1 · AMS 2» when it has two
@@ -670,11 +671,14 @@ function Notification(title, o) { this.title = title; this.o = o; made.push(this
 Notification.permission = "granted";
 var window = { Notification: Notification, focus: function () { log.push(["focus"]); } };
 function pushOpen(pid, notes) { log.push(["open", pid, notes]); }
+// the push's icon is its printer's picture (QA 17.11), the panel's own without a printer
+function findPrinter(pid) { return pid === "bambu-3" ? { id: pid, kind: "bambu" } : null; }
+function imgFor(p) { return "/static/img/" + p.kind + ".png"; }
 %(fn)s
 showBrowserNotification("t", "b", "bambu-3", true);
 showBrowserNotification("t", "b");
 made[0].onclick();
-console.log(JSON.stringify({ log: log, n: made.length, second: typeof made[1].onclick }));
+console.log(JSON.stringify({ log: log, n: made.length, second: typeof made[1].onclick, icons: [made[0].o.icon, made[1].o.icon] }));
 """
 
 OPEN_HARNESS = r"""
@@ -693,7 +697,8 @@ console.log(JSON.stringify(log));
 def test_a_push_opens_its_printer():
     fn = _js_function("showBrowserNotification").replace('("Notification" in window)', "true")
     out = _node(PUSH_HARNESS % {"fn": fn})
-    assert out == {"log": [["focus"], ["close"], ["open", "bambu-3", True]], "n": 2, "second": "undefined"}
+    assert out == {"log": [["focus"], ["close"], ["open", "bambu-3", True]], "n": 2, "second": "undefined",
+                   "icons": ["/static/img/bambu.png", "/pwa/icon-192.png"]}
     op = _js_function("pushOpen")
     run = lambda known, notes: _node(OPEN_HARNESS % {"fn": op, "known": json.dumps(known), "notes": json.dumps(notes)})
     assert run(True, True) == [["sheets"], ["pop", True], ["goto", "bambu-3", False]]     # with its notifications

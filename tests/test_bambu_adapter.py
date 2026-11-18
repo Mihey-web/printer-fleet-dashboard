@@ -29,10 +29,15 @@ PUSH = {"print": {"command": "push_status", "msg": 0, "gcode_state": "IDLE",
 
 
 def _connected(make_collector, fake_paho, **kwargs):
-    """connect() and wait until the lib's listener has called paho connect()."""
+    """connect() and wait until the lib's listener has called paho connect() and
+    the bridge thread has ended. The listener calls paho connect() while the
+    bridge is still finishing BambuClient.connect(); until it ends,
+    _listener_dead() reads «start in progress» on purpose, so a listener that
+    stops right away read as «login refused» on a loaded machine (QA 17.11 F11)."""
     collector = make_collector(**kwargs)
     collector.connect()
-    assert kit.wait_until(lambda: fake_paho.instances and fake_paho.instances[-1].connect_calls, timeout=5)
+    assert kit.wait_until(lambda: fake_paho.instances and fake_paho.instances[-1].connect_calls
+                          and _bridge_done(collector), timeout=5)
     return collector, fake_paho.instances[-1]
 
 

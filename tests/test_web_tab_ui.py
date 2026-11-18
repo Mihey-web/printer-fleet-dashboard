@@ -178,7 +178,9 @@ def test_load_updates_the_tab_on_success_and_on_failure():
     assert "updateTabStatus(cachedAllPrinters, false)" in ok
     assert ok.index("applyAndRender();") < ok.index("updateTabStatus(")
     assert "tabState.lastOkAt = Date.now()" in ok
-    assert re.search(r"updateTabStatus\(cachedAllPrinters, Date\.now\(\) - tabState\.lastOkAt > 30000\)", fail)
+    assert re.search(r"updateTabStatus\(cachedAllPrinters, Date\.now\(\) - tabState\.lastOkAt > LIVE_DOWN_MS\)", fail)
+    # QA 17.11 (func F9): «нет связи» after two polls without an answer, not after 30 s
+    assert re.search(r"var POLL_MS = 3000, LIVE_DOWN_MS = 2 \* POLL_MS \+ 1000,", JS)
 
 
 def test_wrapper_uses_the_bell_predicate_and_draws_only_on_change():

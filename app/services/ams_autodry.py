@@ -39,6 +39,9 @@ INTERRUPT_LIMIT = 2           # legacy: an "interrupts" disable left by an older
 INTERRUPT_RETRY_S = 300
 CONFIRM_S = 300               # our start must show dry.active within 5 min
 END_TOLERANCE_MIN = 10        # last remaining <= 10 min -> finished normally
+# Across a clock jump (the service down > 6 h, or a wrong clock) the time proves
+# nothing: only a last reading that ran out before the next check would (TICK_S).
+JUMP_END_MIN = 1
 END_TOLERANCE_S = 900         # or now >= expected end - 15 min
 LOST_GAP_S = 900              # unseen > 15 min before the end -> "lost", not an interruption
 RESTART_S = 900               # drying again within 15 min of an early end: the same program restarted
@@ -228,7 +231,7 @@ def parse_key(key: Any) -> Optional[Tuple[str, int]]:
     if not isinstance(key, str) or "__" not in key:
         return None
     pid, _, ams = key.rpartition("__")
-    if not pid or not ams.isdigit():
+    if not pid or not (ams.isascii() and ams.isdigit()):   # "²" is a digit to isdigit(), not to int()
         return None
     return pid, int(ams)
 
@@ -252,6 +255,7 @@ def new_state() -> Dict[str, Any]:
         "phase": "idle",              # idle | running (ours) | foreign | settle
         "origin": None,               # running/settle: auto | now (run-now) | manual (dashboard) | None (foreign)
         "series": 0,                  # 1-based position of the current/last run in the series, 0 = none
+        "series_cut": 0,              # runs of this series the printer switched off: they end no series
         "closed": False,              # the current run/settle ended by a stop: no repeat
         "end_kind": None,             # finish | foreign_end | interrupted | lost | stop
         "run_started_at": None, "run_expected_end": None,
@@ -289,7 +293,7 @@ def new_state() -> Dict[str, Any]:
 
 _STATE_KEYS = frozenset(new_state())
 _PHASES = ("idle", "running", "foreign", "settle")
-_COUNTS = ("series", "interrupts", "refusals")
+_COUNTS = ("series", "series_cut", "interrupts", "refusals")
 _FLAGS = ("closed", "seen_active", "fault_noted", "repeat_pending")
 _TEXTS = ("origin", "end_kind", "run_filament", "hold_reason", "last_refusal", "disabled_reason")
 _ENTRIES = ("foreign_entry", "measure_entry", "disabled_entry")
@@ -929,10 +933,11 @@ def decide(state: Dict[str, Any], obs: Dict[str, Any], cfg: Dict[str, Any], now:
                 st["closed"] = True
                 if hold_h:
                     st["hold_until"], st["hold_reason"] = now + hold_h * 3600, "foreign_stop"
-        elif obs.get("clock_jump"):
+        elif obs.get("clock_jump") and not (st["last_remaining_min"] is not None
+                                            and st["last_remaining_min"] <= JUMP_END_MIN):
             events.append(_ev("lost", **common))
             st["end_kind"] = "lost"
-        elif _ended_normally(st, now, offline_gap):
+        elif _ended_normally(st, now, offline_gap or bool(obs.get("clock_jump"))):
             events.append(_ev("finish", series=st["series"], temp=st["run_temp"], dur=ran, origin=st["origin"],
                               **common))
             st["interrupts"], st["end_kind"] = 0, "finish"
@@ -949,6 +954,7 @@ def decide(state: Dict[str, Any], obs: Dict[str, Any], cfg: Dict[str, Any], now:
             st["end_kind"] = "interrupted"
             st["restart_at"] = now + INTERRUPT_RETRY_S
             st["interrupts"] = n
+            st["series_cut"] += 1                                # redone: it does not use up the series
         st["phase"], st["dry_end_at"], st["settle_until"] = "settle", now, now + pause_s
         st["stop_sent_at"], st["seen_active"], st["confirm_by"], st["fault_noted"] = None, False, None, False
         return out("cool", end_kind=st["end_kind"], series=st["series"], until=st["settle_until"], dry_end_at=now)
@@ -975,6 +981,8 @@ def decide(state: Dict[str, Any], obs: Dict[str, Any], cfg: Dict[str, Any], now:
         t_rest = onset["t_before"] if late and onset["t_before"] is not None else as_temp(st["rest_temp"])
         rh_rest = onset["rh_before"] if late and onset["rh_before"] is not None else obs.get("rh")
         st["series"] = st["series"] + 1 if cont else 1
+        if not cont:
+            st["series_cut"] = 0
         st["t_before"] = (st["t_before"] if cont and st["t_before"] is not None
                           else t_rest if t_rest is not None else onset["t_before"])
         st["rh_before"] = st["last_rest_rh"] if cont and st["last_rest_rh"] is not None else rh_rest
@@ -1031,7 +1039,8 @@ def decide(state: Dict[str, Any], obs: Dict[str, Any], cfg: Dict[str, Any], now:
             outcome = "held"
         elif st["backoff_until"]:
             outcome = "backoff"
-        elif cfg["max_runs"] and series >= cfg["max_runs"] and st["end_kind"] != "interrupted":
+        elif (cfg["max_runs"] and series - min(st["series_cut"], series) >= cfg["max_runs"]
+              and st["end_kind"] != "interrupted"):
             outcome = "unreachable"          # a run the printer switched off never ends the series: redone
         elif cfg["max_runs"] and len(st["runs"]) >= cfg["max_runs"] and st["end_kind"] != "interrupted":
             outcome = "limit"
@@ -1084,7 +1093,9 @@ def decide(state: Dict[str, Any], obs: Dict[str, Any], cfg: Dict[str, Any], now:
         if not rest["ok"]:
             return out("wait", rest=rest)
         if cfg["max_runs"] and len(st["runs"]) >= cfg["max_runs"]:
-            return out("limit", until=min(st["runs"]) + DAY_S, runs_24h=len(st["runs"]))
+            # it lifts once fewer than max_runs are left in the 24 h: foreign runs come on top of the limit
+            runs = sorted(st["runs"])
+            return out("limit", until=runs[len(runs) - cfg["max_runs"]] + DAY_S, runs_24h=len(runs))
         trigger, rh_before, series, t_before = "start", rest["p10"], 1, as_temp(st["rest_temp"])
     if cfg.get("dry_run") and st["dry_run_at"] and now - st["dry_run_at"] < DRY_RUN_REPEAT_S:
         return out("dry_run", **rep)
@@ -1125,6 +1136,8 @@ def as_temp(t: Any) -> Optional[int]:
 
 def _start_running(st: Dict[str, Any], origin: str, series: int, temp: int, hours: int, filament: str,
                    now: float) -> None:
+    if series <= 1:
+        st["series_cut"] = 0                                     # a new series
     st.update(phase="running", origin=origin, series=series, closed=False, end_kind=None,
               run_started_at=now, run_expected_end=now + hours * 3600, run_temp=temp, run_hours=hours,
               run_filament=filament, confirm_by=now + CONFIRM_S, seen_active=False, fault_noted=False,

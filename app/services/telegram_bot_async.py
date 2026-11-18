@@ -11,6 +11,25 @@ logger = logging.getLogger(__name__)
 
 # The first message when the status getter has nothing to say.
 NO_DATA = "(нет данных)"
+# A one-shot message whose send failed on the way (network, proxy, Telegram's own
+# 5xx, flood control) is sent again after these waits: notify() has already told
+# the poll loop it went out (17.11: a «печать завершена» lost that way).
+NOTIFY_RETRY_S = (10, 60)
+NOTIFY_RETRY_AFTER_MAX_S = 120   # Telegram's «retry after N» is honoured up to this
+# Errors a repeat does not cure: a bad message, a bot blocked or removed, a wrong token.
+_PERMANENT_ERRORS = ("TelegramBadRequest", "TelegramForbiddenError", "TelegramUnauthorizedError",
+                     "TelegramNotFound", "TelegramConflictError", "TelegramEntityTooLarge")
+
+
+def _notify_retry_wait(exc: BaseException, waits: list) -> Optional[float]:
+    """Seconds to wait before sending a failed one-shot message again, None: give up."""
+    if type(exc).__name__ in _PERMANENT_ERRORS or not waits:
+        return None
+    wait = waits.pop(0)
+    retry_after = getattr(exc, "retry_after", None)
+    if isinstance(retry_after, (int, float)) and not isinstance(retry_after, bool) and retry_after > 0:
+        wait = min(max(wait, retry_after), NOTIFY_RETRY_AFTER_MAX_S)
+    return wait
 
 
 class TelegramReporter:
@@ -73,7 +92,12 @@ class TelegramReporter:
         return True
 
     def _send_now(self, text: str) -> None:
-        """Blocking send of a one-shot message; run off-thread by notify()."""
+        """Blocking send of a one-shot message; run off-thread by notify().
+
+        A failure on the way is tried again (NOTIFY_RETRY_S); one the message
+        itself causes is not (_PERMANENT_ERRORS). Logged, never raised.
+        """
+        waits = list(NOTIFY_RETRY_S)
         try:
             async def _send_once():
                 import importlib
@@ -106,14 +130,23 @@ class TelegramReporter:
                     except Exception:
                         pass
 
-            loop = asyncio.new_event_loop()
-            try:
-                loop.run_until_complete(_send_once())
-            finally:
+            while True:
+                loop = asyncio.new_event_loop()
                 try:
-                    loop.close()
-                except Exception:
-                    pass
+                    loop.run_until_complete(_send_once())
+                    return
+                except Exception as e:
+                    wait = _notify_retry_wait(e, waits)
+                    if wait is None or self._stop_event.is_set():
+                        raise
+                    logger.warning("Telegram notify failed (%s), retrying in %d s", type(e).__name__, wait)
+                finally:
+                    try:
+                        loop.close()
+                    except Exception:
+                        pass
+                if self._stop_event.wait(wait):
+                    return
         except Exception as e:
             logger.warning("Telegram notify failed: %s", e)
 
@@ -312,7 +345,12 @@ class TelegramReporter:
 
     async def _periodic_update(self, bot):
         while not self._stop_event.is_set():
-            await asyncio.sleep(self.update_interval)
+            # a null or broken interval saved before the settings check (QA 17.11, F6) must not stop
+            # the live summary: sleep(None) raised TypeError and ended this task for good
+            interval = self.update_interval
+            if isinstance(interval, bool) or not isinstance(interval, (int, float)) or interval <= 0:
+                interval = 2
+            await asyncio.sleep(interval)
             if not self._chat_id or not self._message_id or not self._get_text:
                 continue
 

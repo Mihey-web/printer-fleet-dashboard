@@ -51,13 +51,29 @@ Links in the last column point to the line of code (version 2.0.0) where the var
 
 ### History and automation
 
-These three are in `.env.example` too.
-
 | Variable | Default | What it does | Read in |
 | --- | --- | --- | --- |
 | `HISTORY_RETENTION_DAYS` | `90` | Days to keep the state history (timeline, statistics), printer notification records and the AMS history. | [app/services/state_store.py:21](https://github.com/mihey-web/printer-fleet-dashboard/blob/313ccaec83e4a3a05e632db1127df39faeed967e/app/services/state_store.py#L21), [app/services/notification_tracker.py:37](https://github.com/mihey-web/printer-fleet-dashboard/blob/313ccaec83e4a3a05e632db1127df39faeed967e/app/services/notification_tracker.py#L37), [app/services/ams_store.py:21](https://github.com/mihey-web/printer-fleet-dashboard/blob/313ccaec83e4a3a05e632db1127df39faeed967e/app/services/ams_store.py#L21) |
 | `JOBS_RETENTION_DAYS` | `730` | Days to keep finished prints in the print journal (at least 1). | [app/services/job_journal.py:939](https://github.com/mihey-web/printer-fleet-dashboard/blob/313ccaec83e4a3a05e632db1127df39faeed967e/app/services/job_journal.py#L939) |
 | `FORGE_TZ_OFFSET_MIN` | `180` | The farm's time zone for the auto-drying start window, in minutes from UTC (`180` = UTC+3, Moscow). For example `120` for UTC+2, `-300` for UTC−5. | [app/services/ams_autodry_engine.py:55](https://github.com/mihey-web/printer-fleet-dashboard/blob/313ccaec83e4a3a05e632db1127df39faeed967e/app/services/ams_autodry_engine.py#L55) |
+
+### Data folder {#data-dir}
+
+| Variable | Default | What it does | Read in |
+| --- | --- | --- | --- |
+| `FORGE_DATA_DIR` | the project folder, next to `main.py` | The folder with the three databases and `data/` (see [Where the dashboard keeps its data](install/index.md#where-the-dashboard-keeps-its-data)). `DATA_DIR` in `config.py` works too; the environment variable wins. A relative path is taken from the project folder. Changing it moves nothing: stop the dashboard, move the files there, start it again, and give the nightly backup the same folder as `--src`. In Docker keep the default. | [app/services/data_dir.py](https://github.com/mihey-web/printer-fleet-dashboard/blob/main/app/services/data_dir.py) |
+
+### Shared file pool {#file-pool}
+
+Print files uploaded to the dashboard are kept in `data/file_pool/`. The same names without `FORGE_`
+can be set in `config.py`; the environment variable wins. A value that is not a whole number, or is
+below the allowed minimum, falls back to the default with a warning in the log.
+
+| Variable | Default | What it does | Read in |
+| --- | --- | --- | --- |
+| `FORGE_FILE_POOL_MAX_GB` | `8` | Gigabytes all uploaded files take together (every model). | [app/services/file_pool.py](https://github.com/mihey-web/printer-fleet-dashboard/blob/main/app/services/file_pool.py) |
+| `FORGE_FILE_POOL_FILE_MAX_MB` | `512` | The largest file that can be uploaded, in megabytes. | [app/services/file_pool.py](https://github.com/mihey-web/printer-fleet-dashboard/blob/main/app/services/file_pool.py) |
+| `FORGE_FILE_POOL_KEEP_FREE_MB` | `1024` | Megabytes to keep free on the dashboard's disk (the databases live there too): an upload stops before the space runs out. `0` — no reserve. | [app/services/file_pool.py](https://github.com/mihey-web/printer-fleet-dashboard/blob/main/app/services/file_pool.py) |
 
 ## Settings on the web page
 
@@ -71,10 +87,21 @@ These live in `printer_history.db` and are changed only on the web page (by an a
 | Error codes for auto-skip | [Admin → Automation](interface/admin.md#auto-skip-errors) |
 | Hidden notifications | the **Hide** / **Restore** buttons on printer notifications |
 | Users | [Admin → Access](security.md#users-and-roles) (stored in `users.db`) |
+| Hiding factory sample files | [Admin → System → General](interface/admin.md#general) |
 | Telegram: token, chat, interval, events, templates | [Admin → System](telegram.md) |
 | Proxies for Telegram and their check interval | [Admin → System](telegram.md#6-proxy-for-telegram) |
 
-Telegram and proxy changes apply at once. Changes to the printer list need **Apply and restart**.
+Telegram, proxy and general changes apply at once. Changes to the printer list need **Apply and
+restart**.
 
-Settings in **👤 This browser** (theme, text size, browser notifications) are kept only in that
-browser.
+Settings in **👤 This browser** (language, theme, text size, browser notifications) are kept only in
+that browser.
+
+## Settings without a page {#settings-without-a-page}
+
+One stored setting has no switch on the page. An administrator changes it through the settings API,
+`PUT /api/admin/settings` with a JSON body; it applies without a restart.
+
+| Setting | Default | What it does |
+| --- | --- | --- |
+| `auto_light_states` | `["paused", "error", "cancelled"]` | The states that switch a printer's lamp on when it steps into them (see [Lamp on when a printer stops](interface/printers.md#lamp-on-stop)). Allowed: `paused`, `error`, `cancelled`, `finished`. `[]` turns it off. Example body: `{"auto_light_states": ["paused", "error"]}`. |

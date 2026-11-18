@@ -40,5 +40,9 @@
 [ha-bambulab](https://github.com/greghesp/ha-bambulab), © 2023 ha-bambulab contributors, по
 лицензии **MIT**. Она остаётся под лицензией MIT и не входит ни в одну из лицензий выше.
 
+`app/vendor/ha_creality_ws/` — отдельный клиент Creality, скопированный из
+[ha_creality_ws](https://github.com/3dg1luk43/ha_creality_ws), по лицензии **AGPL-3.0**. Он
+остаётся под AGPL-3.0 и не входит ни в одну из лицензий выше.
+
 Тексты ошибок и таблицы кнопок Bambu, которые панель скачивает во время работы, — данные Bambu; они
 хранятся только в локальной папке `data/hms/` и в репозиторий не входят.

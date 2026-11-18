@@ -112,12 +112,19 @@ git pull
 sudo systemctl restart bambudiagnostic.service
 ```
 
-## Nightly database backup (optional)
+## Nightly backup of the databases and job cards (optional) {#nightly-database-backup-optional}
 
 `deploy/` also has a nightly backup: `forge-db-backup.service`, `forge-db-backup.timer` and the
 script `forge_db_backup.py`. Every night at about 03:30 it makes a consistent copy of
 `printer_history.db`, `users.db`, `ams_history.db` and `config.py` into a dated folder, checks each
 copy and keeps the newest 14.
+
+It also copies `data/job_previews/` there (into the dated folder's `data/job_previews/`): the job
+previews and job cards of the print history, which the printers no longer have. These files never
+change, so a file the previous night already copied becomes a hard link to it: a night adds only the
+new jobs' previews, and the 14 folders hold the previews about once. `data/file_pool/` and
+`data/hms/` are not copied. To restore, stop the dashboard and copy a dated folder's files, its
+`data/job_previews/` included, back into the project folder.
 
 The template is written for a **separate disk mounted at `/mnt/ssd`** (backups go to
 `/mnt/ssd/forge-backups`). If that disk is not mounted the backup refuses to run, so it never fills

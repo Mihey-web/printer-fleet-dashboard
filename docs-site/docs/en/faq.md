@@ -52,8 +52,9 @@ gets in. If everybody gets this answer at once with Docker behind nginx or Caddy
 
 ### Some messages are in English
 
-The interface is in Russian, but some messages come straight from the server in English — on the
-login page and in some admin forms (for example `Password must be at least 8 characters`).
+The panel speaks Russian and English (the switch is in the 👤 menu and on the login page) and shows
+the server's answers in the chosen language. A rare message that is not in the dictionary may come
+as the server wrote it, in English.
 
 ## Printers
 
@@ -139,8 +140,9 @@ The farm time is Moscow time (UTC+3) unless you set `FORGE_TZ_OFFSET_MIN` — se
 
 ### How do I back up or move the dashboard?
 
-Copy `printer_history.db`, `users.db` and `ams_history.db` from the project folder while the
-dashboard is stopped, and put them into the new installation's folder. On Linux there is a ready
+Copy `printer_history.db`, `users.db`, `ams_history.db` and the `data/job_previews/` folder (the
+history's job previews and cards) from the project folder while the dashboard is stopped, and put
+them into the new installation's folder. On Linux there is a ready
 [nightly backup](install/linux.md#nightly-database-backup-optional).
 
 ### The page does not load when I start `main.py` from another folder

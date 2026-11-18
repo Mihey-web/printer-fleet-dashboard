@@ -24,12 +24,12 @@ refresh after commands. A storage failure is logged and costs only the row:
 """
 import logging
 import os
-import sqlite3
 import threading
 import time
 from typing import Any, Callable, Dict, List, Optional
 
 from app.collectors.bambu_raw import FLAP_GRACE_S
+from app.services import sqlite_db
 
 logger = logging.getLogger(__name__)
 
@@ -62,7 +62,7 @@ class NotificationTracker:
         self._flag_off: Dict[str, Dict[str, float]] = {}        # pid -> flag -> first status without it
         # Its own connection to the history DB (StateStore keeps another): writes
         # are rare, and WAL lets both work side by side.
-        self._db = sqlite3.connect(db_path, timeout=10, check_same_thread=False)
+        self._db = sqlite_db.connect(db_path, check_same_thread=False)
         self._db.execute("PRAGMA journal_mode=WAL")
         self._db.execute("PRAGMA synchronous=NORMAL")
         self._init_db()

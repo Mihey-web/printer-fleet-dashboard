@@ -100,7 +100,7 @@ class MksWifiClient:
             re.IGNORECASE,
         )
         firmware_match = re.search(r"FIRMWARE_NAME:([^\r\n]+)", raw, re.IGNORECASE)
-        print_time_match = re.search(r"M992\s+(\d{2}):(\d{2}):(\d{2})", raw, re.IGNORECASE)
+        print_time_match = re.search(r"M992\s+(\d+):(\d{2}):(\d{2})", raw, re.IGNORECASE)   # 100+ hours too
         file_match = re.search(r"M994\s+([^;\r\n]+)(?:;(\d+))?", raw, re.IGNORECASE)
         m991_match = re.search(r"M991\s+(.+)", raw, re.IGNORECASE)
         m991_raw = m991_match.group(1).strip() if m991_match else None

@@ -102,6 +102,7 @@ class Spec:
     ids: Tuple[int, ...] = ()
     builder: Optional[Callable[[Dict[str, Any]], Dict[str, Any]]] = None
     rpc: Optional[str] = None                 # Moonraker method (Klipper actions)
+    command: Optional[str] = None             # a printer_commands.send() action (Creality: its own guards)
     needs: Tuple[str, ...] = ()
     guards: Tuple[str, ...] = ()
     confirm: Optional[str] = None
@@ -167,6 +168,21 @@ ACTIONS: Dict[str, Spec] = {
         "Перезапуск Klipper", rpc="printer.restart", guards=("host_error",), confirm="Перезапустить Klipper?",
         yes="Перезапустить", expect="ctl_ready", kinds=("klipper",), srcs=("klipper",)),
     # No Bambu id: Studio sends it on every close. Off, see ENABLE_UIOP.
+    # Creality with Klipper's API (K2 Plus), on a pause: the card's ▷ (send "resume"). Its RESUME
+    # macro (read 16.11.2026): RESUME_EXTERNAL_PROCESS (BOX_ERROR_RESUME_PROCESS, RESUME_EXTERNAL:
+    # the nozzle back to its temperature, ~82 mm purged at the wipe spot, nozzle clean, fans
+    # restored) then RESUME_BASE. No «сброс» here: CANCEL_PRINT ends the job, and
+    # MOTOR_CLEAR_ERR_WARN_CODE is a firmware command whose DATA codes are not published.
+    "cr_resume": Spec(
+        "Продолжить печать", command="resume", guards=("cr_paused",), expect="printing",
+        kinds=("creality",), srcs=("creality",)),
+    # Any Creality (WebSocket :9999): what the K1C's own web page sends for an error (16.11.2026).
+    "cr_clear": Spec(
+        "Сбросить ошибку", command="clear_error", kinds=("creality",), srcs=("creality",)),
+    "cr_restart": Spec(
+        "Перезапустить прошивку", command="restart_firmware",
+        confirm="Перезапустить прошивку принтера? Он перезагрузится, текущее задание будет потеряно.",
+        yes="Перезапустить", danger=True, kinds=("creality",), srcs=("creality",)),
     "close_dialog": Spec(
         CANCEL_LABEL, builder=_uiop_close, needs=("err",), guards=("pe",), enabled=ENABLE_UIOP),
 }
@@ -218,6 +234,21 @@ def table_known(prefix: Optional[str], code: Any) -> bool:
 # Klipper host state -> its notification's buttons, in this order.
 KLIPPER_BY_HOST: Dict[str, Tuple[str, ...]] = {"shutdown": ("fw_restart",),
                                                "error": ("klippy_restart", "fw_restart")}
+
+
+# errcodes the K1C's web page answers with a firmware restart instead of cleanErr.
+CREALITY_RESTART_CODES = frozenset({1, 2, 3, 4, 5, 6, 8, 200})
+
+
+def creality_actions(state: Any, code: Any = None, klipper: bool = False) -> List[Dict[str, Any]]:
+    """A Creality error's buttons: «Продолжить печать» on a pause (Klipper's API only), then
+    the error's own answer — «Перезапустить прошивку» for the codes the printer's page restarts
+    on, «Сбросить ошибку» for the rest."""
+    keys = []
+    if klipper and str(getattr(state, "value", state) or "").lower() == "paused":
+        keys.append(("cr_resume", None))
+    keys.append(("cr_restart" if code in CREALITY_RESTART_CODES else "cr_clear", None))
+    return describe(keys)
 
 
 def klipper_actions(host_state: Any) -> List[Dict[str, Any]]:
@@ -363,6 +394,8 @@ def _run_live(pc: Any, printer_id: str, prn: Dict[str, Any], key: str, action: s
     refusal = _guard_refusal(pc, action, spec, n, ctx)
     if refusal:
         return pc._refused(refusal)
+    if "cr_paused" in spec.guards and getattr(status, "state", None) != PrinterState.PAUSED:
+        return pc._refused(pc.MSG_NOT_PAUSED)
     if spec.confirm and confirmed is not True:
         return pc._refused(MSG_CONFIRM)
     mark = _claim(pc, printer_id)
@@ -382,7 +415,9 @@ def _run_live(pc: Any, printer_id: str, prn: Dict[str, Any], key: str, action: s
                 if not autodry.claim(printer_id, ams):
                     return pc._refused(MSG_AUTODRY_BUSY)
                 claimed.append(ams)
-        if spec.rpc:
+        if spec.command:
+            r = pc.send(printer_id, spec.command)        # the card's own path: its guards, its channel
+        elif spec.rpc:
             r = pc.send_klipper_rpc(printer_id, action)
         else:
             payload = spec.builder({"err": _code_int(n.get("code")) if n.get("src") == "print_error" else None,
@@ -397,7 +432,7 @@ def _run_live(pc: Any, printer_id: str, prn: Dict[str, Any], key: str, action: s
             autodry.unclaim(printer_id, ams)
         if not r.get("success"):
             _release(pc, printer_id, mark)
-    out = pc._outcome(r)
+    out = r if spec.command else pc._outcome(r)
     logger.info("[notif] %s %s on %s (%s) -> %s %s", printer_id, action, n.get("code"), source, out["status"],
                 out["detail"])
     if out["success"]:
@@ -442,7 +477,7 @@ RESET_BLOCKING_TEXT = {"0300_8007": "0300_8007 после отключения �
 RESET_AUTO_TAIL = ", автопропуск уже пробует"
 RESET_KLIPPER = "Klipper: перезапуск прошивки — только по одному, с подтверждением"
 RESET_KLIPPER_NONE = "Klipper: команды сброса нет — устраните причину на принтере"
-RESET_CREALITY = "Creality: команды сброса нет — только на экране принтера"
+RESET_CREALITY = "Creality: сброс — кнопкой в уведомлении, по одному принтеру"
 RESET_GONE = "сбрасывать нечего — уведомление уже снято"
 RESET_CHANGED = "состояние изменилось, не отправлено"      # the dashboard's own words (nfResetRevalidate)
 RESET_ACTION = "clean"

@@ -50,12 +50,17 @@ def test_klipper_next_id_is_atomic_and_monotonic():
     assert len(ids) == len(set(ids)) == 800
 
 
+def mark_creality_connected(client):
+    client._client._ws = object()
+    client._client._ws_ready.set()
+
+
 def test_creality_offline_returns_empty_then_parses_when_connected():
     c = CrealityK1Client("host", "(11) K1C")
-    c.on_message(None, '{"printStatus": "printing", "nozzleTemp": 210}')
+    c._parse_report({"printStatus": "printing", "nozzleTemp": 210})
     # Not connected yet -> treated as offline.
     assert c.get_data() == {}
-    c.connected = True
+    mark_creality_connected(c)
     data = c.get_data()
     assert data["state"] == "printing"
     assert data["nozzle_temp"] == 210
@@ -65,18 +70,18 @@ def test_creality_parses_material_status_top_level():
     # materialStatus is the only runout signal K1 firmware gives (state stays
     # "printing"), so it must land in the top-level data, not just debug.
     c = CrealityK1Client("host", "(11) K1C")
-    c.on_message(None, '{"printStatus": "printing", "materialStatus": 1}')
-    c.connected = True
+    c._parse_report({"printStatus": "printing", "materialStatus": 1})
+    mark_creality_connected(c)
     data = c.get_data()
     assert data["material_status"] == 1
-    c.on_message(None, '{"materialStatus": 0}')
+    c._parse_report({"materialStatus": 0})
     assert c.get_data()["material_status"] == 0
 
 
 def test_creality_get_data_returns_copy():
     c = CrealityK1Client("host", "L")
-    c.on_message(None, '{"printStatus": "printing"}')
-    c.connected = True
+    c._parse_report({"printStatus": "printing"})
+    mark_creality_connected(c)
     snap = c.get_data()
     snap["state"] = "tampered"
     assert c.get_data()["state"] == "printing"
@@ -175,22 +180,12 @@ def test_klipper_liveness_only_from_status_messages():
     assert k.last_message_ts > 0.0  # real status update did refresh it
 
 
-def test_creality_heartbeat_does_not_refresh_liveness():
-    # The K1 sends heart_beat keepalives independent of telemetry. A heartbeat
-    # alone must not keep the 30s staleness guard alive, or a printer whose real
-    # telemetry has frozen keeps showing its last state.
+def test_creality_stale_telemetry_is_hidden_on_a_live_connection():
     c = CrealityK1Client("host", "L")
-    c.last_message_ts = 0.0
-
-    class _WS:
-        def send(self, _msg):
-            pass
-
-    c.on_message(_WS(), json.dumps({"ModeCode": "heart_beat"}))
-    assert c.last_message_ts == 0.0  # heartbeat is a keepalive, not telemetry
-
-    c.on_message(_WS(), json.dumps({"nozzleTemp": 25}))
-    assert c.last_message_ts > 0.0  # real telemetry refreshed it
+    mark_creality_connected(c)
+    c._parse_report({"nozzleTemp": 25})
+    c.last_message_ts -= 31
+    assert c.get_data() == {}
 
 
 def test_klipper_connect_skips_when_already_connected(monkeypatch):
@@ -207,14 +202,16 @@ def test_klipper_connect_skips_when_already_connected(monkeypatch):
     assert built == []
 
 
-def test_creality_connect_skips_when_already_connected(monkeypatch):
-    built = []
-    monkeypatch.setattr("websocket.WebSocketApp", lambda *a, **k: built.append(1))
-    c = CrealityK1Client("host", "L")
-    assert hasattr(c, "_connect_lock")
-    c.connected = True
-    c.connect()
-    assert built == []
+def test_creality_connect_starts_one_network_worker():
+    c = CrealityK1Client("localhost", "L")
+    try:
+        c.connect()
+        first = c._thread
+        c.connect()
+        assert c._thread is first
+    finally:
+        c.disconnect()
+    assert not first.is_alive()
 
 
 def test_klipper_get_data_empty_before_any_telemetry():
@@ -252,17 +249,17 @@ def test_creality_numeric_state_5_is_paused():
     # проваливался в дефолт 'idle', normalizer промоутил idle обратно в
     # 'printing' — и пауза была не видна на карточке вообще.
     c = CrealityK1Client("host", "E5")
-    c.on_message(None, '{"state": 5, "printLeftTime": 16352}')
-    c.connected = True
+    c._parse_report({"state": 5, "printLeftTime": 16352})
+    mark_creality_connected(c)
     assert c.get_data()["state"] == "paused"
 
 
 def test_creality_numeric_state_known_codes():
     c = CrealityK1Client("host", "E5")
-    c.connected = True
+    mark_creality_connected(c)
     # 4 = stopped: a K1C (fw 1.3.5.22) after a cancelled print (ha_creality_ws fixture)
     for code, want in ((0, "idle"), (1, "printing"), (2, "paused"), (3, "finish"), (4, "cancelled"), (5, "paused")):
-        c.on_message(None, '{"state": %d}' % code)
+        c._parse_report({"state": code})
         assert c.get_data()["state"] == want
 
 
@@ -271,9 +268,9 @@ def test_creality_unknown_numeric_state_is_not_idle():
     # незнакомая пауза снова станет невидимой. 7 (finishing a cancel) and 9
     # (starting a print) are the K1C's busy codes: unknown too.
     c = CrealityK1Client("host", "E5")
-    c.connected = True
+    mark_creality_connected(c)
     for code in (42, 7, 9):
-        c.on_message(None, '{"state": %d}' % code)
+        c._parse_report({"state": code})
         assert c.get_data()["state"] == "unknown"
 
 
@@ -499,58 +496,57 @@ def test_klipper_light_state_from_the_pin_value():
 
 def test_creality_light_state_and_switch():
     c = CrealityK1Client("host", "K1")
-    c.on_message(None, '{"lightSw": 1}')
-    c.connected = True
+    c._parse_report({"lightSw": 1})
+    mark_creality_connected(c)
     assert c.get_data()["light_on"] is True
-    c.on_message(None, '{"lightSw": 0}')
+    c._parse_report({"lightSw": 0})
     assert c.get_data()["light_on"] is False
-    c.on_message(None, '{"lightSw": "x", "nozzleTemp": 20}')       # unparseable: last value kept
+    c._parse_report({"lightSw": "x", "nozzleTemp": 20})       # unparseable: last value kept
     assert c.get_data()["light_on"] is False
 
     sent = []
-    c.ws = type("W", (), {"send": lambda self, raw: sent.append(json.loads(raw))})()
+    c._send = sent.append
     assert c.send_command("light_off")["success"] is True
     assert c.send_command("light_on")["success"] is True
-    assert sent == [{"method": "set", "params": {"lightSw": 0}}, {"method": "set", "params": {"lightSw": 1}}]
+    assert sent == [{"lightSw": 0}, {"lightSw": 1}]
 
 
 def test_creality_fans_and_heater_ceilings_reach_the_data():
     # K1C (fw 1.3.5.22) frame keys: case / auxiliary fans and the heater ceilings
     # leave debug for the telemetry (the card's fan popover, the temperature limits)
     c = CrealityK1Client("host", "K1")
-    c.on_message(None, json.dumps({"modelFanPct": 40, "caseFanPct": 30, "auxiliaryFanPct": 0,
-                                   "maxNozzleTemp": 300, "maxBedTemp": "100", "maxBoxTemp": 60}))
-    c.connected = True
+    c._parse_report({"modelFanPct": 40, "caseFanPct": 30, "auxiliaryFanPct": 0,
+                                   "maxNozzleTemp": 300, "maxBedTemp": "100", "maxBoxTemp": 60})
+    mark_creality_connected(c)
     d = c.get_data()
     assert (d["fan_speed_pct"], d["case_fan_pct"], d["aux_fan_pct"]) == (40, 30, 0)
     assert (d["max_nozzle_temp"], d["max_bed_temp"]) == (300, 100)
     assert (d["debug"]["case_fan_pct"], d["debug"]["aux_fan_pct"]) == (30, 0)
-    c.on_message(None, '{"maxNozzleTemp": "x", "nozzleTemp": 20}')     # unparseable: last value kept
+    c._parse_report({"maxNozzleTemp": "x", "nozzleTemp": 20})     # unparseable: last value kept
     assert c.get_data()["max_nozzle_temp"] == 300
     c2 = CrealityK1Client("host", "E5")
-    c2.on_message(None, '{"modelFanPct": 0}')                           # a printer without them
-    c2.connected = True
+    c2._parse_report({"modelFanPct": 0})                           # a printer without them
+    mark_creality_connected(c2)
     assert not {"case_fan_pct", "aux_fan_pct", "max_nozzle_temp", "max_bed_temp"} & set(c2.get_data())
 
 
 def test_creality_set_frames_go_out_one_by_one():
     c = CrealityK1Client("host", "K1")
     sent = []
-    c.ws = type("W", (), {"send": lambda self, raw: sent.append(raw)})()
+    c._send = sent.append
     frames = [{"nozzleTempControl": 0}, {"bedTempControl": {"num": 0, "val": 0}}]
     assert c.send_command("set", frames) == {"success": False, "detail": "Not connected"}
     assert sent == []
-    c.connected = True
+    mark_creality_connected(c)
     assert c.send_command("set", frames) == {"success": True, "detail": "Command sent"}
-    assert sent == ['{"method": "set", "params": {"nozzleTempControl": 0}}',
-                    '{"method": "set", "params": {"bedTempControl": {"num": 0, "val": 0}}}']
+    assert sent == frames
     for bad in (None, [], {"nozzleTempControl": 0}, [{}], ["M106"]):
         assert c.send_command("set", bad) == {"success": False, "detail": "No set params provided"}
     assert len(sent) == 2
 
-    def broken(self, raw):
+    def broken(raw):
         raise OSError("socket is already closed.")
-    c.ws = type("W", (), {"send": broken})()
+    c._send = broken
     assert c.send_command("set", frames) == {"success": False, "detail": "socket is already closed."}
 
 
@@ -558,18 +554,18 @@ def test_creality_set_frames_cut_short_say_how_many_went_out():
     # the socket drops after the first frame: it reached the printer, so the
     # result is a success (never «nothing sent») marked partial, with the count
     c = CrealityK1Client("host", "K1")
-    c.connected = True
+    mark_creality_connected(c)
     sent = []
 
-    def second_fails(self, raw):
+    def second_fails(raw):
         if len(sent) == 1:
             raise OSError("socket is already closed.")
         sent.append(raw)
-    c.ws = type("W", (), {"send": second_fails})()
+    c._send = second_fails
     frames = [{"gcodeCmd": "M106 P0 S0"}, {"gcodeCmd": "M106 P2 S128"}, {"gcodeCmd": "M106 P1 S76"}]
     assert c.send_command("set", frames) == {
         "success": True, "partial": True, "detail": "отправлено частично: 1 из 3 (socket is already closed.)"}
-    assert sent == ['{"method": "set", "params": {"gcodeCmd": "M106 P0 S0"}}']
+    assert sent == frames[:1]
 
 
 # --- Klipper: klippy host state, the host watchdog (notifications spec step 6) -----
@@ -744,15 +740,15 @@ def test_klipper_host_watchdog_thread(monkeypatch):
 
 def test_creality_err_code_and_key():
     c = CrealityK1Client("host", "K1")
-    c.connected = True
-    c.on_message(None, '{"state": 1, "err": {"errcode": 2, "key": 5}}')
+    mark_creality_connected(c)
+    c._parse_report({"state": 1, "err": {"errcode": 2, "key": 5}})
     data = c.get_data()
     assert (data["err_code"], data["err_key"], data["debug"]["err"]) == (2, 5, {"errcode": 2, "key": 5})
-    c.on_message(None, '{"nozzleTemp": 200}')                       # no err in this message: kept
+    c._parse_report({"nozzleTemp": 200})                       # no err in this message: kept
     assert c.get_data()["err_code"] == 2
-    c.on_message(None, '{"err": {"errcode": 0, "key": 0}}')
+    c._parse_report({"err": {"errcode": 0, "key": 0}})
     assert (c.get_data()["err_code"], c.get_data()["err_key"]) == (0, 0)
-    c.on_message(None, '{"err": {"errcode": "x", "key": 1}}')      # unparseable: last value kept
-    c.on_message(None, '{"err": 3}')                                 # not the dict form: debug only
+    c._parse_report({"err": {"errcode": "x", "key": 1}})      # unparseable: last value kept
+    c._parse_report({"err": 3})                                 # not the dict form: debug only
     data = c.get_data()
     assert (data["err_code"], data["err_key"], data["debug"]["err"]) == (0, 0, 3)

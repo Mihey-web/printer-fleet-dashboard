@@ -20,9 +20,17 @@ CHECK_S = 15
 RETRY_S = 120
 MAX_TRIES = 3
 FORGET_S = 600          # out of the pause this long since the last try: the next pause is a new one
+# Seen out of the pause (printing) this long before it pauses again: that is the
+# next print's pause, with tries of its own (network prints all say job_id "0").
+RUN_S = 300
+# The longest a listed pause may wait for this thread: every try, the last one's
+# wait and a pass to see it (main's Telegram «Пауза» holds no longer).
+HOLD_MAX_S = MAX_TRIES * RETRY_S + 2 * CHECK_S
+GIVE_UP = ("tries_used", "no_job_id", "maintenance")   # skip reasons that leave the pause to people
 
 _tries: Dict[Tuple[str, str, int], Tuple[int, float]] = {}   # (pid, job, err) -> (count, last at)
 _skips: Dict[Tuple[str, str, int, str], float] = {}           # one audit row per skipped pause and reason
+_out: Dict[str, float] = {}     # pid -> first seen out of the pause since the last pass that saw it paused
 _lock = threading.Lock()
 
 
@@ -72,6 +80,39 @@ def forget(key_pid: str, now: float) -> None:
             return
         for k in [k for k in _skips if k[0] == key_pid]:
             del _skips[k]
+
+
+def _ran_since(key_pid: str, now: float) -> bool:
+    """The printer was seen out of the pause for RUN_S before this one: another print's."""
+    since = _out.get(key_pid)
+    return since is not None and now - since >= RUN_S
+
+
+def renew(key_pid: str, now: float) -> None:
+    """A pass that sees the printer paused: after RUN_S out of the pause, the tries and
+    notes of before belong to the previous print (four short prints in a row each
+    pause at the plate check; the fourth was left paused, 17.11). A plate that
+    re-pauses within seconds of an ignore keeps counting toward MAX_TRIES."""
+    with _lock:
+        if _ran_since(key_pid, now):
+            for k in [k for k in _tries if k[0] == key_pid]:
+                del _tries[k]
+            for k in [k for k in _skips if k[0] == key_pid]:
+                del _skips[k]
+        _out.pop(key_pid, None)
+
+
+def gave_up(key_pid: str, err: int, now: Optional[float] = None) -> bool:
+    """True when this thread leaves the printer's pause on listed code `err` to
+    people: this print's tries are used up, or it said why it does not press it
+    (GIVE_UP: no job id, maintenance mode). False while it may still press it
+    (auto_light and main's Telegram «Пауза» wait for it then)."""
+    now = time.time() if now is None else now
+    with _lock:
+        if _ran_since(key_pid, now):
+            return False                    # the next print's pause: fresh tries
+    v = view(key_pid, err, now)
+    return v["tries"] >= MAX_TRIES or v["skip"] in GIVE_UP
 
 
 def view(key_pid: str, err: int, now: Optional[float] = None) -> Dict[str, Any]:
@@ -138,7 +179,10 @@ def check_once(store, codes: Iterable[str], live: Callable[[str], Optional[Dict[
         if d.get("kind") != "bambu" or not d.get("online") or d.get("state") != "paused":
             if d.get("online") and d.get("state") not in (None, "paused"):
                 forget(d["id"], now)        # the pause is over: the next one gets fresh tries
+                with _lock:
+                    _out.setdefault(d["id"], now)
             continue
+        renew(d["id"], now)
         ctx = live(d["id"])
         try:
             in_maint = bool(maint(d["id"]))

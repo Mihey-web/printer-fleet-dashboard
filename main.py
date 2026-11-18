@@ -196,15 +196,40 @@ def _build_grace_status(prev_item, reason, now, device_type):
     Uses dataclasses.replace so EVERY field is carried over — an earlier
     field-by-field copy silently dropped ams/fans/light_on/fw_update, blanking
     the AMS panel and fan/light indicators the moment a transient fetch failure
-    put a printer into grace. Only the failure markers are overridden.
+    put a printer into grace. Only the failure markers are overridden, and a
+    printing printer's time left runs on with the clock since the status it
+    clones: «Дальше» (now + eta) keeps its finish time instead of moving it
+    forward with every repeat of the same eta.
     """
+    eta = prev_item.eta_seconds
+    if prev_item.state == PrinterState.PRINTING and isinstance(eta, (int, float)) and eta > 0:
+        elapsed = max(0.0, now - (prev_item.last_update_ts or now))
+        eta = max(0, int(round(eta - elapsed)))
     return dataclasses.replace(
         prev_item,
         last_update_ts=now,
         last_error=reason,
         device_type=device_type,
         grace_period_active=True,
+        eta_seconds=eta,
     )
+
+
+def _held_for_auto_ignore(pid, status, codes, held_since, now):
+    """A pause on a code the auto-ignore thread presses through (P3's plate check at
+    every start, gone within seconds): the Telegram «Пауза» waits for it. It goes
+    out after all once the thread gives up on it (its tries used, no job id,
+    maintenance mode) or the pause outlasts every try it could make."""
+    from app.services import auto_ignore
+    codes = set(codes or [])
+    code = next((n.get('code') for n in (status.notifications or [])
+                 if isinstance(n, dict) and n.get('src') == 'print_error'), None)
+    if not code or code not in codes or now - held_since >= auto_ignore.HOLD_MAX_S:
+        return False
+    try:
+        return not auto_ignore.gave_up(pid, int(code.replace('_', ''), 16), now)
+    except (TypeError, ValueError):
+        return False
 
 
 def _error_notification(template, label, last_error, status=None, lang=None):
@@ -359,6 +384,12 @@ def poll_loop(
     # telegram_finish_repeat_interval_min минут; запись гасится при любом
     # уходе из FINISHED.
     _finish_notify_at: dict[str, float] = {}
+    # Printers whose finish message was due but the bot could not take it (down
+    # for a moment: a restart after a settings save, a proxy change): it goes out
+    # on a later poll while the printer still stands finished.
+    _finish_due: set[str] = set()
+    # pid -> when its «Пауза» was held back for the auto-ignore thread (_held_for_auto_ignore).
+    _pause_held: dict[str, float] = {}
     # pid -> последнее НЕ-offline состояние, которое мы реально наблюдали. Нужно,
     # чтобы кратковременный уход в OFFLINE (истёкший grace) между активной печатью
     # и терминальным состоянием не съедал уведомление: если после offline принтер
@@ -408,7 +439,7 @@ def poll_loop(
                         if tg is not None and not quiet and scfg.get('telegram_notify_on_finish'):
                             now = time.time()
                             if status.state == PrinterState.FINISHED:
-                                entered = effective_prev == PrinterState.PRINTING
+                                entered = effective_prev == PrinterState.PRINTING or pid in _finish_due
                                 last = _finish_notify_at.get(pid)
                                 repeat_due = False
                                 if not entered and scfg.get('telegram_notify_on_finish_repeat') and last is not None:
@@ -419,30 +450,48 @@ def poll_loop(
                                         # parse_mode=HTML: the free-form label is escaped.
                                         msg = bot_i18n.template(scfg, 'telegram_finish_template').format(label=html.escape(str(disp_label)))
                                         # Only anchor the repeat timer if the message
-                                        # was actually dispatched. Marking it on a
-                                        # no-op (bot down / no chat) would suppress
-                                        # the real notification once the bot recovers.
+                                        # was actually dispatched. A no-op (bot down /
+                                        # no chat) keeps the finish due: the next poll
+                                        # sends it once the bot recovers.
                                         if tg.notify(msg):
                                             _finish_notify_at[pid] = now
+                                            _finish_due.discard(pid)
                                             logger.info('[%s] Telegram finish notification sent%s',
                                                         label, ' (повтор)' if repeat_due else '')
+                                        elif entered:
+                                            _finish_due.add(pid)
                                     except Exception as e:
+                                        if entered:
+                                            _finish_due.add(pid)
                                         logger.warning('[%s] Telegram notify failed: %s', label, e)
                                 elif last is None:
                                     # Принтер уже стоял завершённым, когда мы начали
                                     # опрос (перехода PRINTING→FINISHED не видели) —
                                     # заякорим отсчёт, чтобы повторы шли от now.
                                     _finish_notify_at[pid] = now
+                        if status.state != PrinterState.FINISHED or quiet or tg is None or not scfg.get('telegram_notify_on_finish'):
+                            _finish_due.discard(pid)
                         if status.state != PrinterState.FINISHED or quiet:
                             _finish_notify_at.pop(pid, None)
                         if tg is not None and not quiet and scfg.get('telegram_notify_on_paused'):
-                            if effective_prev == PrinterState.PRINTING and status.state == PrinterState.PAUSED:
-                                try:
-                                    msg = bot_i18n.template(scfg, 'telegram_paused_template').replace('{label}', html.escape(str(disp_label)))
-                                    tg.notify(msg)
-                                    logger.info('[%s] Telegram paused notification sent', label)
-                                except Exception as e:
-                                    logger.warning('[%s] Telegram notify failed: %s', label, e)
+                            if status.state == PrinterState.PAUSED and (
+                                    effective_prev == PrinterState.PRINTING or pid in _pause_held):
+                                now = time.time()
+                                held_since = _pause_held.setdefault(pid, now)
+                                if _held_for_auto_ignore(pid, status, scfg.get('auto_ignore_print_errors'),
+                                                         held_since, now):
+                                    if held_since == now:
+                                        logger.info('[%s] Telegram paused notification held: auto-ignore presses it', label)
+                                else:
+                                    _pause_held.pop(pid, None)
+                                    try:
+                                        msg = bot_i18n.template(scfg, 'telegram_paused_template').replace('{label}', html.escape(str(disp_label)))
+                                        tg.notify(msg)
+                                        logger.info('[%s] Telegram paused notification sent', label)
+                                    except Exception as e:
+                                        logger.warning('[%s] Telegram notify failed: %s', label, e)
+                        if status.state != PrinterState.PAUSED or quiet or tg is None or not scfg.get('telegram_notify_on_paused'):
+                            _pause_held.pop(pid, None)
                         if tg is not None and not quiet and scfg.get('telegram_notify_on_error'):
                             if effective_prev is not None and status.state == PrinterState.ERROR and effective_prev not in (PrinterState.ERROR, PrinterState.OFFLINE):
                                 try:
@@ -590,6 +639,8 @@ def main():
     printer_commands.start_live_refresh()   # cards follow the live telemetry every 2 s, not every poll
     from app.services import auto_ignore
     auto_ignore.start(store)   # «Ignore and resume» for the print errors listed in settings
+    from app.services import auto_light
+    auto_light.start(store)    # the lamp on when a printer pauses, fails or is cancelled in the dark
     from app.services import hms_catalog
     hms_catalog.start()        # Bambu's HMS button/text tables: data/hms, refreshed daily
 

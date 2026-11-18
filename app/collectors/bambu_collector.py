@@ -342,6 +342,8 @@ def quiet_vendor_logging(window: float = 600.0) -> None:
 class BambuCollector:
     def __init__(self, label: str, host: str, access_code: str, serial: str, device_type: str = "X1C",
                  tls_verify: bool = False):
+        from app.services.print_material import MaterialReader
+        self._material_reader = MaterialReader()
         self.label = label
         self.host = host
         self.client = _ForgeBambuClient(_client_config(host, access_code, serial, device_type, tls_verify))
@@ -508,6 +510,10 @@ class BambuCollector:
         if device is not None and getattr(getattr(device, "info", None), "online", False):
             self._rebuild_attempt = 0
             self._rebuild_due = None
+            try:
+                self._material_reader.poll(self.client)
+            except Exception:
+                logger.debug("material reader unavailable", exc_info=True)
             return device
 
         if self.connected:

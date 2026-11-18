@@ -35,4 +35,8 @@ contributions are licensed to make this possible).
 Third-party code bundled with the project is not part of either grant: the
 vendored copy of `pybambu` in [`app/vendor/pybambu/`](./app/vendor/pybambu/)
 remains under its own MIT License (© 2023 ha-bambulab contributors, see its
-[`LICENSE`](./app/vendor/pybambu/LICENSE)).
+[`LICENSE`](./app/vendor/pybambu/LICENSE)), and the Creality client copied from
+`ha_creality_ws` in [`app/vendor/ha_creality_ws/`](./app/vendor/ha_creality_ws/)
+remains under its own AGPL-3.0 (see its
+[`LICENSE`](./app/vendor/ha_creality_ws/LICENSE) and
+[`VENDORED.md`](./app/vendor/ha_creality_ws/VENDORED.md)).

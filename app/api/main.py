@@ -13,7 +13,7 @@ import threading
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.middleware.gzip import GZipMiddleware
 
-from app.services import job_queries, temp_history
+from app.services import creality_models, job_queries, sqlite_db, temp_history
 from app.services.state_store import StateStore
 
 logger = logging.getLogger(__name__)
@@ -86,19 +86,15 @@ _states_summary_lock = threading.Lock()
 
 
 def _history_db_path():
-    """Absolute path to the printer_history SQLite DB (project root)."""
-    return os.path.join(
-        os.path.dirname(os.path.dirname(os.path.dirname(__file__))),
-        "printer_history.db",
-    )
+    """Absolute path to the printer_history SQLite DB (the data folder, FORGE_DATA_DIR)."""
+    from app.services import data_dir
+    return data_dir.HISTORY_DB
 
 
 def _ams_db_path():
-    """Absolute path to the ams_history SQLite DB (project root)."""
-    return os.path.join(
-        os.path.dirname(os.path.dirname(os.path.dirname(__file__))),
-        "ams_history.db",
-    )
+    """Absolute path to the ams_history SQLite DB (the data folder, FORGE_DATA_DIR)."""
+    from app.services import data_dir
+    return data_dir.AMS_DB
 
 
 def _registry_rows():
@@ -156,16 +152,25 @@ def _notification_mutes():
 
 
 _JOBS_WINDOW_S = 7 * 86400  # the print journal's default window
+# Offsets and indices in a query string: an integer SQLite can bind (a bigger
+# one raised OverflowError in the query, a 500; QA 17.11 F5). 422 instead.
+SQLITE_INT_MAX = 2 ** 63 - 1
+
+
+def _check_window(fr, to):
+    """400 unless fr and to are finite and fr <= to: an inf / nan window gave a
+    states summary of 9e18 s «нет данных» and an empty timeline (QA 17.11)."""
+    if not (math.isfinite(fr) and math.isfinite(to)):
+        raise HTTPException(status_code=400, detail="fr and to must be finite")
+    if fr > to:
+        raise HTTPException(status_code=400, detail="fr must be <= to")
 
 
 def _jobs_window(fr, to):
     """(fr, to) of a /api/history/jobs* request: the last 7 days by default; 400 on a bad window."""
     to = time_module.time() if to is None else to
     fr = to - _JOBS_WINDOW_S if fr is None else fr
-    if not (math.isfinite(fr) and math.isfinite(to)):
-        raise HTTPException(status_code=400, detail="fr and to must be finite")
-    if fr > to:
-        raise HTTPException(status_code=400, detail="fr must be <= to")
+    _check_window(fr, to)
     return fr, to
 
 
@@ -213,7 +218,7 @@ def _query_events(db, fr, to, limit, offset, printer_id=None, state=None):
         outer_where += " AND state = ?"
         params.append(state)
     params.extend([limit + 1, offset])
-    conn = sqlite3.connect(db, timeout=10)
+    conn = sqlite_db.connect(db)
     try:
         conn.row_factory = sqlite3.Row
         rows = conn.execute("""
@@ -269,7 +274,7 @@ def _query_timeline(db, fr, to, limit, offset, printer=None, desc=False):
     # пользовательский ввод в текст SQL не попадает.
     order_clause = "ORDER BY recorded_at DESC" if desc else "ORDER BY recorded_at ASC"
     params.extend([step, step, limit + 1, offset])
-    conn = sqlite3.connect(db, timeout=10)
+    conn = sqlite_db.connect(db)
     try:
         conn.row_factory = sqlite3.Row
         rows = conn.execute("""
@@ -314,7 +319,7 @@ def _query_state_durations(db, fr, to):
     Expensive: a full LEAD() window scan over printer_history. Memoized by
     _cached_state_durations.
     """
-    conn = sqlite3.connect(db, timeout=10)
+    conn = sqlite_db.connect(db)
     try:
         conn.row_factory = sqlite3.Row
         # Группировка — по printer_id, а НЕ по (printer_id, label): иначе после
@@ -393,6 +398,11 @@ def _live_raw(store, printer_id):
     if device is None or not hasattr(device, 'forge_raw'):
         return None
     raw = device.forge_raw.snapshot()
+    from app.services.print_material import job_key
+    material = getattr(device, 'forge_material', None)
+    raw['material_estimate'] = {'grams': material[1] if material else None,
+                                'matches_job': bool(material and material[0] == job_key(device)),
+                                'reader': getattr(device, 'forge_material_debug', None)}
     raw['ams'] = {str(k): {'info': v['info'], 'sf': list(v['sf'] or [])} for k, v in raw['ams'].items()}
     raw['extruders'] = {str(k): v for k, v in raw['extruders'].items()}
     ams = getattr(device, 'ams', None)
@@ -448,11 +458,13 @@ class JWTAuthMiddleware(BaseHTTPMiddleware):
                     # predates their tokens_valid_after watermark.
                     payload = decode_token(token, secret)
                     iat = payload.get('iat', 0) if payload else 0
+                    # jti: a token «Выйти» revoked is turned away too (same query).
+                    jti = payload.get('jti') if payload else None
                     # token_subject_active does a synchronous SQLite read; run it in
                     # the threadpool so a concurrent users.db write can't stall the
                     # event loop (and with it every in-flight request).
                     from starlette.concurrency import run_in_threadpool
-                    if await run_in_threadpool(token_subject_active, result[0], iat):
+                    if await run_in_threadpool(token_subject_active, result[0], iat, jti):
                         username, role = result
         if username is not None:
             request.state.username = username
@@ -525,6 +537,9 @@ def create_app(store: StateStore) -> FastAPI:
             # stays as it is, the card adds its plaque on top.
             d["maintenance"] = maint.get(d["id"])
             d["caps"], d["caps_note"] = caps, note
+            # The model as people read it («K1C», «Ender-5 Max»; None for a model without a name
+            # in app/services/creality_models.py): the card's head and the job card.
+            d["model_name"] = creality_models.display_name(d.get("device_type"))
             # True/False/None: доступно ли управление печатью. У Bambu это
             # вердикт зонда (прошивка может блокировать print-класс), у Creality
             # — просто живая WS-сессия, у Klipper — готовность klippy (caps).
@@ -537,7 +552,7 @@ def create_app(store: StateStore) -> FastAPI:
             # Активный подогрев камеры (M141) — только H2-серия; на остальных
             # моделях чип камеры остаётся некликабельным показометром. Та же
             # цепочка модели, что у команд: статус, затем реестр.
-            if printer_commands.has_chamber_heater(d.get("device_type") or reg_models.get(d["id"])):
+            if d.get("chamber_limit") or (d.get("kind") == "bambu" and printer_commands.has_chamber_heater(d.get("device_type") or reg_models.get(d["id"]))):
                 d["chamber_ctl"] = True
             # The auto-ignore thread's state for a pause on a code it waves
             # through (tries of this pause, next try, why it did not press):
@@ -565,6 +580,23 @@ def create_app(store: StateStore) -> FastAPI:
         d["maintenance"] = _maintenance_of_rows(registry).get(d["id"])
         notification_mutes.mark(d["id"], d.get("notifications"), _notification_mutes())
         return d
+
+    @app.get('/api/printers/{printer_id}/parts')
+    def printer_parts(printer_id: str):
+        # The job card's plate map of a printing Creality (creality_parts.view):
+        # the parts' outlines live from the printer, the skipped ones, the bed.
+        item = store.get_one(printer_id)
+        if item is None:
+            raise HTTPException(status_code=404, detail='Printer not found')
+        from app.services import creality_parts
+        empty = {"parts": [], "skipped": [], "current": None, "bed": None}
+        if item.kind.value != "creality":
+            return empty
+        get_collector = getattr(store, 'get_collector', None)
+        collector = get_collector(printer_id) if callable(get_collector) else None
+        get_data = getattr(getattr(collector, 'client', None), 'get_data', None)
+        data = get_data() if callable(get_data) else None
+        return creality_parts.view(data, item.device_type) if data else empty
 
     @app.get('/api/printers/{printer_id}/temps')
     def printer_temps(printer_id: str, hours: int = Query(6, ge=1, le=168)):
@@ -613,6 +645,9 @@ def create_app(store: StateStore) -> FastAPI:
         out = []
         for s in store.get_all():
             ams = s.ams
+            if s.cfs:
+                from app.services.creality_features import history_units
+                ams = {"units": history_units(s.cfs)}
             if not ams or not ams.get("units"):
                 continue
             tray_now = ams.get("tray_now")
@@ -625,11 +660,13 @@ def create_app(store: StateStore) -> FastAPI:
                     "printer_id": s.id,
                     "label": labels.get(s.id, s.label),
                     "device_type": s.device_type,
+                    "model_name": creality_models.display_name(s.device_type),   # the card's «K2 Plus»
                     "online": s.online,
                     "maintenance": s.id in maint,   # the printer is in maintenance mode
                     # Physical unit index (matches what record_ams stores), so the
                     # history query below lines up with the right unit's rows.
                     "unit_index": unit.get("index", idx),
+                    "system": unit.get("system", "ams"),
                     "humidity": unit.get("humidity"),
                     "humidity_pct": unit.get("humidity_pct"),
                     "temp": unit.get("temp"),
@@ -639,7 +676,8 @@ def create_app(store: StateStore) -> FastAPI:
                     "drying": bool(dry["active"]) if dry else bool(dry_time and dry_time > 0),
                     "dry": dry,
                     "slots": unit.get("slots") or [],
-                    "tray_now_local": (tray_now - base) if tray_now is not None
+                    "tray_now_local": next((i for i, slot in enumerate(unit["slots"]) if slot["selected"]), None)
+                        if unit.get("system") == "cfs" else (tray_now - base) if tray_now is not None
                         and base <= tray_now < base + nslots else None,
                 })
                 base += nslots
@@ -653,18 +691,17 @@ def create_app(store: StateStore) -> FastAPI:
         return ams_autodry_engine.snapshot()
 
     @app.get("/api/ams/history")
-    def ams_history(printer_id: str, unit: int = Query(0, ge=0),
+    def ams_history(printer_id: str, unit: int = Query(0, ge=0, le=SQLITE_INT_MAX),
                     fr: float = None, to: float = None):
         if to is None:
             to = time_module.time()
         if fr is None:
             fr = to - 24 * 3600
-        if fr > to:
-            raise HTTPException(status_code=400, detail="fr must be <= to")
+        _check_window(fr, to)
         db = _ams_db_path()
         if not os.path.exists(db):
             return {"rows": []}
-        conn = sqlite3.connect(db, timeout=10)
+        conn = sqlite_db.connect(db)
         try:
             conn.row_factory = sqlite3.Row
             rows = conn.execute(
@@ -681,14 +718,13 @@ def create_app(store: StateStore) -> FastAPI:
     @app.get("/api/history/timeline")
     def get_timeline(fr: float, to: float = None, printer: str = None,
                      limit: int = Query(1000, ge=1, le=50000),
-                     offset: int = Query(0, ge=0), desc: bool = False):
+                     offset: int = Query(0, ge=0, le=SQLITE_INT_MAX), desc: bool = False):
         # le=50000 сознательно НЕ снижен до фактической страницы фронта (5000):
         # закэшированный старый app.js всё ещё шлёт limit=50000 и не должен
         # ловить 422 (однажды уже наступали — см. вкладку «История» 07.2026).
         if to is None:
             to = time_module.time()
-        if fr > to:
-            raise HTTPException(status_code=400, detail="fr must be <= to")
+        _check_window(fr, to)
         payload = _query_timeline(_history_db_path(), fr, to, limit, offset,
                                   printer=printer, desc=desc)
         # json.dumps здесь, в threadpool-потоке sync-эндпоинта: дефолтный путь
@@ -700,12 +736,11 @@ def create_app(store: StateStore) -> FastAPI:
 
     @app.get("/api/history/events")
     def get_events(fr: float, to: float = None,
-                   limit: int = Query(50, ge=1, le=500), offset: int = Query(0, ge=0),
+                   limit: int = Query(50, ge=1, le=500), offset: int = Query(0, ge=0, le=SQLITE_INT_MAX),
                    printer_id: str = None, state: str = None):
         if to is None:
             to = time_module.time()
-        if fr > to:
-            raise HTTPException(status_code=400, detail="fr must be <= to")
+        _check_window(fr, to)
         if state is not None and state not in _EVENT_STATES:
             raise HTTPException(status_code=400, detail="unknown state")
         return _query_events(_history_db_path(), fr, to, limit, offset,
@@ -715,8 +750,7 @@ def create_app(store: StateStore) -> FastAPI:
     def get_states_summary(fr: float, to: float = None):
         if to is None:
             to = time_module.time()
-        if fr > to:
-            raise HTTPException(status_code=400, detail="fr must be <= to")
+        _check_window(fr, to)
 
         printers = _cached_state_durations(_history_db_path(), fr, to)
 
@@ -753,7 +787,7 @@ def create_app(store: StateStore) -> FastAPI:
     @app.get("/api/history/jobs")
     def get_jobs(fr: float = None, to: float = None, printer: str = None, result: str = None,
                  include_maint: bool = True, limit: int = Query(200, ge=1, le=2000),
-                 offset: int = Query(0, ge=0)):
+                 offset: int = Query(0, ge=0, le=SQLITE_INT_MAX)):
         fr, to = _jobs_window(fr, to)
         payload = job_queries.list_jobs(_history_db_path(), fr, to, printer=printer,
                                         results=_jobs_results(result), include_maint=include_maint,
@@ -762,10 +796,15 @@ def create_app(store: StateStore) -> FastAPI:
 
     @app.get("/api/history/jobs/stats")
     def get_jobs_stats(fr: float = None, to: float = None, printer: str = None,
-                       include_maint: bool = False):
+                       include_maint: bool = False, tz: str = Query(None, max_length=64)):
+        # tz: the browser's IANA zone («Печатей в день» by the viewer's days, not
+        # the server's; QA 17.11 hunt №2). Unknown or empty: the server's, as before.
         fr, to = _jobs_window(fr, to)
+        # Given only when sent: job_stats' own default (None) is the server's zone too.
+        extra = {"tz": tz} if tz else {}
         return _json_response(job_queries.job_stats(_history_db_path(), fr, to, printer=printer,
-                                                    include_maint=include_maint, labels=_current_labels()))
+                                                    include_maint=include_maint, labels=_current_labels(),
+                                                    **extra))
 
     # A dependency, not a check in the body: it runs before the query is
     # validated, so a viewer gets 403 for any parameters, never a 400 / 422.
@@ -788,6 +827,34 @@ def create_app(store: StateStore) -> FastAPI:
             body = gzip.compress(body, 6)
             headers.update({"Content-Encoding": "gzip", "Vary": "Accept-Encoding"})
         return Response(content=body, media_type="text/csv; charset=utf-8", headers=headers)
+
+    @app.get('/api/job-projects/{key}.json')
+    def job_project(key: str):
+        from app.services import job_previews
+        if not job_previews.valid_key(key):
+            raise HTTPException(status_code=404, detail="Project not found")
+        path = job_previews.DIRECTORY / (key + ".json")
+        try:
+            document = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            raise HTTPException(status_code=404, detail="Project not found")
+        from app.services import project_summary
+        # Not immutable: the summary of an older stored file follows project_summary's code.
+        return JSONResponse(project_summary.from_stored(document),
+                            headers={"Cache-Control": "private, max-age=3600",
+                                     "X-Content-Type-Options": "nosniff"})
+
+    @app.get('/api/job-previews/{key}.png')
+    def job_preview(key: str):
+        from app.services import job_previews
+        if not job_previews.valid_key(key):
+            raise HTTPException(status_code=404, detail="Preview not found")
+        path = job_previews.DIRECTORY / (key + ".png")
+        if not path.is_file():
+            raise HTTPException(status_code=404, detail="Preview not found")
+        return FileResponse(path, media_type="image/png",
+                            headers={"Cache-Control": "private, max-age=31536000, immutable",
+                                     "X-Content-Type-Options": "nosniff"})
 
     app.mount('/static', StaticFiles(directory='app/web'), name='static')
 
@@ -833,7 +900,10 @@ def create_app(store: StateStore) -> FastAPI:
         trusted_proxies=getattr(cfg, 'TRUSTED_PROXIES', None),
     )
 
-    conn = sqlite3.connect(os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "users.db"), timeout=10)
+    # auth.USERS_DB, the file init_users_db() just prepared (the same project-root
+    # users.db in production; a test's temporary one when it points auth there).
+    from app.api import auth as auth_api
+    conn = sqlite_db.connect(auth_api.USERS_DB)
     row = conn.execute("SELECT COUNT(*) as cnt FROM users").fetchone()
     if row and row[0] == 0:
         # First-run admin bootstrap. Username from FORGE_ADMIN_USERNAME (default
@@ -873,6 +943,8 @@ def create_app(store: StateStore) -> FastAPI:
     from app.api.admin import router as admin_router
     app.include_router(auth_router)
     app.include_router(admin_router)
+    from app.api.printer_files_api import router as printer_files_router
+    app.include_router(printer_files_router)
     # GZip добавлен ПЕРЕД JWT (= внутренним слоем): аутентификация остаётся
     # внешней, а JSON истории (~сотни КБ на страницу) сжимается в ~10 раз.
     # compresslevel=6 — на Pi уровень 9 заметно дороже при ~том же размере.

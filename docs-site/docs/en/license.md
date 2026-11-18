@@ -38,5 +38,9 @@ contributors grant the copyright holder a license that keeps the dual-licensing 
 [ha-bambulab](https://github.com/greghesp/ha-bambulab), © 2023 ha-bambulab contributors, under the
 **MIT License**. It stays under the MIT License and is not part of either license above.
 
+`app/vendor/ha_creality_ws/` is the standalone Creality client copied from
+[ha_creality_ws](https://github.com/3dg1luk43/ha_creality_ws), under the **AGPL-3.0**. It stays
+under the AGPL-3.0 and is not part of either license above.
+
 Bambu's error texts and button tables that the dashboard downloads at run time are Bambu's data;
 they are stored only in the local `data/hms/` folder and are not part of the repository.

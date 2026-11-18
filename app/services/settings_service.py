@@ -18,11 +18,11 @@ import time
 from threading import Lock
 from typing import Any, Dict, Optional
 
-from app.services import ams_autodry
+from app.services import ams_autodry, data_dir, sqlite_db
 
 logger = logging.getLogger(__name__)
 
-DB_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "printer_history.db")
+DB_PATH = data_dir.HISTORY_DB
 
 DEFAULTS: Dict[str, Any] = {
     "telegram_enabled": False,
@@ -64,9 +64,16 @@ DEFAULTS: Dict[str, Any] = {
     # Both have Studio's «Ignore this and Resume» button. The owner's plates have worn
     # markers and move between printers, so on every Bambu (15.10).
     "auto_ignore_print_errors": ["0500_8062", "0C00_8009"],
+    # The states a printer steps into that turn its lamp on when it is off
+    # (app/services/auto_light.py, 03.11): it stopped on its own — the owner looks
+    # through the cameras. [] — never. Set via PUT /api/admin/settings, no UI.
+    "auto_light_states": ["paused", "error", "cancelled"],
     # Printer notifications an admin hid («Скрыть», app/services/notification_mutes.py):
     # printer_id -> [record key, …]. Kept by key, never pruned. Shared object: never mutated.
     "notification_mutes": {},
+    # «Файлы на принтере» and the shared pool leave the printers' factory sample files out
+    # (printer_files.is_sample: by exact name). The sync never copies them either way.
+    "hide_sample_files": True,
 }
 
 # config.py attribute -> settings key, for the one-time migration seed.
@@ -90,7 +97,7 @@ _cache: Optional[Dict[str, Any]] = None
 
 
 def _connect(db_path: Optional[str] = None) -> sqlite3.Connection:
-    conn = sqlite3.connect(db_path or DB_PATH, timeout=10)
+    conn = sqlite_db.connect(db_path or DB_PATH)
     conn.row_factory = sqlite3.Row
     return conn
 

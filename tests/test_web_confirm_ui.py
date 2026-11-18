@@ -69,7 +69,7 @@ def _node(src):
 
 
 def _ams(expr):
-    lib = "\n".join([_safe_text(), _js_function("icon"), _js_function("amsUnitName"), _js_function("amsFmtMin"),
+    lib = "\n".join([_safe_text(), _js_function("icon"), _js_function("amsUnitName"), _js_function("amsFmtMin"), _js_function("timeFmt"),
                      _block("ams-ui")])
     return _node(lib + "\nconsole.log(JSON.stringify(" + expr + "));")
 
@@ -250,7 +250,7 @@ def test_a_reply_line_has_its_close_and_the_toasts_are_gone_from_commands():
     assert "await loadAdminUsers();" in users and "replyIn(row ? row.querySelector('td.adm-actions') : null" in users
     assert "showToast" not in users
     perm = _js_function("updateNotificationSetting")
-    assert "showToast" not in perm and perm.count("nfPermReply(") == 4
+    assert "showToast" not in perm and perm.count("nfPermReply(") == 5
     assert 'document.getElementById("settingsList")' in _js_function("nfPermReply")
     restart = _js_function("prnWaitForRestart")
     assert "showToast" not in restart and "replyIn(txt, { k: 'wait', t: 'Сервис перезапускается…' });" in restart
@@ -280,7 +280,7 @@ def test_the_ams_block_asks_in_its_drying_line():
     asked = _ams("amsTabDryHtml(%s, %s, true, null, true)" % (json.dumps(u), json.dumps(p)))
     assert plain == _ams("amsTabDryHtml(%s, %s, true, null, false)" % (json.dumps(u), json.dumps(p)))
     assert 'data-ams-dry-stop data-pid="b1" data-ams="0">Стоп<' in plain and "asking" not in plain
-    assert asked.startswith('<div class="ams-dry asking">') and "осталось 11:52" in asked
+    assert asked.startswith('<div class="ams-dry asking">') and "осталось 11ч 52м" in asked
     assert ('<span class="ams-ask">Остановить сушку?</span><button type="button" class="pc-ctl cf-stop" '
             'data-ams-dry-stop-go data-pid="b1" data-ams="0">Стоп</button><button type="button" class="pc-ctl" '
             'data-ams-dry-stop-no data-pid="b1" data-ams="0">Отмена</button>') in asked
@@ -316,14 +316,15 @@ def test_the_ams_wiring_asks_then_sends_and_answers_on_the_block():
         assert need in ams, need
     sends = re.search(r"var sends = t\.matches\(\"([^\"]*)\"\)", _js_function("onPopClick")).group(1).split(",")
     assert sends == ["[data-speed]", "[data-ok]", "[data-ams-load-go]", "[data-ams-unload-go]", "[data-dry-start]",
-                     "[data-dry-stop-go]"]
+                     "[data-dry-stop-go]", "[data-spool-save]", "[data-rfid]",   # + «Катушки…» (04.11)
+                     "[data-airduct]"]   # + the air duct switch (16.11)
 
 
 def test_the_popover_question_sends_only_from_its_go_button():
     # onAmsPopClick in node: load / unload / stop ask (no command), their «…-go» send, «Отмена» goes back
     p = {"id": "b1", "label": "P3", "filament_loaded": True,
          "ams": {"tray_now": 0, "units": [{"index": 0, "slots": [{"type": "PLA"}, {"type": "PETG"}], "dry": {}}]}}
-    src = "\n".join([_safe_text(), _js_function("icon"), _js_function("amsUnitName"), _js_function("amsFmtMin"),
+    src = "\n".join([_safe_text(), _js_function("icon"), _js_function("amsUnitName"), _js_function("amsFmtMin"), _js_function("timeFmt"),
                      _block("ams-ui")]) + r"""
     var log = [], P = %s, pcPop = {querySelector: function () { return null; }, querySelectorAll: function () { return []; }};
     function findPrinter() { return P; }

@@ -1,4 +1,5 @@
-# Nightly backup of the dashboard databases to a separate data disk.
+# Nightly backup of the dashboard databases, config.py and the job cards (data/job_previews)
+# to a separate data disk.
 # Install (replace placeholders, e.g. __USER__=pi, __WORKDIR__=/home/pi/BambuDiagnosticData):
 #   sed "s|__USER__|$USER|g; s|__WORKDIR__|$PWD|g" deploy/forge-db-backup.service | sudo tee /etc/systemd/system/forge-db-backup.service
 #   sudo cp deploy/forge-db-backup.timer /etc/systemd/system/ && sudo systemctl daemon-reload

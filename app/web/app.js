@@ -2,27 +2,20 @@
       // --- Auth state ---
       let currentUser = null;
 
-      function isAuthenticated() { return currentUser !== null; }
       function isAdmin() { return currentUser && currentUser.role === 'admin'; }
 
+      // A network failure rejects as fetch does; a 401 the refresh cannot cure shows the sign-in
+      // page and rejects with «Unauthorized».
       async function apiFetch(url, opts) {
         opts = opts || {};
-        try {
-          var res = await fetch(url, opts);
-          if (res.status === 401) {
-            var refreshed = await tryRefresh();
-            if (refreshed) {
-              res = await fetch(url, opts);
-              return res;
-            }
-            showLogin();
-            throw new Error('Unauthorized');
-          }
-          return res;
-        } catch (e) {
-          if (e.message === 'Unauthorized') throw e;
-          throw e;
+        var res = await fetch(url, opts);
+        if (res.status === 401) {
+          var refreshed = await tryRefresh();
+          if (refreshed) return fetch(url, opts);
+          showLogin();
+          throw new Error('Unauthorized');
         }
+        return res;
       }
 
       // Single-flight guard: the refresh token is one-time-use and rotates on the
@@ -261,30 +254,55 @@
       let timelineLoadingMore = false;
 
       const imageMap = {
-        "bambu-x1": "/static/img/bambu-x1c.png",
-        "bambu-x1c": "/static/img/bambu-x1c.png",
-        "bambu-x1e": "/static/img/bambu-x1c.png",
-        "bambu-p1": "/static/img/bambu-p2s.png",
-        "bambu-p1p": "/static/img/bambu-p2s.png",
-        "bambu-p1s": "/static/img/bambu-p2s.png",
-        "bambu-p2s": "/static/img/bambu-p2s.png",
-        "bambu-a1": "/static/img/bambu-a1.png",
-        "bambu-a1mini": "/static/img/bambu-a1mini.png",
-        "bambu-h2d": "/static/img/bambu-h2s.png",
-        "bambu-h2s": "/static/img/bambu-h2s.png",
-        "creality-k1max": "/static/img/creality-k1max.png",
-        "creality-k1c": "/static/img/creality-k1c.png",
-        "creality-ender5max": "/static/img/creality-ender5max.png",
+        "bambu-x1": "/static/img/bambu-x1-cover.png",
+        "bambu-x1c": "/static/img/bambu-x1c-cover.png",
+        "bambu-x1e": "/static/img/bambu-x1e-cover.png",
+        "bambu-p1p": "/static/img/bambu-p1p-cover.png",
+        "bambu-p1s": "/static/img/bambu-p1s-cover.png",
+        "bambu-p2s": "/static/img/bambu-p2s-cover.png",
+        "bambu-a1": "/static/img/bambu-a1-cover.png",
+        "bambu-a1mini": "/static/img/bambu-a1mini-cover.png",
+        "bambu-a2l": "/static/img/bambu-a2l-cover.png",
+        "bambu-h2c": "/static/img/bambu-h2c-cover.png",
+        "bambu-h2d": "/static/img/bambu-h2d-cover.png",
+        "bambu-h2dpro": "/static/img/bambu-h2dpro-cover.png",
+        "bambu-h2s": "/static/img/bambu-h2s-cover.png",
+        "bambu-x2d": "/static/img/bambu-x2d-cover.png",
+        "creality-k1": "/static/img/creality-k1-cover.png",
+        "creality-k1max": "/static/img/creality-k1max-cover.png",
+        "creality-k1c": "/static/img/creality-k1c-cover.png",
+        "creality-k1se": "/static/img/creality-k1se-cover.png",
+        "creality-k2": "/static/img/creality-k2-cover.png",
+        "creality-k2plus": "/static/img/creality-k2plus-cover.png",
+        "creality-k2pro": "/static/img/creality-k2pro-cover.png",
+        "creality-k2se": "/static/img/creality-k2se-cover.png",
+        "creality-ender3v3": "/static/img/creality-ender3v3-cover.png",
+        "creality-ender3v3ke": "/static/img/creality-ender3v3ke-cover.png",
+        "creality-ender3v3plus": "/static/img/creality-ender3v3plus-cover.png",
+        "creality-ender5max": "/static/img/creality-ender5max-cover.png",
+        "creality-cr10se": "/static/img/creality-cr10se-cover.png",
+        "creality-hi": "/static/img/creality-hi-cover.png",
+        "creality-sparkxi7": "/static/img/creality-sparkxi7-cover.png",
+        "bambu-p1": "/static/img/bambu-p1p-cover.png",
         "klipper": "/static/img/generic-klipper.svg",
         "klipper-ghost6": "/static/img/flyingbear-ghost6-cutout.png",
         "klipper-flyingbear_ghost6": "/static/img/flyingbear-ghost6-cutout.png",
         "mks-reborn2": "/static/img/flyingbear-reborn2-cutout.png",
         "mks-robin": "/static/img/flyingbear-reborn2-cutout.png"
       };
+      const comboImageMap = {
+        "bambu-p2s": "/static/img/bambu-p2s-combo-cutout.png",
+        "bambu-h2s": "/static/img/bambu-h2s-combo-cutout.png",
+        "creality-k2plus": "/static/img/creality-k2plus-combo-cutout.png"
+      };
       function imgFor(printer) {
         const kind = (printer.kind || "").toLowerCase();
-        const deviceType = (printer.device_type || "").toLowerCase();
+        const deviceType = (printer.device_type || "").toLowerCase().replace(/[\s_-]+/g, "");
         const key = kind + "-" + deviceType;
+        const hasFeeder = kind === "bambu"
+          ? !!(printer.ams && Array.isArray(printer.ams.units) && printer.ams.units.length)
+          : kind === "creality" && Array.isArray(printer.cfs) && printer.cfs.some(box => box && !box.external);
+        if (hasFeeder && comboImageMap[key]) return comboImageMap[key];
         return imageMap[key] || imageMap[kind] || imageMap["klipper"];
       }
       function loadNotificationSettings() {
@@ -314,9 +332,11 @@
       function showBrowserNotification(title, body, pid, notes) {
         if (!("Notification" in window) || Notification.permission !== "granted") return;
         try {
+          // the printer's own picture (as on its card); a push of no printer: the panel's icon
+          var pr = pid != null ? findPrinter(pid) : null;
           var n = new Notification(title, {
             body: body,
-            icon: "/static/img/bambu-x1c.png"
+            icon: pr ? imgFor(pr) : "/pwa/icon-192.png"
           });
           if (pid != null) n.onclick = function () {
             try { window.focus(); } catch (e) {}
@@ -363,8 +383,14 @@
               settings.enabled = false;
               saveNotificationSettings(settings);
               syncNotificationControls();
-              var httpsUrl = "https://" + window.location.hostname;
-              nfPermReply("Уведомления не работают через HTTP. Откройте " + httpsUrl);
+              // A secure page (HTTPS, localhost): the person blocked them in the browser. Over plain
+              // HTTP the browser refuses them anyway: the HTTPS address of this host.
+              if (window.isSecureContext || window.location.protocol === "https:") {
+                nfPermReply("Уведомления запрещены в браузере — разрешите их для этого сайта в настройках браузера");
+              } else {
+                var httpsUrl = "https://" + window.location.hostname;
+                nfPermReply("Уведомления не работают через HTTP. Откройте " + httpsUrl);
+              }
               return;
             }
           }
@@ -510,24 +536,23 @@
         }
         return raw;
       }
+      // The panel's one duration format: «2ч 5м», «40м», «3ч»; whole minutes, rounded, the
+      // minutes carried into the hours (3599 s is «1ч», never «60м»); «< 1м» under a minute;
+      // "—" — none, not known or zero. fleetDur, amsFmtMin and adFmtHM say it the same.
       function timeFmt(seconds) {
-        if (seconds == null || !isFinite(seconds)) return "—";
-        const sec = Math.max(0, Math.floor(seconds));
-        const h = Math.floor(sec / 3600);
-        const m = Math.floor((sec % 3600) / 60);
-        const parts = [];
-        if (h) parts.push(h + "ч");
-        if (m) parts.push(m + "м");
-        return parts.join(" ") || "—";
+        if (seconds == null || !isFinite(seconds) || seconds <= 0) return "—";
+        if (seconds < 60) return "< 1м";
+        var mins = Math.round(seconds / 60), h = Math.floor(mins / 60), m = mins % 60;
+        return (h ? h + "ч" : "") + (h && m ? " " : "") + (m ? m + "м" : "");
       }
       function progressOffset(pct) {
         const circumference = 339.292;
         if (pct == null || !isFinite(pct) || pct <= 0) return circumference;
         return circumference - (circumference * Math.max(0, Math.min(100, pct)) / 100);
       }
-      function fmtAvg(value, suffix) {
-        return value == null || !isFinite(value) ? "—" : value.toFixed(0) + suffix;
-      }
+      // The panel language's locale for the browser's own number and date formats (app/web/i18n.js:
+      // "ru-RU", "en-GB"); "ru-RU" before the dictionaries load.
+      function uiLocale() { return typeof I18N === "object" && I18N ? I18N.locale() : "ru-RU"; }
       function safeText(value, fallback) {
         if (value == null || value === "") return fallback;
         // Device-supplied strings (job names, errors, labels) are interpolated
@@ -570,11 +595,15 @@
       // IA §5, §10: by name (natural, P2 before P10); a printer that wants a decision
       // (nfUrgency: a fatal / a pause on an error that holds it, never in maintenance
       // mode) always first — no «Проблемные сверху» switch any more. «Финиш»: the
-      // printing ones with an ETA by the time left, the rest by name after them.
+      // finished ones (ready to unload) first, by name — not sunk below every print
+      // the moment they finish (owner, 03.11.2026) — then the printing ones with an
+      // ETA by the time left, the rest by name after them.
       function sortPrinters(printers) {
         const byEta = currentSort === "eta";
         function eta(p) {
-          return byEta && !inMaint(p) && p.state === "printing" && !isOffline(p) && p.eta_seconds > 0 ? p.eta_seconds : Infinity;
+          if (!byEta || inMaint(p) || isOffline(p)) return Infinity;
+          if (p.state === "finished") return -1;
+          return p.state === "printing" && p.eta_seconds > 0 ? p.eta_seconds : Infinity;
         }
         return printers.slice().sort((a, b) => {
           const na = nfUrgency(a);
@@ -609,7 +638,7 @@
       var ROUTE_SCREENS = {
         printers: { view: "fleet", subs: {}, keys: ["finish", "bell"] },
         ams: { view: "ams", subs: {}, keys: [] },
-        history: { view: "history", subs: { jobs: "jobs", chrono: "chrono", stats: "stats", actions: "actions" },
+        history: { view: "history", subs: { jobs: "jobs", chrono: "chrono", stats: "stats", plastic: "plastic", actions: "actions" },
                    keys: ["period", "from", "to", "printer"], adminSubs: ["actions"] },
         admin: { view: "admin", subs: { park: "park", auto: "auto", access: "access", system: "system" }, keys: [], admin: true }
       };
@@ -836,6 +865,8 @@
           if (st && st.forgeSheet) { sheetNav.skip++; window.history.back(); }
         });
       }
+      // preview.js (the job card dialog) is a sheet on phones too.
+      window.ForgeSheet = { opened: sheetOpened, closed: sheetClosed };
       function sheetCloseAll() {
         var close = sheetNav.open;
         if (close) close();
@@ -933,6 +964,8 @@
       function adminLoadSub() {
         if (!isAdmin()) { if (!currentUser) adminLoadWaits = true; return; }
         loadAdminPrinters();
+        if (adminSub === "park" && typeof window !== "undefined" && window.ForgeFilePool)   // file-pool.js
+          window.ForgeFilePool.mount(document.getElementById("filePool"), apiFetch);
         if (adminSub === "auto") { loadAutodry(); loadAutoIgnore(); }
         if (adminSub === "access") loadAdminUsers();
         if (adminSub === "system") loadServerSettings();
@@ -1022,12 +1055,14 @@
       function icon(name) {
         return '<svg class="pc-ic" aria-hidden="true"><use href="#i-' + name + '"></use></svg>';
       }
+      // As project_summary.short_name: "Шестерня.gcode.3mf", Creality's "Колесо.STL_PETG_8h55m7s.gcode" → the part's name.
       function jobShortName(name) {
         var base = String(name || "").split(/[\\/]/).pop();
-        return base.replace(/\.(gcode|gco|3mf)$/i, "");
+        base = base.replace(/\.gcode\.3mf$/i, "").replace(/\.(gcode|gco|3mf)$/i, "");
+        return base.replace(/_[A-Za-z0-9+-]+_(\d+d)?\d+h\d+m\d+s$/, "").replace(/\.(stl|step|stp|obj|3mf|amf)$/i, "").trim() || base;
       }
       function fmtClock(ts) {
-        return new Date(ts).toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" });
+        return new Date(ts).toLocaleTimeString(uiLocale(), { hour: "2-digit", minute: "2-digit" });
       }
       // Cold → gray, heating toward target → yellow with →target, at working temp → warm.
       function tempChip(kind, name, cur, target, editable, icName) {
@@ -1096,10 +1131,13 @@
       }
       // editable: an admin's chip (the AMS popover with its commands); viewable: anyone
       // else's, which opens the read-only one (amsViewPopHtml) — IA §5, the chip is the
-      // one way into the AMS popover.
-      function amsChip(p, editable, viewable) {
+      // one way into the AMS popover. zones: the humidity zones ({ok, warn}, amsZonesNow);
+      // without them the fixed 25 / 40.
+      function amsChip(p, editable, viewable, zones) {
         var a = p.ams;
         if (!a || !a.units || !a.units.length) return "";
+        var system = a.system === "cfs" ? "CFS" : "AMS";
+        var panel = system === "CFS" ? "cfs" : "ams";
         var trayNow = a.tray_now;
         var parts = [];
         var globalIdx = 0;
@@ -1139,14 +1177,16 @@
             var pct = unit.humidity_pct;
             var hcls, htxt;
             if (pct != null) {
-              hcls = pct <= 25 ? "ok" : pct <= 40 ? "warn" : "bad";
+              // the AMS tab's zones (amsZones: from the auto-dry goal once known), so one colour on both screens
+              var z = zones || { ok: 25, warn: 40 };
+              hcls = pct <= z.ok ? "ok" : pct <= z.warn ? "warn" : "bad";
               htxt = "💧" + pct + "%";
             } else {
               // older AMS units report only the 5-level index
               hcls = unit.humidity <= 2 ? "ok" : unit.humidity === 3 ? "warn" : "bad";
               htxt = "💧" + unit.humidity + "/5";
             }
-            var htip = "AMS: влажность " + (pct != null ? pct + "%" : "уровень " + unit.humidity + "/5")
+            var htip = system + ": влажность " + (pct != null ? pct + "%" : "уровень " + unit.humidity + "/5")
               + (multi && unit.temp != null ? " · " + Math.round(unit.temp) + "°" : "");
             parts.push('<span class="pc-ams-hum pc-ams-hum-' + hcls + '" data-tip="' + htip + '">' + htxt + '</span>');
           }
@@ -1158,12 +1198,12 @@
             var dtip = dryStatusText(unit) + (unit.temp != null ? " · в AMS " + Math.round(unit.temp) + "°" : "");
             parts.push('<span class="pc-ams-temp" data-tip="' + dtip + '">' + icon("hourglass") + amsFmtMin(remaining) + '</span>');
           } else if (unit.temp != null && (!multi || !hasHum)) {
-            var ttip = unitDrying ? dryStatusText(unit) : "Температура AMS";
+            var ttip = unitDrying ? dryStatusText(unit) : "Температура " + system;
             parts.push('<span class="pc-ams-temp" data-tip="' + ttip + '">' + icon("steam") + Math.round(unit.temp) + '°</span>');
           }
         }
-        var edit = editable ? ' pc-editable" data-edit="ams' : viewable ? ' pc-chartable" data-chart="ams' : '';
-        return '<span class="pc-chip pc-ams' + (drying ? " pc-ams-drying" : "") + edit + '"><span class="pc-ams-lbl" data-tip="AMS">' + icon("spool") + '</span>' + parts.join("") + '</span>';
+        var edit = editable ? ' pc-editable" data-edit="' + panel : viewable ? ' pc-chartable" data-chart="' + panel : '';
+        return '<span class="pc-chip pc-ams' + (drying ? " pc-ams-drying" : "") + edit + '"><span class="pc-ams-lbl" data-tip="' + system + '">' + icon("spool") + '</span>' + parts.join("") + '</span>';
       }
       /* ams-ui:begin */
       // AMS load / unload, drying, filament-change progress and card indicators:
@@ -1195,7 +1235,7 @@
         if (unit.dry) return !!unit.dry.active;
         return unit.dry_time != null && unit.dry_time > 0;
       }
-      // "Сушка · осушение · 55 °C · PETG · осталось 11:52" (HTML-escaped).
+      // "Сушка · осушение · 55° · PETG · осталось 11ч 52м" (HTML-escaped).
       function dryStatusText(unit) {
         var dry = unit && unit.dry;
         var active = dryActive(unit);
@@ -1207,7 +1247,7 @@
           parts.push(active ? "Сушка" : "Сушка выключена");
         }
         if (active && dry) {
-          if (dry.temp) parts.push(Number(dry.temp) + " °C");
+          if (dry.temp) parts.push(Number(dry.temp) + "°");
           if (dry.filament) parts.push(safeText(dry.filament, ""));
         }
         var remaining = dry ? dry.remaining_min : unit && unit.dry_time;
@@ -1257,6 +1297,88 @@
         if (p.state === "printing" || p.state === "paused") return "Только в простое — принтер печатает или на паузе";
         return null;
       }
+      function cfsSlot(slot) {
+        return { empty: slot.empty, type: slot.type, name: slot.name, remain_pct: slot.percent,
+                 color: String(slot.color || "").replace(/^#/, "") };
+      }
+      function cfsChip(p) {
+        if (!p.cfs || !p.cfs.length) return "";
+        var boxes = p.cfs.filter(function (box) { return !box.external; });
+        if (!boxes.length) boxes = p.cfs;
+        var index = 0, active = null;
+        var units = boxes.map(function (box) {
+          var slots = box.slots.map(function (slot) {
+            if (slot.selected && !slot.empty) active = index;
+            index++;
+            return cfsSlot(slot);
+          });
+          return {slots: slots, humidity_pct: box.humidity, temp: box.temp};
+        });
+        // as the AMS chip: an admin's live card opens the popover with its commands, anyone
+        // else's the same popover read-only (cfsPopHtml decides what each one may press)
+        var editable = isAdmin() && !isOffline(p) && !p.grace_period_active;
+        return amsChip({ams: {system: "cfs", units: units, tray_now: active}}, editable, true);
+      }
+
+      function feederSettingsButton(p) {
+        return isAdmin() && p.feeder_settings ? '<div class="pc-pop-row"><button type="button" class="pc-pop-preset" data-feeder-open>⚙ Настройки ' + (p.kind === "creality" ? "CFS" : "AMS") + '</button></div>' : "";
+      }
+      function feederSettingsHtml(p) {
+        var cfs = p.kind === "creality", settings = p.feeder_settings || {};
+        var canEdit = isAdmin() && !isOffline(p) && !p.grace_period_active && (cfs || (p.caps && p.caps.ams === true));
+        var html = '<div class="pc-pop-h">Настройки ' + (cfs ? 'CFS' : 'AMS') + '</div>';
+        var labels = {auto_refill: "Запасная катушка", estimate_remaining: "Оценка остатка"};
+        Object.keys(labels).forEach(function (key) {
+          if (typeof settings[key] !== "boolean") return;
+          var on = settings[key];
+          html += '<div class="pc-pop-row"><span>' + labels[key] + '</span><button type="button" role="switch" aria-label="' + labels[key]
+            + '" aria-checked="' + on + '" class="pc-pop-preset' + (on ? ' on' : '') + '" data-feeder-setting="' + key + '" data-enabled="' + (!on)
+            + '"' + (canEdit ? '' : ' disabled') + '>' + (on ? 'Включено' : 'Выключено') + '</button></div>';
+        });
+        html += '<div class="pc-pop-note">Запасная катушка: продолжить печать, когда закончится текущая. Материал и цвет должны совпадать.</div>';
+        if (!cfs && typeof settings.estimate_remaining === "boolean") html += '<div class="pc-pop-note">Остаток — приблизительная оценка для катушек с меткой Bambu.</div>';
+        if (!canEdit) html += '<div class="pc-pop-note">Изменение настроек сейчас недоступно</div>';
+        return html + '<div class="pc-pop-row"><button type="button" class="pc-pop-preset" ' + (cfs ? 'data-cfs-nav="back"' : 'data-ams-back') + '>← Назад</button></div>';
+      }
+
+      function cfsPopHtml(p, spools) {
+        var admin = isAdmin() && !isOffline(p) && !p.grace_period_active;
+        var edit = admin && ["idle", "finished", "cancelled"].includes(p.state);
+        var boxes = (p.cfs || []).slice().sort(function (a, b) { return Number(a.external) - Number(b.external); });
+        var html = "";
+        boxes.forEach(function (box) {
+          if (box.external && !spools && !box.slots.some(function (s) { return s.selected; })
+              && boxes.some(function (b) { return !b.external; })) return;
+          var heading = box.external ? "Внешняя катушка" : "CFS " + box.id;
+          if (box.humidity != null) heading += " · 💧" + box.humidity + "%";
+          if (box.temp != null) heading += " · " + box.temp + " °C";
+          html += '<div class="pc-pop-h">' + safeText(heading, "") + '</div>';
+          if (!spools) html += '<div class="pc-pop-presets">';
+          box.slots.forEach(function (m) {
+            var address = ' data-box="' + Number(box.id) + '" data-slot="' + Number(m.id) + '"';
+            var label = amsSlotDot(cfsSlot(m)) + (Number(m.id) + 1) + ' · ' + (m.empty ? 'пусто' : safeText(m.type, "?"));
+            var tip = safeText([m.name, !m.empty && m.percent != null ? m.percent + "%" : "", m.selected ? "Загружен сейчас" : ""].filter(Boolean).join(" · "), "");
+            if (!spools) {
+              html += '<button type="button" class="pc-pop-preset' + (m.selected ? ' on' : '') + '"' + address
+                + ' data-tip="' + tip + '"' + (edit && !m.empty ? ' data-cfs="' + (m.selected ? 'unload' : 'load') + '"' : ' disabled') + '>' + label + '</button>';
+              return;
+            }
+            html += '<div class="pc-pop-row pc-spool-row"' + address + '><span class="pc-pop-slot' + (m.selected ? ' on' : '') + '">'
+              + label + '</span>' + (!m.empty && m.percent != null ? '<span class="pc-pop-unit">' + Number(m.percent) + '%</span>' : '')
+              + (admin && !box.external ? '<button class="pc-pop-preset" data-cfs="rfid"' + (edit ? '' : ' disabled') + '>Метка</button>' : '') + '</div>';
+            if (edit && !m.empty) {
+              html += '<div class="pc-pop-row"' + address + '><input type="text" aria-label="Материал" data-material maxlength="16" value="' + safeText(m.type, "") + '">'
+                + (/^#[0-9a-f]{6}$/i.test(m.color) ? '<input class="pc-pop-color" type="color" aria-label="Цвет" data-color value="' + m.color + '">' : '')
+                + '<button class="pc-pop-ok" data-cfs="set">Записать</button></div>';
+            }
+          });
+          if (!spools) html += '</div>';
+        });
+        if (!edit && admin) html += '<div class="pc-pop-note">Только в простое — принтер печатает или занят</div>';
+        return html + (spools ? "" : feederSettingsButton(p)) + '<div class="pc-pop-row"><button type="button" class="pc-pop-preset" data-cfs-nav="'
+          + (spools ? 'back">← Назад' : 'spools">Катушки: метка, материал…') + '</button></div>';
+      }
+
       function amsUnits(p) {
         return (p && p.ams && p.ams.units) || [];
       }
@@ -1307,6 +1429,10 @@
           }
           html += note;
           note = "";
+          if (slots.length) {
+            html += '<div class="pc-pop-row"><button type="button" class="pc-pop-preset" data-spool-open="' + Number(unit.index)
+              + '" data-tip="Перечитать метку катушки, задать материал и цвет вручную">Катушки: метка, материал…</button></div>';
+          }
           base += slots.length;
           if (!dry) return;
           var alert = dry.status === "error" || dry.status === "overheat";
@@ -1321,11 +1447,68 @@
             html += '<div class="pc-pop-row"><button type="button" class="pc-pop-ok" data-dry-open="' + Number(unit.index) + '">Сушить…</button></div>';
           }
         });
+        html += feederSettingsButton(p);
         html += note;   // no units
         if (canSwap && !block && p.filament_loaded === true && a.tray_now != null && a.tray_now !== 255) {
           html += '<div class="pc-pop-row"><button type="button" class="pc-pop-ok" data-ams-unload>Выгрузить</button></div>';
         }
         return html;
+      }
+      // «Катушки…» of an AMS unit: per slot «Метка» (ams_rfid: idle only, the AMS turns
+      // the spool) and «Изменить…» (spoolEditHtml). SPOOL_MATERIALS mirrors
+      // printer_commands.SPOOL_MATERIALS: material -> [nozzle min, max] (parity test).
+      var SPOOL_MATERIALS = {
+        "PLA": [190, 230], "PLA-CF": [210, 240], "PETG": [220, 260], "PETG-CF": [240, 270], "PCTG": [240, 270],
+        "ABS": [240, 270], "ASA": [240, 270], "TPU": [200, 250], "PA": [260, 290], "PA-CF": [260, 290],
+        "PC": [260, 280], "PVA": [190, 210], "HIPS": [220, 250]
+      };
+      function rfidBlock(p) {
+        if (p.grace_period_active) return CTL_MSG.grace;
+        if (p.filament_change) return CTL_MSG.change;
+        return p.state === "printing" || p.state === "paused" ? CTL_MSG.rfid : null;
+      }
+      function amsBaseOf(p, unitIndex) {
+        var base = 0, units = amsUnits(p);
+        for (var u = 0; u < units.length && units[u].index !== unitIndex; u++) base += (units[u].slots || []).length;
+        return base;
+      }
+      function spoolListHtml(p, unit) {
+        var base = amsBaseOf(p, unit.index), block = rfidBlock(p);
+        var html = '<div class="pc-pop-h">Катушки · ' + amsUnitName(unit.index) + '</div>';
+        if (block) html += '<div class="pc-pop-note">' + safeText(block, "") + '</div>';
+        (unit.slots || []).forEach(function (slot, i) {
+          var key = Number(unit.index) + ":" + i, why = block || (slot.empty ? "Слот пуст" : null);
+          html += '<div class="pc-pop-row pc-spool-row"><span class="pc-pop-slot' + (slot.empty ? " empty" : "") + '">' + amsSlotDot(slot)
+            + (base + i + 1) + ' · ' + (slot.empty ? "пусто" : safeText(slot.type, "?")) + '</span>'
+            + '<button type="button" class="pc-pop-preset" data-rfid="' + key + '"'
+            + (why ? ' aria-disabled="true" data-tip="' + safeText(why, "") + '"' : ' data-tip="AMS прокрутит катушку и прочтёт метку"') + '>Метка</button>'
+            + '<button type="button" class="pc-pop-preset" data-spool-edit="' + key + '" data-tip="Материал, цвет, температура">Изменить…</button></div>';
+        });
+        return html + '<div class="pc-pop-row"><button type="button" class="pc-pop-preset" data-ams-back>← Назад</button></div>';
+      }
+      // A slot's spool by hand: material (its nozzle range follows), colour, nozzle min / max.
+      function spoolEditHtml(p, unit, i, sel) {
+        var slot = (unit.slots || [])[i] || {}, base = amsBaseOf(p, unit.index);
+        var type = String(slot.type || "").toUpperCase();
+        sel = sel || {};
+        var mat = sel.material || (SPOOL_MATERIALS[type] ? type : "PLA");
+        var rng = sel.tmin != null ? [sel.tmin, sel.tmax]
+          : (slot.nozzle_temp && SPOOL_MATERIALS[type] ? slot.nozzle_temp : SPOOL_MATERIALS[mat]);
+        var color = amsHex(sel.color || slot.color);
+        color = color.length === 6 ? color : "FFFFFF";
+        var chips = Object.keys(SPOOL_MATERIALS).map(function (m) {
+          return '<button type="button" class="pc-pop-preset' + (m === mat ? " on" : "") + '" data-spool-mat="' + m + '">' + m + '</button>';
+        }).join("");
+        return '<div class="pc-pop-h">Слот ' + (base + i + 1) + ' · ' + amsUnitName(unit.index) + '</div>'
+          + '<div class="pc-pop-presets">' + chips + '</div>'
+          + '<div class="pc-pop-row"><input type="color" class="pc-pop-color" data-spool="color" value="#' + color.toLowerCase() + '" aria-label="Цвет">'
+          + '<input type="text" inputmode="numeric" class="pc-pop-in pc-pop-num" data-spool="tmin" value="' + Number(rng[0]) + '" aria-label="Сопло от">'
+          + '<span class="pc-pop-unit">–</span>'
+          + '<input type="text" inputmode="numeric" class="pc-pop-num" data-spool="tmax" value="' + Number(rng[1]) + '" aria-label="Сопло до">'
+          + '<span class="pc-pop-unit">°C</span></div>'
+          + '<div class="pc-pop-note">Профиль Bambu «Generic» выбранного материала. Метка катушки при следующем чтении перезапишет это.</div>'
+          + '<div class="pc-pop-row"><button type="button" class="pc-pop-preset" data-spool-open="' + Number(unit.index) + '">← Назад</button>'
+          + '<button type="button" class="pc-pop-ok" data-spool-save="' + Number(unit.index) + ":" + i + '">Записать</button></div>';
       }
       // The AMS popover without commands (IA §5: a viewer, or an admin whose card takes no
       // AMS command — offline, in its grace period, no AMS control): per unit its humidity and
@@ -1437,7 +1620,7 @@
       }
       // The printer's drying statuses an idle line names before the auto-dry's word.
       var AMS_DRY_OWN = { checking: true, stopping: true, error: true, overheat: true, testing: true };
-      // A drying unit's line (HTML): «авто · прогон 2 · 55 °C PETG · ещё 9:30» — the time
+      // A drying unit's line (HTML): «авто · прогон 2 · 55° PETG · ещё 9ч 30м» — the time
       // left in one format, as the card's chip shows it; a foreign run is not ours to touch.
       function amsDryRunText(u, s) {
         s = s || {};
@@ -1445,7 +1628,7 @@
         var who = s.kind === "foreign" ? "чужая сушка"
           : s.kind === "dry" ? (s.origin === "auto" ? "авто · прогон " + (Number(s.series) || 1) : "вручную") : "сушка";
         var parts = [], temp = dry.temp || s.temp, mat = dry.filament || s.filament;
-        if (temp) parts.push(Number(temp) + " °C" + (mat ? " " + safeText(mat, "") : ""));
+        if (temp) parts.push(Number(temp) + "°" + (mat ? " " + safeText(mat, "") : ""));
         var rem = u.dry ? dry.remaining_min : u.dry_time;
         if (rem > 0) parts.push("ещё " + amsFmtMin(rem));
         return "<b>" + who + "</b>" + (parts.length ? " · " + parts.join(" · ") : "") +
@@ -1499,13 +1682,12 @@
         return many;
       }
       function adPad(n) { return (n < 10 ? "0" : "") + n; }
-      // 425 -> "7 ч 05 мин", 40 -> "40 мин" (non-breaking: a unit never wraps alone)
+      // 425 -> "7ч 5м", 40 -> "40м", 0 -> "0м": the panel's format (timeFmt), unbreakable
       function adFmtHM(min) {
         min = Math.max(0, Math.round(Number(min) || 0));
-        var h = Math.floor(min / 60), m = min % 60;
-        return h ? h + "\u00a0ч " + adPad(m) + "\u00a0мин" : m + "\u00a0мин";
+        return min ? timeFmt(min * 60).replace(/ /g, "\u00a0") : "0м";
       }
-      // time left as the AMS cards show it ("7:05", "40 мин"), unbreakable
+      // time left as the AMS cards show it ("7ч 5м", "40м"), unbreakable
       function adLeft(min) { return amsFmtMin(min).replace(/ /g, "\u00a0"); }
       // "HH:MM" on the same local day as nowTs, else "DD.MM HH:MM" (browser time; "DD/MM" in English)
       function adClock(ts, nowTs) {
@@ -1864,7 +2046,7 @@
         });
         var h = 'Автосушка: <b class="' + (c.enabled ? "on" : "off") + '">' + (c.enabled ? "вкл" : "выкл") + "</b> · сушит <b>" + n +
           "</b> из " + units.length + (foreign ? " (" + foreign + " " + adPlural(foreign, "чужая", "чужие", "чужих") + ")" : "") +
-          '<span class="ams-strip-tail' + (c.dry_run ? " keep" : "") + '"> · цель ≤ ' + adNum(c.target_rh) + " % · пробный режим " +
+          '<span class="ams-strip-tail' + (c.dry_run ? " keep" : "") + '"> · цель ≤ ' + adNum(c.target_rh) + "% · пробный режим " +
           (c.dry_run ? '<b class="warn">вкл</b>' : "выкл") + "</span>";
         if (e.clock_wait) h += ' · <span class="warn">ждёт синхронизации часов</span>';
         if (autodryStalled(ad)) {
@@ -1882,8 +2064,8 @@
       }
       function amsHumZone(pct, z) { return pct <= z.ok ? "ok" : pct <= z.warn ? "warn" : "bad"; }
       function amsLegendHtml(z) {
-        return '<span><i class="z-ok"></i>сухо ≤ ' + z.ok + " %" + (z.goal ? " (цель автосушки)" : "") + "</span>" +
-          '<span><i class="z-warn"></i>норма ≤ ' + z.warn + " %</span>" +
+        return '<span><i class="z-ok"></i>сухо ≤ ' + z.ok + "%" + (z.goal ? " (цель автосушки)" : "") + "</span>" +
+          '<span><i class="z-warn"></i>норма ≤ ' + z.warn + "%</span>" +
           '<span><i class="z-bad"></i>влажно</span><span><i class="z-dry"></i>шла сушка</span>';
       }
       // The humidity chart's top (% from 0): the peak with a margin, in steps of 5, at least 20
@@ -1945,7 +2127,10 @@
       };
       var JOB_RESULT_ORDER = ["finished", "cancelled", "failed", "power_loss", "stopped", "lost", "open"];
       var JOB_PLAN_SRC = { slicer: "оценка слайсера", printer: "оценка принтера", linear: "оценка по прогрессу" };
-      var JOB_COLS = ["Принтер", "Начало", "Длительность (план, Δ)", "Результат", "Паузы", "Слои", "Задание"];
+      function filamentGramsText(value) {
+        return typeof value === "number" && isFinite(value) && value > 0 ? "≈ " + value.toLocaleString(typeof I18N === "object" ? I18N.locale() : "ru-RU", {maximumFractionDigits: 1}) + " г" : "—";
+      }
+      var JOB_COLS = ["Принтер", "Начало", "Длительность (план, Δ)", "Результат", "Паузы", "Слои", "Задание", "Расход (расч.)"];
       var JOB_DELTA_OK = 10;          // |fact / plan − 1| up to this many % reads as «по плану»
 
       function jbPad(n) { return (n < 10 ? "0" : "") + n; }
@@ -2087,15 +2272,48 @@
       // One table row <tr class="job-row" data-job-id data-pid tabindex="0" aria-expanded>: a click
       // (Enter) unfolds its details (jobDetailHtml) in the row after it. Every cell has data-l (its
       // label in the phone layout). opts: {now, open: the row is unfolded}.
+      // What the job card (preview.js) is opened with: its data-preview-* attributes.
+      function previewData(p, history) {
+        var model = p.model_name || p.model || p.device_type;   // model_name: the server's «K1C» for k1c
+        return { key: p.preview_key, project: p.project_key || "", name: p.job_name ? jobShortName(p.job_name) : "Задание",
+          printer: (p.label || "") + (model ? " · " + model : ""),
+          pid: history ? "" : (p.id || ""),   // a live card: its plate map may skip parts
+          grams: p.planned_filament_g > 0 ? filamentGramsText(p.planned_filament_g) : "",
+          time: history && p.planned_sec > 0 ? timeFmt(p.planned_sec) : "",   // a live job's «до завершения» is on its card
+          timecaption: "Плановое время",
+          planned: history && p.planned_sec > 0 ? "1" : ""   // the card's time is the slicer's: no second one below
+        };
+      }
+      function previewButton(p, compact, history) {
+        if (!p.preview_key || typeof ForgePreview === 'undefined') return "";
+        return ForgePreview.button(previewData(p, history), compact);
+      }
+      // The printer card's job (owner's pick, 16.11): the picture on the left with the grams under it,
+      // beside it the part's name over the stat row and the bar. The picture and the name are both
+      // .job-preview, so either opens the job card; the name is a second hit area only (not tabbed,
+      // hidden from screen readers — the picture's button names the job). null: no picture to show.
+      function cardPreviewParts(p) {
+        if (!/^[a-f0-9]{64}$/.test(p.preview_key || "") || typeof ForgePreview === "undefined") return null;
+        var d = previewData(p, false);
+        var attrs = Object.keys(d).map(function (k) { return ' data-preview-' + k + '="' + safeText(d[k], "") + '"'; }).join("");
+        return {
+          thumb: '<button type="button" class="job-preview pc-pv-thumb"' + attrs + ' aria-label="Превью: ' + safeText(d.name, "") + '">'
+            + '<span class="job-preview-thumb"><img src="/api/job-previews/' + p.preview_key + '.png" alt="" loading="lazy" decoding="async"></span>'
+            + (d.grams ? '<span class="pc-pv-grams" data-tip="Расчётный расход на всё задание">' + safeText(d.grams, "") + '</span>' : '') + '</button>',
+          name: '<button type="button" class="job-preview pc-pv-name"' + attrs + ' tabindex="-1" aria-hidden="true">'
+            + '<span class="pc-pv-text">' + safeText(d.name, "") + '</span><span class="job-preview-open">↗</span></button>'
+        };
+      }
       function jobRowHtml(job, printer, opts) {
         opts = opts || {};
-        var running = job.result == null, pauses = jobPausesCell(job);
+        var running = job.result == null, pauses = jobPausesCell(job), grams = filamentGramsText(job.planned_filament_g);
         function td(label, cls, tip, html) {
           return '<td data-l="' + label + '"' + (cls ? ' class="' + cls + '"' : '') + (tip ? ' data-tip="' + tip + '"' : '') +
             '>' + html + '</td>';
         }
         var label = safeText(job.label, safeText(job.printer_id, "—"));
-        var model = job.model && job.model !== job.label ? ' <span class="job-model">' + safeText(job.model, "") + '</span>' : "";
+        var shownModel = job.model_name || job.model;
+        var model = shownModel && shownModel !== job.label ? ' <span class="job-model">' + safeText(shownModel, "") + '</span>' : "";
         var name = job.job_name
           ? '<span data-tip="' + safeText(job.job_name, "") + '">' + safeText(jobShortName(job.job_name), "—") + '</span>' : "—";
         var cells = [
@@ -2105,7 +2323,8 @@
           td(JOB_COLS[3], "job-state", "", jobStateHtml(job, printer, opts.now)),
           td(JOB_COLS[4], "job-pauses" + (pauses.text === "—" ? " job-nil" : ""), pauses.tip, pauses.text),
           td(JOB_COLS[5], "job-layers", "", jobLayersText(job)),
-          td(JOB_COLS[6], "job-name", "", name)
+          td(JOB_COLS[6], "job-name", "", previewButton(job, true, true) || name),
+          td(JOB_COLS[7], "job-material" + (grams === "—" ? " job-nil" : ""), "Расчёт слайсера на всё задание; не фактический расход", grams)
         ];
         return '<tr class="job-row' + (running ? " job-open" : "") + (opts.open ? " job-x" : "") + '" data-job-id="' +
           safeText(job.id, "") + '" data-pid="' + safeText(job.printer_id, "") + '" tabindex="0" aria-expanded="' +
@@ -2184,9 +2403,9 @@
             (job.ended_at != null ? ' <span class="job-dim">· ' + (job.end_exact ? "" : "~") + jobClock(job.ended_at, at) + '</span>' : "");
         }
         var src = JOB_PLAN_SRC[job.planned_src];
-        var tail = '<div class="r">' + end + '</div>' + (src && Number(job.planned_sec) > 0
+        var tail = '<div class="r">Расчётный расход: ' + filamentGramsText(job.planned_filament_g) + ' (на всё задание)</div>' + '<div class="r">' + end + '</div>' + (src && Number(job.planned_sec) > 0
           ? '<div class="r job-dim">план ' + timeFmt(job.planned_sec) + ' — ' + src + '</div>' : '');
-        var what = job.job_name ? '<div class="r job-full">' + safeText(job.job_name, "") + '</div>' : '';
+        var what = previewButton(job, false, true) || (job.job_name ? '<div class="r job-full">' + safeText(job.job_name, "") + '</div>' : '');
         what += '<div class="r job-dim">слои ' + jobLayersText(job) + (job.maint ? " · шла в режиме обслуживания" : "") + '</div>';
         return '<div class="job-xp"><div><h5>Паузы · ' + n + (paused !== "—" ? " · " + paused : "") + '</h5>' + pz + '</div>' +
           '<div><h5>Конец</h5>' + tail + '</div><div><h5>Задание</h5>' + what + '</div></div>';
@@ -2267,13 +2486,94 @@
         var every = Math.max(1, Math.ceil(days.length / 10));   // ~10 date labels at most
         return '<div class="jobs-days">' + days.map(function (d, i) {
           var jobs = Number(d.jobs) || 0, ok = Math.min(jobs, Number(d.finished) || 0);
-          var m = /^\d{4}-(\d{2})-(\d{2})$/.exec(String(d.day || ""));
-          var label = m ? m[2] + (typeof I18N === "object" ? I18N.dateSep() : ".") + m[1] : safeText(d.day, "");
+          var label = jobsDayLabel(d.day);
           return '<div class="jobs-day" data-tip="' + label + ": " + jobs + (jobs ? ", успешно " + ok : "") + '">' +
             '<span class="jobs-day-bar"><i class="jobs-day-other" style="height:' + ((jobs - ok) / max * 100).toFixed(1) + '%"></i>' +
             '<i class="jobs-day-ok" style="height:' + (ok / max * 100).toFixed(1) + '%"></i></span>' +
             '<span class="jobs-day-lbl">' + (i % every === 0 && days.length - i >= every ? label : "") + '</span></div>';
         }).join("") + '</div>';
+      }
+      // «Пластик» (История, 17.11.2026): the plastic the farm used — the slicer's weight of each print,
+      // spread over the hours it ran (a cancelled one by the share it printed; job_queries._grams_per_day).
+      // The panel records the weight since 2.2.0: a day whose prints all lack it is an empty
+      // column with a tip, never a zero. today: "YYYY-MM-DD", the day still going (not in the average).
+      function plasticText(g, short) {
+        g = Number(g) || 0;
+        if (g < 1000) return Math.round(g).toLocaleString(typeof I18N === "object" ? I18N.locale() : "ru-RU") + " г";
+        return (g / 1000).toLocaleString(typeof I18N === "object" ? I18N.locale() : "ru-RU",
+          { maximumFractionDigits: short || g >= 10000 ? 1 : 2 }) + " кг";
+      }
+      // «17.11» of a per_day "2026-11-17" (the panel's date separator), for both day charts
+      function jobsDayLabel(day) {
+        var m = /^\d{4}-(\d{2})-(\d{2})$/.exec(String(day || ""));
+        return m ? m[2] + (typeof I18N === "object" ? I18N.dateSep() : ".") + m[1] : safeText(day, "");
+      }
+      // A day the numbers can be trusted for: nearly all its prints have a weight (the first days after
+      // the day 2.2.0 came had a weight for a part of them only), or it had no prints at all (a real 0).
+      var PLASTIC_COVER = 0.9;
+      function plasticDayFull(d) {
+        var w = Number(d.weighed) || 0, n = Number(d.no_weight) || 0;
+        return w + n === 0 || w / (w + n) >= PLASTIC_COVER;
+      }
+      // The days of the average: such days from the first one with a weight on, without today.
+      function plasticFullDays(stats, today) {
+        var seen = false;
+        return ((stats && stats.per_day) || []).filter(function (d) {
+          if (Number(d.grams) > 0) seen = true;
+          return seen && d.day !== today && plasticDayFull(d);
+        });
+      }
+      function plasticKpiHtml(stats, today) {
+        var t = (stats && stats.total) || {}, total = Number(t.grams) || 0, nw = Number(t.no_weight) || 0;
+        var full = plasticFullDays(stats, today);
+        var avg = full.length ? full.reduce(function (s, d) { return s + (Number(d.grams) || 0); }, 0) / full.length : null;
+        var td = ((stats && stats.per_day) || []).filter(function (d) { return d.day === today; })[0];
+        function tile(label, value, tip) {
+          return '<div class="hist-kpi static"' + (tip ? ' data-tip="' + tip + '"' : '') + '><span>' + label + '</span><b>' + value + '</b></div>';
+        }
+        return tile("За период", total ? plasticText(total) : "—", "по весу из слайсера; отменённые — по напечатанной доле") +
+          tile("В среднем в сутки", avg != null ? plasticText(avg) : "—",
+            "по дням, где вес известен почти у всех печатей; без сегодняшнего дня") +
+          (td ? tile("Сегодня", plasticText(td.grams), "день ещё идёт") : "") +
+          (nw ? tile("Печатей без веса", String(nw), "у панели нет для них веса из слайсера — в расход они не вошли") : "");
+      }
+      // A column per local day; with a week or less on screen, the value over each column.
+      function plasticDayBarsHtml(stats, today) {
+        var days = (stats && stats.per_day) || [], max = 0;
+        days.forEach(function (d) { max = Math.max(max, Number(d.grams) || 0); });
+        if (!max) {
+          var unknown = days.some(function (d) { return Number(d.no_weight) > 0; });
+          return '<div class="dash-stats-empty">' + (unknown
+            ? "Вес пластика панель записывает с версии 2.2.0 — за этот период его нет" : "Печатей за период нет") + '</div>';
+        }
+        var every = Math.max(1, Math.ceil(days.length / 10)), values = days.length <= 8;
+        // a week or less: the date under its column; more: the dense chart's labels running right
+        return '<div class="jobs-days plastic-days' + (values ? " plastic-few" : "") + '">' + days.map(function (d, i) {
+          var g = Number(d.grams) || 0, nw = Number(d.no_weight) || 0, label = jobsDayLabel(d.day), now = d.day === today;
+          var tip = label + ": " + (g ? plasticText(g) : "—") + (nw ? " · без веса: " + nw : "") + (now ? " · день ещё идёт" : "");
+          // lighter: today (still going) and a day with a weight for a part of its prints only
+          var cls = now ? " plastic-today" : g && !plasticDayFull(d) ? " plastic-part" : "";
+          return '<div class="jobs-day' + cls + '" data-tip="' + tip + '">' +
+            '<span class="plastic-val">' + (values && g ? plasticText(g, true) : "") + '</span>' +
+            '<span class="jobs-day-bar plastic-bar"><i class="plastic-fill" style="height:' + (g / max * 100).toFixed(1) + '%"></i></span>' +
+            '<span class="jobs-day-lbl">' + (i % every === 0 && days.length - i >= every ? label : "") + '</span></div>';
+        }).join("") + '</div>';
+      }
+      // By printer: the most plastic first, its share of the period, its prints without a weight.
+      function plasticPrintersHtml(stats) {
+        var ps = ((stats && stats.printers) || []).filter(function (p) { return Number(p.grams) > 0 || Number(p.no_weight) > 0; });
+        if (!ps.length) return "";
+        var total = ps.reduce(function (s, p) { return s + (Number(p.grams) || 0); }, 0);
+        ps = ps.slice().sort(function (a, b) { return (Number(b.grams) || 0) - (Number(a.grams) || 0); });
+        var top = Number(ps[0].grams) || 0;                // the bar: against the biggest, the number: of the total
+        return '<div class="hist-stab-wrap"><table class="hist-stab plastic-tab"><thead><tr><th>Принтер</th><th>Пластик</th>' +
+          '<th>Доля</th><th>Без веса</th></tr></thead><tbody>' + ps.map(function (p) {
+            var g = Number(p.grams) || 0, share = total ? g / total * 100 : 0, bar = top ? g / top * 100 : 0;
+            var model = p.model_name || p.model;
+            return '<tr><td>' + safeText(p.label, "") + (model ? ' <span class="job-model">' + safeText(model, "") + '</span>' : '') +
+              '</td><td class="plastic-num">' + (g ? plasticText(g) : "—") + '</td><td><span class="plastic-share"><i style="width:' +
+              bar.toFixed(1) + '%"></i></span>' + Math.round(share) + '%</td><td class="plastic-num">' + (Number(p.no_weight) || "") + '</td></tr>';
+          }).join("") + '</tbody></table></div>';
       }
       // The filter's window {fr, to}: its own С / По when set, else the last `days` days to now
       function jobsWindow(f, now) {
@@ -2396,7 +2696,6 @@
           '<td class="adm-actions"><div class="adm-inrow">' + acts + "</div>" + err + "</td></tr>";
       }
       // A typed auto-ignore code -> "0500_8062", or null: case, spaces and the separator do not matter.
-      var AI_CODE_RE = /^[0-9A-F]{4}_[0-9A-F]{4}$/;
       var AI_MAX = 32;                         // the server's limit (auto_ignore_print_errors)
       function aiNormCode(s) {
         var t = String(s == null ? "" : s).toUpperCase().replace(/[\s\-_.]/g, "");
@@ -2435,10 +2734,10 @@
       var AUDIT_LIMIT = 50;                // rows per request and «Показать ещё» (IA §10; the API allows le=500)
       // A group is a few action starts (the API matches them, prefix=a,b); «служебные» apart.
       var ACT_GROUPS = [
-        { id: "cmd", label: "Команды", prefixes: ["printer_command", "printer_bulk"] },
-        { id: "auto", label: "Автоматика", prefixes: ["autodry", "auto_ignore"] },
+        { id: "cmd", label: "Команды", prefixes: ["printer_command", "printer_bulk", "printer_print", "printer_file"] },
+        { id: "auto", label: "Автоматика", prefixes: ["autodry", "auto_ignore", "auto_light"] },
         { id: "park", label: "Парк и настройки", prefixes: ["printer_create", "printer_update", "printer_delete",
-          "printer_restore", "printer_maintenance", "printers_", "settings_", "notif_mute", "job_verdict"] },
+          "printer_restore", "printer_maintenance", "printers_", "settings_", "notif_mute", "job_verdict", "file_pool"] },
         { id: "access", label: "Доступ и входы", prefixes: ["login", "logout", "user_", "rate_limit"] }
       ];
       var ACT_SERVICE = ["token_refresh"];   // «служебные» (~90 % of the rows): hidden by default
@@ -2449,8 +2748,18 @@
         chamber: "Нагрев камеры", ams_load: "Загрузить филамент", ams_unload: "Выгрузить филамент",
         dry_start: "Сушить", dry_stop: "Остановить сушку", reset_errors: "Сбросить ошибки"
       };
+      // «Сервис» of a Creality with Klipper's API: the server's titles (klipper_service.ACTIONS, the one
+      // list), as /api/admin/audit sends them (service_titles); server strings, so through safeText.
+      var ACT_SVC = { __proto__: null };
+      function actSetServiceTitles(titles) {
+        if (!titles || typeof titles !== "object") return;
+        Object.keys(titles).forEach(function (k) { if (typeof titles[k] === "string") ACT_SVC[k] = titles[k]; });
+      }
+      function actCmdName(a) {
+        return ACT_CMD[a] || safeText(ACT_SVC[a] || a, "");
+      }
       var ACT_NOTIF = {
-        resume: "Продолжить печать", ignore: "Игнорировать и продолжить", stop: "Остановить печать",
+        resume: "Продолжить печать", cr_resume: "Продолжить печать", ignore: "Игнорировать и продолжить", stop: "Остановить печать",
         ams_done: "AMS: готово", ams_retry: "AMS: повторить", ams_abort: "Прервать операцию AMS",
         clean: "Убрать отметку отмены", idle_ignore: "Не напоминать", buzzer_off: "Выключить сирену",
         dry_stop: "Остановить сушку", refresh_nozzle: "Перепроверить хотэнд", purifier_off: "Выключить очистку воздуха",
@@ -2514,7 +2823,7 @@
         var s = String(action == null ? "" : action), p = s.split(":"), k = p[0], st;
         if (k === "printer_command" && p.length >= 3) {
           var a = p[1], prm = actParams(p.slice(3).join(":"));
-          var name = a.indexOf("notif_") === 0 ? ACT_NOTIF[a.slice(6)] || safeText(a.slice(6), "") : ACT_CMD[a] || safeText(a, "");
+          var name = a.indexOf("notif_") === 0 ? ACT_NOTIF[a.slice(6)] || safeText(a.slice(6), "") : actCmdName(a);
           var bits = [];
           if (prm.code) bits.push('<span class="mono">' + safeText(prm.code, "") + "</span>");
           if (prm.ams != null) bits.push(actUnit(prm.ams) + (prm.slot != null && isFinite(prm.slot) ? " · слот " + (Number(prm.slot) + 1) : ""));
@@ -2525,12 +2834,33 @@
                    what: name + (bits.length ? " · " + bits.join(" · ") : "") + (prm.bulk ? ' <span class="dim">(группой)</span>' : "") +
                      (prm.st ? " " + actTag(st ? st[0] : safeText(prm.st, ""), st ? st[1] : "") : "") };
         }
+        if (k === "printer_print" && p.length >= 3) {     // «Файлы на принтере» → «Печать» (printer_files_api)
+          var pf = actParams(p.slice(2).join(":"));
+          st = ACT_STATUS[pf.st];
+          return { printer: p[1],
+                   what: "Печать файла" + (pf.file && pf.file !== "?" ? " · " + safeText(pf.file, "") : "")
+                     + (pf.plate ? " · стол " + safeText(pf.plate, "") : "")
+                     + (pf.st ? " " + actTag(st ? st[0] : safeText(pf.st, ""), st ? st[1] : "") : "") };
+        }
+        if (k === "printer_file_delete" && p.length >= 3) {   // «Файлы на принтере» → «Удалить с принтера»
+          var pd = actParams(p.slice(2).join(":"));
+          st = ACT_STATUS[pd.st];
+          return { printer: p[1],
+                   what: "Файл удалён с принтера" + (pd.file && pd.file !== "?" ? " · " + safeText(pd.file, "") : "")
+                     + (pd.st ? " " + actTag(st ? st[0] : safeText(pd.st, ""), st ? st[1] : "") : "") };
+        }
+        if (k.indexOf("file_pool_") === 0 && p.length >= 2) {   // «Общие файлы по моделям» (printer_files_api)
+          var fp = actParams(p.slice(2).join(":")), fpWhat = { file_pool_sync: "Синхронизация файлов",
+            file_pool_upload: "Файл загружен в общие", file_pool_delete: "Файл убран из общих" }[k] || safeText(k, "");
+          return { printer: null, what: fpWhat + " · " + safeText(p[1], "")
+                     + (fp.files ? " · файлов " + safeText(fp.files, "") + " → принтеров " + safeText(fp.printers, "") : "") };
+        }
         if (k === "printer_bulk" && p.length >= 4) {
           var c = actParams(p.slice(3).join(":")), parts = [];
           [["confirmed", "подтвердили"], ["sent", "отправлено"], ["rejected", "отказ"], ["skipped", "пропущено"]].forEach(function (x) {
             if (Number(c[x[0]]) > 0) parts.push(x[1] + " " + Number(c[x[0]]));
           });
-          return { printer: null, what: (ACT_CMD[p[1]] || safeText(p[1], "")) + " — всем" + (parts.length ? " · " + parts.join(" · ") : "") };
+          return { printer: null, what: actCmdName(p[1]) + " — всем" + (parts.length ? " · " + parts.join(" · ") : "") };
         }
         if (k === "printer_maintenance" && p.length >= 3) {
           var m = { on: "Обслуживание: вкл", off: "Обслуживание: снято", note: "Обслуживание: заметка" }[p[2]];
@@ -2659,7 +2989,7 @@
       // only (no DOM, no globals besides safeText, timeFmt and the jobs-ui block), run in
       // node by tests/test_web_hist_ui.py. Times are epoch seconds, days "YYYY-MM-DD" in
       // browser time; the returned texts are HTML unless said otherwise.
-      var HIST_SUBS = ["jobs", "chrono", "stats", "actions"];   // the first: a fresh tab's
+      var HIST_SUBS = ["jobs", "chrono", "stats", "plastic", "actions"];   // the first: a fresh tab's
       var HIST_PERIODS = [
         { id: "24h", label: "24 ч", days: 1 }, { id: "7d", label: "7 дн", days: 7 },
         { id: "30d", label: "30 дн", days: 30 }, { id: "90d", label: "90 дн", days: 90 }
@@ -2726,6 +3056,13 @@
           return { fr: Math.floor(Math.min(histDayStart(f.from), to)), to: Math.ceil(to) };
         }
         return { fr: Math.floor(now - histPeriodOf(f.period).days * 86400), to: Math.ceil(now) };
+      }
+      // «&tz=Asia/Omsk»: the browser's time zone, the server cuts «Печатей в день» into the days
+      // this window is made of (histWindow: local midnights), not the Pi's; "" when unknown.
+      function histTzQuery() {
+        var tz = "";
+        try { tz = Intl.DateTimeFormat().resolvedOptions().timeZone || ""; } catch (e) { tz = ""; }
+        return tz ? "&tz=" + encodeURIComponent(tz) : "";
       }
       // «Статистика»'s time shares (states-summary — a window scan on the Pi, ~17 s for 30 дн): the
       // window in whole minutes (a repeat asks the same and the server's short cache serves it) and
@@ -2821,7 +3158,7 @@
           if (!p || p.id == null) return;
           var r = row(p.id);
           r.label = p.label ? String(p.label) : r.label;
-          r.model = p.model ? String(p.model) : r.model;
+          r.model = p.model_name || p.model ? String(p.model_name || p.model) : r.model;
           r.maint = !!p.maintenance;
         });
         (ss || []).forEach(function (x) {
@@ -2835,7 +3172,7 @@
           if (!j || j.printer_id == null) return;
           var r = row(j.printer_id);
           r.label = r.label || (j.label ? String(j.label) : "");
-          r.model = r.model || (j.model ? String(j.model) : "");
+          r.model = r.model || (j.model_name || j.model ? String(j.model_name || j.model) : "");
           r.jobs = j;
         });
         var rows = order.map(function (id) { var r = by[id]; if (!r.label) r.label = r.id; return r; })
@@ -2912,6 +3249,10 @@
         change: "Идёт смена филамента — дождитесь окончания",
         grace: "Нет связи с принтером — данные устарели",
         speed: "Скорость меняется только во время печати",
+        motion: "Оси двигаются, только когда принтер стоит — не во время печати и не на паузе",
+        no_extrude: "Creality: подача и втягивание только с экрана принтера",   // = printer_commands.MSG_CREALITY_NO_EXTRUDE
+        rfid: "Метку перечитывают только в простое — AMS при этом крутит катушку",
+        cold: "Сопло холодное — подача и втягивание только от 170 °C, сначала нагрев",   // = printer_commands.MSG_COLD_NOZZLE
         busy: "Ждём ответа на предыдущую команду",
         eject_wait: "Стол уже опускается — подождите",          // = printer_commands.MSG_EJECT_INFLIGHT (parity)
         cool_paused: "Стол остынет — деталь может отклеиться. Подогреет ли принтер при продолжении — не проверено."
@@ -2923,7 +3264,11 @@
         cooldown: ["Остудить", "Остывание"], eject: ["Стол вниз", "Стол вниз"], speed: ["Скорость", "Скорость"],
         ams_load: ["Загрузка", "Загрузка"], ams_unload: ["Выгрузка", "Выгрузка"],
         dry_start: ["Сушка", "Сушка запущена"], dry_stop: ["Стоп сушки", "Сушка остановлена"],
-        preheat: ["Нагрев", "Нагрев"], chamber: ["Камера", "Камера"], fans: ["Вентиляторы", "Вентиляторы"]
+        preheat: ["Нагрев", "Нагрев"], chamber: ["Камера", "Камера"], fans: ["Вентиляторы", "Вентиляторы"],
+        home: ["Домой", "Домой"], move: ["Сдвиг оси", "Сдвиг оси"], extrude: ["Филамент", "Филамент"],
+        ams_rfid: ["Чтение метки", "Метка перечитывается"], ams_set: ["Катушка", "Катушка записана"],
+        skip_objects: ["Пропуск деталей", "Детали пропущены"],
+        airduct: ["Воздуховод", "Воздуховод переключён"]
       };
 
       function ctlCaps(p) {
@@ -2944,6 +3289,11 @@
         if (action === "cooldown" || action === "eject") {   // = printer_commands._state_check, fail closed
           if (p.filament_change) return CTL_MSG.change;
           if (s === "printing" || (action === "eject" && s === "paused")) return CTL_MSG[action];
+          return s == null || s === "unknown" || s === "offline" ? CTL_MSG.unknown : null;
+        }
+        if (action === "home" || action === "move") {         // = printer_commands.state_refusal: the eject's rules
+          if (p.filament_change) return CTL_MSG.change;
+          if (s === "printing" || s === "paused") return CTL_MSG.motion;
           return s == null || s === "unknown" || s === "offline" ? CTL_MSG.unknown : null;
         }
         if (action === "speed") return s === "printing" || s === "paused" ? null : CTL_MSG.speed;
@@ -3058,11 +3408,22 @@
             + '<span>Печать: ' + note + '</span></span></div>' + cmdLineHtml(ui.line);
         }
         var b = [light];
-        b.push(p.state === "paused"
-          ? ctlBtnHtml("pp", "resume", "play", "Продолжить печать", blk(null), ui)
-          : ctlBtnHtml("pp", "pause", "pause", "Пауза", blk(ctlStateBlock("pause", p)), ui));
-        if (caps.stop === true) {
-          b.push(ctlBtnHtml("stop", "stop", "stop", "Остановить печать", blk(ctlStateBlock("stop", p)), ui, "danger"));
+        // The row follows the printer (owner, 04.11): a print — pause / resume and stop;
+        // standing — cooldown, eject and the motion popover. Never a button that is
+        // always grey in this state (12 of 14 cards showed ❄ and ⤓ dead mid-print).
+        if (p.state === "printing" || p.state === "paused") {
+          b.push(p.state === "paused"
+            ? ctlBtnHtml("pp", "resume", "play", "Продолжить печать", blk(null), ui)
+            : ctlBtnHtml("pp", "pause", "pause", "Пауза", blk(ctlStateBlock("pause", p)), ui));
+          if (caps.stop === true) {
+            b.push(ctlBtnHtml("stop", "stop", "stop", "Остановить печать", blk(ctlStateBlock("stop", p)), ui, "danger"));
+          }
+          // a long pause may be cooled (the card asks first: «На паузе — остудить?»)
+          if (p.state === "paused" && caps.cooldown === true) {
+            b.push(ctlBtnHtml("cool", "cool", "snow", p.chamber_ctl === true ? "Остудить всё: сопло, стол, камера"
+              : "Остудить всё: сопло и стол", blk(ctlStateBlock("cooldown", p)), ui));
+          }
+          return head + b.join("") + '</div>' + cmdLineHtml(ui.line);
         }
         if (caps.cooldown === true) {
           b.push(ctlBtnHtml("cool", "cool", "snow", p.chamber_ctl === true ? "Остудить всё: сопло, стол, камера"
@@ -3071,6 +3432,10 @@
         if (caps.eject === true) {
           var ejectBlock = ctlStateBlock("eject", p) || (ui.ejectUntil > opts.now ? CTL_MSG.eject_wait : null);
           b.push(ctlBtnHtml("eject", "eject", "bed-down", "Опустить стол на 3 см, чтобы снять деталь", blk(ejectBlock), ui));
+        }
+        if (caps.motion === true) {
+          b.push(ctlBtnHtml("motion", "motion", "move", "Перемещение, «Домой», филамент", blk(null), ui,
+            ui.pop === "motion" ? "open" : ""));
         }
         return head + b.join("") + '</div>' + cmdLineHtml(ui.line);
       }
@@ -3087,11 +3452,64 @@
       // row's ❄ / ⤓ buttons and the speed chip — the menu never repeats them (owner, 19.10).
       function ctlMenuHtml(p, ui, now, opts) {
         var admin = !!(opts && opts.admin);
-        return (admin ? maintMenuHtml(p) + '<div class="pm-sep"></div>' : "")
+        // whose menu it is: a phone's sheet covers the card (and its cut name), the actions go to this printer
+        return '<div class="pm-title" translate="no">' + safeText(p.label, "Принтер") + '</div>'
+          + (admin ? maintMenuHtml(p) + '<div class="pm-sep"></div>' : "")
           + '<button type="button" class="pm-item" data-menu="jobs">' + icon("file") + '<span class="lbl">Печати принтера ›</span></button>'
           + '<button type="button" class="pm-item" data-menu="chrono">' + icon("clock") + '<span class="lbl">Хронология принтера ›</span></button>'
+          + (admin && !(opts && opts.offline) && (p.kind === "bambu" || p.kind === "creality")
+            ? '<button type="button" class="pm-item" data-menu="files">' + icon("file")
+              + '<span class="lbl">Файлы на принтере ›<span class="sub">список и запуск печати</span></span></button>' : "")
+          // «Сервис» (printer-service.js): a Creality with Klipper's API (K2 Plus) only
+          + (admin && !(opts && opts.offline) && p.kind === "creality" && p.klipper_api === true
+            ? '<button type="button" class="pm-item" data-menu="service">' + icon("tool")
+              + '<span class="lbl">Сервис ›<span class="sub">калибровки и перезапуск прошивки</span></span></button>' : "")
           + (admin ? '<button type="button" class="pm-item" data-menu="params">' + icon("tool")
             + '<span class="lbl">Параметры принтера ›<span class="sub">Админ → Парк, откроется форма</span></span></button>' : "");
+      }
+      // The ⋯ menu's «Перемещение и «Домой»…» popover: the step (1 / 10 / 50 mm, ui.mstep,
+      // default 10), «Домой» (home, G28) and the jog (move {axis, dist}: one relative step
+      // per press). It stays open between presses; each answer goes to its reply line.
+      // Z+ moves the bed away from the nozzle, Z− towards it. state / grace: the row's rules.
+      var MOVE_STEPS = [1, 10, 50], EXTRUDE_TEMP_MIN = 170;   // = printer_commands.EXTRUDE_TEMP_MIN
+      function motionPopHtml(p, ui) {
+        ui = ui || {};
+        var step = MOVE_STEPS.indexOf(ui.mstep) >= 0 ? ui.mstep : 10;
+        var block = p.grace_period_active ? CTL_MSG.grace : ctlStateBlock("move", p);
+        var dis = block ? ' aria-disabled="true" data-tip="' + safeText(block, "") + '"' : "";
+        function jog(axis, sign, text, tip) {
+          return '<button type="button" class="pc-pop-preset pc-jog-b" data-move="' + axis + ':' + sign * step + '"'
+            + (block ? dis : ' data-tip="' + tip + '"') + ' aria-label="' + tip + '">' + text + '</button>';
+        }
+        var steps = MOVE_STEPS.map(function (n) {
+          return '<button type="button" class="pc-pop-preset' + (n === step ? " on" : "") + '" data-mstep="' + n + '">'
+            + n + ' мм</button>';
+        }).join("");
+        return '<div class="pc-pop-h">Перемещение</div>'
+          + (block ? '<div class="pc-pop-note">' + safeText(block, "") + '</div>' : "")
+          + '<div class="pc-pop-presets" role="group" aria-label="Шаг">' + steps + '</div>'
+          + '<div class="pc-jog">'
+          + '<span></span>' + jog("y", 1, "Y+", "Голова назад")
+          + jog("z", 1, "Z+", "Стол дальше от сопла")
+          + jog("x", -1, "X−", "Голова влево")
+          + '<button type="button" class="pc-pop-preset pc-jog-b pc-jog-home" data-home' + (block ? dis
+            : ' data-tip="Домой: найти нули всех осей"') + ' aria-label="Домой">' + icon("move") + 'Домой</button>'
+          + jog("x", 1, "X+", "Голова вправо")
+          + '<span></span>' + jog("y", -1, "Y−", "Голова вперёд")
+          + jog("z", -1, "Z−", "Стол ближе к соплу")
+          + '</div>'
+          + '<div class="pc-pop-h">Филамент · сопло ' + (p.nozzle_temp != null ? Math.round(p.nozzle_temp) + "°" : "—") + '</div>'
+          + '<div class="pc-jog pc-jog-e">' + extrudeBtn(-1, "E− втянуть", "Втянуть филамент из сопла") + extrudeBtn(1, "E+ подать", "Подать филамент в сопло") + '</div>'
+          + '<div class="pc-pop-note">После включения сначала «Домой». Z+ — стол дальше от сопла.</div>';
+        // filament at the nozzle: a hot nozzle only (EXTRUDE_TEMP_MIN, = the server)
+        function extrudeBtn(sign, text, tip) {
+          var cold = p.kind === "creality" ? CTL_MSG.no_extrude
+            : p.nozzle_temp == null || p.nozzle_temp < EXTRUDE_TEMP_MIN ? CTL_MSG.cold : null;
+          var why = block || cold;
+          return '<button type="button" class="pc-pop-preset pc-jog-b" data-extrude="' + sign * step + '"'
+            + (why ? ' aria-disabled="true" data-tip="' + safeText(why, "") + '"' : ' data-tip="' + tip + '"')
+            + ' aria-label="' + tip + '">' + text + '</button>';
+        }
       }
       // The ⋯ menu's maintenance section (spec_maintenance §6.3); «…» opens maintPopHtml.
       function maintMenuHtml(p) {
@@ -3160,12 +3578,12 @@
           + (since ? " · " + since : "") + (m.note ? " · " + safeText(m.note, "") : "") + '</span></div>';
       }
       // The model in the card's head, always (IA §5: «P3 · P2S», it used to go with an
-      // AMS): the printer form's names for Creality, else the reported type in capitals;
+      // AMS): the server's name of a Creality model (p.model_name, from the one table in
+      // app/services/creality_models.py), else the reported type in capitals;
       // "" when it only repeats the name (a Klipper or MKS printer is named after its model).
-      var CARD_MODEL_NAMES = { k1max: "K1 Max", k1c: "K1C", ender5max: "Ender-5 Max" };   // = the printer form's options
       function cardModelText(p) {
         var raw = String((p && p.device_type) || "").trim();
-        var text = CARD_MODEL_NAMES[raw.toLowerCase()] || raw.toUpperCase();
+        var text = (p && p.model_name) || (p && p.kind === "creality" ? raw : raw.toUpperCase());
         function norm(v) { return String(v == null ? "" : v).toLowerCase().replace(/[\s_-]+/g, ""); }
         return text && norm(text) !== norm(p && p.label) ? text : "";
       }
@@ -3484,9 +3902,14 @@
       function fleetDur(sec) {
         if (sec === Infinity) return "> 1 дн";
         if (sec == null || !isFinite(sec)) return "";
-        var mins = Math.max(1, Math.round(sec / 60)), h = Math.floor(mins / 60), m = mins % 60;
-        if (h >= 48) return Math.floor(h / 24) + " дн";
-        return (h ? h + "ч" + (m ? " " : "") : "") + (m || !h ? m + "м" : "");
+        if (sec >= 48 * 3600 - 30) return Math.floor(Math.round(sec / 60) / 1440) + " дн";
+        return timeFmt(Math.max(60, sec));   // the panel's format (timeFmt), a minute at least
+      }
+      // An offline card's line (no empty box): since when there is no link (age: fleetSinceAge) —
+      // «Нет связи · 2ч 5м», «Нет связи · больше суток» — or «Нет связи с принтером» while not known.
+      function offlineSinceText(age) {
+        if (age == null) return "Нет связи с принтером";
+        return "Нет связи · " + (age === Infinity ? "больше суток" : fleetDur(age));
       }
       // Not at work (IA §5): maintenance mode (any state) or offline for a day and more.
       // A fresh drop is a signal and stays in the grid, so is one not known yet.
@@ -3556,6 +3979,15 @@
         next.sort(function (a, b) { return a.eta_seconds - b.eta_seconds || fleetByName(a, b); });
         noEta.sort(fleetByName);
         return { ready: ready, next: next, noEta: noEta };
+      }
+      // A printer in its grace period (no link, up to 180 s) repeats its last good status with the
+      // same time left: counted from when that status was fresh (last_successful_fetch), so its
+      // finish stays put instead of walking with the clock. p: a copy of the row, changed in place.
+      function graceEta(p, now) {
+        if (p.grace_period_active && p.eta_seconds > 0 && p.last_successful_fetch > 0 && now > p.last_successful_fetch) {
+          p.eta_seconds = Math.max(0, Math.round(p.eta_seconds - (now - p.last_successful_fetch)));
+        }
+        return p;
       }
       // «11:25»: the farm's local clock at unix seconds t.
       function finClock(t) {
@@ -3752,7 +4184,7 @@
                         A1: "039", P2S: "22E", H2S: "093", H2D: "094", H2C: "31B", X2D: "20P" };
       var NF_SRC = {   // where a record comes from (the code's tooltip)
         hms: "HMS (MQTT print.hms[])", print_error: "print_error (диалог на экране принтера)",
-        klipper: "Moonraker: webhooks.state / print_stats", creality: "Creality: поле err в статусе WS :9999"
+        klipper: "Moonraker: webhooks.state / print_stats", creality: "Creality: поле err в статусе WebSocket принтера"
       };
       var NF_UNKNOWN = "Описание кода Bambu не публикует (в таблице пусто)";
       var NF_REQUIRED = "Выбор обязателен: принтер ждёт ответа, просто закрыть этот диалог нельзя";
@@ -3768,7 +4200,7 @@
         auto_tail: ", автопропуск уже пробует",
         klipper: "Klipper: перезапуск прошивки — только по одному, с подтверждением",
         klipper_none: "Klipper: команды сброса нет — устраните причину на принтере",
-        creality: "Creality: команды сброса нет — только на экране принтера"
+        creality: "Creality: сброс — кнопкой в уведомлении, по одному принтеру"
       };
       var NF_RESET_BLOCKING = { "0300_8007": "0300_8007 после отключения питания — выбор обязателен: продолжить или остановить" };
       var NF_MUTE_TIP = {   // «Скрыть» / «Вернуть» (nfMuteHtml)
@@ -3875,8 +4307,10 @@
         var d = nfTs(ts);
         return d ? "с " + nfPad(d.getDate()) + (typeof I18N === "object" ? I18N.dateSep() : ".") + nfPad(d.getMonth() + 1) + " " + nfClock(ts) : "";
       }
+      // The model as people read it (the notifications and the group dialogs): the server's name of a
+      // Creality model (p.model_name, app/services/creality_models.py), else the reported type in capitals.
       function nfModel(p) {
-        return String(p.device_type || p.kind || "").toUpperCase();
+        return p.model_name || String(p.device_type || p.kind || "").toUpperCase();
       }
       function nfPrefix(model) {
         return NF_PREFIX[String(model || "").toUpperCase().replace(/[\s-]/g, "")] || null;
@@ -3899,6 +4333,8 @@
       function nfCanAct(p) {
         if (!p || !p.online || p.state === "offline" || p.grace_period_active) return false;
         if (p.kind === "bambu") return !!(p.caps && p.caps.resume === true);
+        // a Creality with Klipper's API (K2 Plus): «Продолжить печать» on its pause
+        if (p.kind === "creality") return p.klipper_api === true && !!(p.caps && p.caps.resume === true);
         return p.kind === "klipper";
       }
       // The auto-ignore line of a pause (n.auto = auto_ignore.view): {t: the
@@ -4092,7 +4528,10 @@
         if (p.kind === "klipper") {
           return "Источник — Moonraker: webhooks.state_message / notify_klippy_shutdown. Принтер остаётся на связи в «ОШИБКЕ», а не уходит в офлайн.";
         }
-        if (p.kind === "creality") return "Источник — поле err в статусе WebSocket :9999. Своей команды подтверждения ошибки у Creality нет.";
+        if (p.kind === "creality" && p.klipper_api === true) {
+          return "Источник — поле err в статусе WebSocket принтера. «Продолжить печать» — команда ▷; ошибку на экране принтера убирают на нём.";
+        }
+        if (p.kind === "creality") return "Источник — поле err в статусе WebSocket принтера. Своей команды подтверждения ошибки у Creality нет.";
         return "";
       }
       // The printer's status pill: opts.status(p) -> {cls, label} (the card's
@@ -4158,7 +4597,7 @@
           other.forEach(function (p) { n += nfLive(p).length; });
           h += '<button type="button" class="nf-other" data-nf-more="farm-other" aria-expanded="' + open + '" data-fk="more-farm-other"><span>Прочие · '
             + n + " на " + other.length + " " + plural(other.length, "принтере", "принтерах", "принтерах") + '</span>'
-            + '<span class="nf-dim">долгие HMS, плановое</span>' + icon("chev") + '</button>';
+            + '<span class="nf-dim">давние сообщения принтеров, плановое</span>' + icon("chev") + '</button>';
           if (open) {
             h += '<div class="nf-orows">' + other.map(function (p) {
               var id = safeText(p.id, ""), top = nfSort(nfLive(p))[0];
@@ -4409,7 +4848,13 @@
         // Under the name: the AMS chip (an admin's opens the commands, anyone else's the
         // read-only popover) or, without an AMS, the external spool's chip (admins).
         var model = cardModelText(p);
-        var sub = amsChip(p, canAms, true) || extSpoolChip(p, canAms);
+        var sub = cfsChip(p) || amsChip(p, canAms, true, amsZonesNow()) || extSpoolChip(p, canAms);
+        // The job: with a slicer picture it stands left of the stat row (cardPreviewParts),
+        // without one the stat row, the bar and the job's name line as before.
+        var pv = showProgress ? cardPreviewParts(p) : null;
+        var statRow = '<div class="pc-statrow"><span class="pc-pct">' + Math.round(progress) + '%</span>'
+          + (eta ? '<span class="pc-eta">' + eta + '</span>' : '') + layers + '</div>';
+        var track = '<div class="progress-track"><div class="progress-fill" style="width:' + progress + '%"></div></div>';
 
         return `
           <article class="printer-card${offlineFlag ? " offline" : ""}${" " + uiStatus}${inMaint(p) ? " maint" : ""}" data-id="${p.id}" data-state="${uiStatus}" data-kind="${p.kind}" data-label="${safeText(p.label, "")}">
@@ -4437,19 +4882,18 @@
               </div>
             </div>
             ${maintPlaqueHtml(p, isAdmin(), Date.now())}
-            ${showProgress ? `
+            ${showProgress && pv ? `
+            <div class="pc-progress pc-pv">
+              ${pv.thumb}
+              <div class="pc-pv-main">${pv.name}${statRow}${track}</div>
+              ${stage ? '<div class="stage-badge">' + safeText(stage, "") + '</div>' : ''}
+            </div>` : showProgress ? `
             <div class="pc-progress">
-              <div class="pc-statrow">
-                <span class="pc-pct">${Math.round(progress)}%</span>
-                ${eta ? '<span class="pc-eta">' + eta + '</span>' : ''}
-                ${layers}
-              </div>
-              <div class="progress-track">
-                <div class="progress-fill" style="width:${progress}%"></div>
-              </div>
-              ${job ? '<div class="pc-jobrow">' + job + '</div>' : ''}
+              ${statRow}${track}
+              ${job ? '<div class="pc-jobrow">' + job + (p.planned_filament_g > 0 ? '<span class="pc-material" data-tip="Расчётный расход на всё задание">' + filamentGramsText(p.planned_filament_g) + '</span>' : '') + '</div>' : ''}
               ${stage ? '<div class="stage-badge">' + safeText(stage, "") + '</div>' : ''}
             </div>` : ""}
+            ${offlineFlag && !showProgress && !changeText && !cancelText ? '<div class="stage-badge pc-off-since">' + offlineSinceText(fleetSinceAge(fleetSince, p, Date.now() / 1000)) + (p.job_name ? ' · последнее задание: ' + safeText(jobShortName(p.job_name), "") : "") + '</div>' : ""}
             ${!showProgress && changeText ? '<div class="stage-badge">' + changeText + '</div>' : ""}
             ${!showProgress && !changeText && cancelText ? '<div class="stage-badge">' + safeText(cancelText, "") + '</div>' : ""}
             ${nfStripHtml(p, isAdmin()) + cmdLineHtml(cardUi[p.id] && cardUi[p.id].nfLine, 'data-nf-dismiss-card="' + safeText(p.id, "") + '"')}
@@ -4510,7 +4954,8 @@
       // how long a printer has stood offline («Не в работе» from a day on) or finished.
       // At start (the first paint waits for it a moment), every 5 min and back in view;
       // a failure keeps what was known — an unknown time leaves a card in the grid.
-      var FLEET_EV_PAGE = 500, FLEET_EV_PAGES = 4, FLEET_EV_EVERY_MS = 5 * 60 * 1000;
+      // FLEET_EV_STALE_MS: older than this, a tab back in view asks again at once
+      var FLEET_EV_PAGE = 500, FLEET_EV_PAGES = 4, FLEET_EV_EVERY_MS = 5 * 60 * 1000, FLEET_EV_STALE_MS = 2 * 60 * 1000;
       var fleetEvBusy = null, fleetEvAt = 0, fleetPainted = false;
       function fleetLoadSince() {
         if (fleetEvBusy) return fleetEvBusy;
@@ -4549,7 +4994,25 @@
       // All rows are measured first, then written: one forced layout per call.
       // The attributes live on the DOM nodes only; a replaced card is balanced
       // again by renderFleet.
+      // The head's name before its pills (QA 17.11: «P2S · …» twice on a phone): where a second line
+      // costs nothing — a phone's one column (no neighbour to stay level with) or a card with no
+      // AMS row under the name (the head is the picture's height either way) — a name that does
+      // not fit beside the pills gets the line to itself, the pills go under it (data-wrap).
+      // Measured on widths the wrap does not change (the name's own, the row's, the pills'), so
+      // it never flips back and forth. Multi-column cards with an AMS row keep one line.
+      function cardNameFit(cards) {
+        var oneCol = getComputedStyle(grid).gridTemplateColumns.trim().split(/\s+/).length === 1;
+        cards.map(function (card) {
+          var row = card.querySelector(".pc-toprow"), nm = row && row.querySelector(".pc-nm");
+          var right = row && row.querySelector(".pc-toprow-right");
+          if (!nm || !right) return null;
+          var gap = parseFloat(getComputedStyle(row).columnGap) || 8;
+          var free = oneCol || !card.querySelector(".pc-subrow");
+          return { row: row, wrap: free && nm.scrollWidth > row.clientWidth - right.getBoundingClientRect().width - gap };
+        }).forEach(function (p) { if (p) p.row.toggleAttribute("data-wrap", p.wrap); });
+      }
       function balanceChips(cards) {
+        cardNameFit(cards);
         var rows = [];
         cards.forEach(function (card) {
           var row = card.querySelector(".pc-chips");
@@ -4716,6 +5179,19 @@
         applyAndRender();
       }
 
+      // The row's ⇄ opens the motion popover under it; a second click closes it.
+      function toggleMotionPop(btn, pid) {
+        var same = pcPopPid === pid && cardUiOf(pid).pop === "motion";
+        closePop(true);
+        var p = findPrinter(pid);
+        if (!same && p) {
+          var ui = cardUiOf(pid);
+          ui.pop = "motion";
+          openPop(btn, pid, motionPopHtml(p, ui), "motion");
+        }
+        applyAndRender();
+      }
+
       // --- Fleet bar «Вся ферма» (admins): light for all, pause / resume with a choice ---
       var fleetBulkEl = document.getElementById("fleetBulk");
       var bulkUi = { busy: null, msg: null, failed: null };   // failed: {action, rows} until dismissed
@@ -4792,7 +5268,7 @@
       function openBulkDialog(action) {
         var split = bulkSplit(action, cachedAllPrinters);
         if (!split.go.length || bulkDlg) return;
-        function model(p) { return String(p.device_type || p.kind || "").toUpperCase(); }
+        function model(p) { return nfModel(p); }   // «K2 Plus», «P2S»: as in the notifications
         var sel = {};
         var go = split.go.map(function (x) {
           var p = x.p;
@@ -5131,7 +5607,7 @@
         var HORIZON_MS = forecastHours * 3600 * 1000;
         var end = now + HORIZON_MS;
         function hhmm(ts) {
-          return new Date(ts).toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" });
+          return new Date(ts).toLocaleTimeString(uiLocale(), { hour: "2-digit", minute: "2-digit" });
         }
         if (meta) meta.innerHTML = 'сейчас <span class="forecast-now-time">' + hhmm(now) + '</span> → ' + hhmm(end);
 
@@ -5275,6 +5751,14 @@
         }
         return { ok: ok, line: cmdResult(action, out) };
       }
+      // preview.js: the job card's plate map skips parts of the running job (admin, printer online).
+      window.ForgeJobs = {
+        printer: function (pid) { return findPrinter(pid); },
+        canSkip: function (p) {
+          return !!p && isAdmin() && !isOffline(p) && !p.grace_period_active && (p.state === "printing" || p.state === "paused");
+        },
+        skip: function (pid, ids) { return sendPrinterCmd(pid, "skip_objects", { objects: ids }); }
+      };
       // ── Поповер смены параметров (клик по чипу сопла/стола/скорости/вентилятора, AMS и ⋯) ──
       // A phone (≤ 899 px, plan step 15): the popover is a bottom sheet over a dim backdrop
       // (pcPopBack; a tap on it is a click outside), «Назад» closes it (sheetOpened).
@@ -5684,20 +6168,78 @@
         return '<div class="pc-pop-h">Скорость печати</div><div class="pc-pop-col">' + btns.join("") + '</div>';
       }
       // keys: the fans to show (fanKeys, the chip's data-fans); all three when not given.
-      function fanPopHtml(part, aux, chamber, keys) {
+      // The air duct of a P2S / H2: two modes, sent at once (no «Применить»).
+      var AIRDUCT_MODES = [[0, "Охлаждение", "Воздух камеры выводится наружу"],
+                           [1, "Обогрев", "Воздух остаётся в камере и идёт через фильтр"]];
+      function airductHtml(ad) {
+        if (!ad || !Array.isArray(ad.modes) || ad.modes.length < 2) return "";
+        return '<div class="pc-pop-h">Воздуховод</div><div class="pc-pop-presets">' + AIRDUCT_MODES.filter(function (m) {
+          return ad.modes.indexOf(m[0]) >= 0;
+        }).map(function (m) {
+          return '<button type="button" class="pc-pop-preset' + (ad.mode === m[0] ? ' on' : '') + '" data-airduct="' + m[0]
+            + '" data-tip="' + m[2] + '"' + (ad.mode === m[0] ? ' aria-pressed="true"' : '') + '>' + m[1] + '</button>';
+        }).join("") + '</div>';
+      }
+      function fanPopHtml(part, aux, chamber, keys, binary, airduct) {
         keys = keys || ["part", "aux", "chamber"];
         function row(lbl, key, val) {
           if (keys.indexOf(key) < 0) return "";
+          if (binary && key === "aux") return "";
+          if (binary) return '<label class="pc-pop-fan">' + lbl + '<select data-fan="' + key + '">'
+            + '<option value="0"' + (val ? '' : ' selected') + '>Выкл</option>'
+            + '<option value="100"' + (val ? ' selected' : '') + '>Вкл</option></select></label>';
           return '<label class="pc-pop-fan">' + lbl
             + '<input type="range" min="0" max="100" value="' + val + '" data-fan="' + key + '"><b>' + val + '</b></label>';
         }
         return '<div class="pc-pop-h">Вентиляторы, %</div>'
           + row("Деталь", "part", part) + row("Вспом.", "aux", aux) + row("Камера", "chamber", chamber)
-          + '<div class="pc-pop-row"><button type="button" class="pc-pop-ok" data-ok="fans">Применить</button></div>';
+          + '<div class="pc-pop-row"><button type="button" class="pc-pop-ok" data-ok="fans">Применить</button></div>'
+          + (airduct ? airductHtml(airduct) : "");
       }
       // AMS popover and drying form actions; the printer is read at click time. Load, unload
       // and a drying stop ask first, in the popover itself (amsAskHtml: «…-go» does it,
       // «Отмена» goes back to the slots / the external spool).
+      // «Катушки…» screens of the AMS popover (spoolListHtml / spoolEditHtml).
+      async function onSpoolPopClick(pid, p, t) {
+        function unitIn(idx) {
+          return amsUnits(p).find(function (u) { return u.index === idx; }) || null;
+        }
+        if (t.dataset.spoolOpen != null) {
+          var su = unitIn(parseInt(t.dataset.spoolOpen, 10));
+          if (su) swapPop(spoolListHtml(p, su), "ams");
+          return;
+        }
+        if (t.dataset.rfid != null) {
+          var rk = t.dataset.rfid.split(":");
+          await popCmd(pid, "ams_rfid", { ams: parseInt(rk[0], 10), slot: parseInt(rk[1], 10) });
+          return;
+        }
+        if (t.dataset.spoolEdit != null) {
+          var ek = t.dataset.spoolEdit.split(":"), eu = unitIn(parseInt(ek[0], 10));
+          if (eu) swapPop(spoolEditHtml(p, eu, parseInt(ek[1], 10)), "spool");
+          return;
+        }
+        if (t.dataset.spoolMat != null) {         // the material's nozzle range into the fields
+          pcPop.querySelectorAll("[data-spool-mat]").forEach(function (b) { b.classList.toggle("on", b === t); });
+          var mr = SPOOL_MATERIALS[t.dataset.spoolMat];
+          pcPop.querySelector('[data-spool="tmin"]').value = mr[0];
+          pcPop.querySelector('[data-spool="tmax"]').value = mr[1];
+          return;
+        }
+        if (t.dataset.spoolSave != null) {
+          var sk = t.dataset.spoolSave.split(":"), on = pcPop.querySelector("[data-spool-mat].on");
+          var tmin = parseInt(pcPop.querySelector('[data-spool="tmin"]').value, 10);
+          var tmax = parseInt(pcPop.querySelector('[data-spool="tmax"]').value, 10);
+          var col = String(pcPop.querySelector('[data-spool="color"]').value || "").replace("#", "").toUpperCase();
+          if (!(tmin >= 150 && tmin <= tmax && tmax <= 350)) {
+            replyIn(pcPop, { k: "bad", t: "Температура сопла: целые от 150 до 350 °C, нижняя не выше верхней" });
+            return;
+          }
+          await popCmd(pid, "ams_set", { ams: parseInt(sk[0], 10), slot: parseInt(sk[1], 10),
+                                         material: on ? on.dataset.spoolMat : "PLA", color: col, tmin: tmin, tmax: tmax });
+          return;
+        }
+      }
       async function onAmsPopClick(pid, t) {
         var p = findPrinter(pid);
         if (!p) { closePop(); return; }
@@ -5706,6 +6248,11 @@
         }
         if (t.hasAttribute("data-ams-back")) {
           swapPop(amsUnits(p).length ? amsPopHtml(p) : extSpoolPopHtml(p), "ams");
+          return;
+        }
+        var dsp = t.dataset || {};
+        if (dsp.spoolOpen != null || dsp.spoolEdit != null || dsp.spoolMat != null || dsp.spoolSave != null || dsp.rfid != null) {
+          await onSpoolPopClick(pid, p, t);
           return;
         }
         if (t.dataset.amsLoad != null) {
@@ -5762,25 +6309,96 @@
           await popCmd(pid, "dry_stop", { ams: parseInt(t.dataset.dryStopGo, 10) });
         }
       }
+      // A CFS slot command asks first on its own button: true on the second press within 4 s.
+      function cfsArmed(btn, question) {
+        if (btn.dataset.armed === "1") return true;
+        var was = btn.innerHTML, wasOn = btn.classList.contains("on");
+        btn.dataset.armed = "1";
+        btn.classList.add("on");
+        btn.textContent = question;
+        setTimeout(function () {
+          if (!btn.isConnected || btn.dataset.armed !== "1") return;
+          btn.dataset.armed = "";
+          btn.classList.toggle("on", wasOn);
+          btn.innerHTML = was;
+        }, 4000);
+        return false;
+      }
       async function onPopClick(e) {
         var pid = pcPopPid;
         if (!pid) return;
-        var t = e.target.closest("[data-trange],[data-set],[data-speed],[data-ok],[data-menu],[data-maint-save],"
+        var t = e.target.closest("[data-airduct],[data-feeder-open],[data-feeder-setting],[data-cfs-nav],[data-cfs],[data-trange],[data-set],[data-speed],[data-ok],[data-menu],[data-maint-save],"
           + "[data-ams-back],[data-ams-load],[data-ams-load-go],[data-ams-unload],[data-ams-unload-go],[data-dry-open],"
-          + "[data-dry-mat],[data-dry-start],[data-dry-stop],[data-dry-stop-go]");
+          + "[data-spool-open],[data-spool-edit],[data-spool-mat],[data-spool-save],[data-rfid],"
+          + "[data-dry-mat],[data-dry-start],[data-dry-stop],[data-dry-stop-go],[data-mstep],[data-move],[data-home],[data-extrude]");
+        var motionBtn = t && (t.hasAttribute("data-move") || t.hasAttribute("data-home") || t.hasAttribute("data-extrude"));
+        if (motionBtn && t.getAttribute("aria-disabled") === "true") {
+          replyIn(pcPop, { k: "info", t: t.dataset.tip || CTL_MSG.motion });   // a phone tap: why it is off
+          return;
+        }
         if (!t || t.disabled || t.getAttribute("aria-disabled") === "true") return;
+        if (t.dataset.mstep != null) {          // the jog's step: never a command
+          cardUiOf(pid).mstep = parseInt(t.dataset.mstep, 10);
+          var mp = findPrinter(pid);
+          if (mp) swapPop(motionPopHtml(mp, cardUiOf(pid)), "motion");
+          return;
+        }
+        if (motionBtn) {
+          await motionCmd(pid, t);
+          return;
+        }
         // the chart's period switch: never a command
         if (t.dataset.trange != null) { tempChartSwitch(parseInt(t.dataset.trange, 10)); return; }
         // A card answers one command at a time: no new one from its popover meanwhile
         // (the ⋯ menu — maintenance mode and links — sends no printer command).
         // (The questions themselves send nothing: only their «…-go» buttons do.)
-        var sends = t.matches("[data-speed],[data-ok],[data-ams-load-go],[data-ams-unload-go],[data-dry-start],[data-dry-stop-go]");
+        var sends = t.matches("[data-speed],[data-ok],[data-ams-load-go],[data-ams-unload-go],[data-dry-start],[data-dry-stop-go],[data-spool-save],[data-rfid],[data-airduct]");
         if (sends && pcPop.dataset.origin === "card" && cardUiOf(pid).busy) { replyIn(pcPop, { k: "info", t: CTL_MSG.busy }); return; }
+        if (t.dataset.airduct != null) {
+          var adp = findPrinter(pid);
+          if (adp && adp.airduct && adp.airduct.mode === Number(t.dataset.airduct)) return;   // already on
+          closePop(true);
+          runCardCmd(pid, "airduct", { mode: Number(t.dataset.airduct) }, null);
+          return;
+        }
         if (t.hasAttribute("data-maint-save")) {
           if (t.classList.contains("is-wait")) return;
           var mIn = pcPop.querySelector(".pc-pop-in");
           t.classList.add("is-wait");
           try { await setMaintenance(pid, true, mIn ? mIn.value : ""); } finally { t.classList.remove("is-wait"); }
+          return;
+        }
+        if (t.hasAttribute("data-feeder-open")) {
+          var fp = findPrinter(pid);
+          if (fp) swapPop(feederSettingsHtml(fp), "feeder-settings");
+          return;
+        }
+        if (t.dataset.feederSetting) {
+          if (cardUiOf(pid).busy) { replyIn(pcPop, { k: "info", t: CTL_MSG.busy }); return; }
+          pcPopPressed = t;
+          try { await popCmd(pid, "feeder_setting", {setting: t.dataset.feederSetting, enabled: t.dataset.enabled === "true"}); }
+          finally { pcPopPressed = null; }
+          return;
+        }
+        if (t.dataset.cfsNav) {
+          var printer = findPrinter(pid);
+          if (printer) swapPop(cfsPopHtml(printer, t.dataset.cfsNav === "spools"), "cfs");
+          return;
+        }
+        if (t.dataset.cfs) {
+          if (cardUiOf(pid).busy) { replyIn(pcPop, { k: "info", t: CTL_MSG.busy }); return; }
+          var row = t.closest("[data-box]");
+          var params = {ams: Number(row.dataset.box), slot: Number(row.dataset.slot)};
+          var action = t.dataset.cfs;
+          if (action === "set") {
+            params.material = row.querySelector("[data-material]").value.trim();
+            var color = row.querySelector("[data-color]");
+            if (color) params.color = color.value.slice(1);
+          } else if (!cfsArmed(t, ({load: "Загрузить", unload: "Выгрузить", rfid: "Прочитать метку"})[action] + " слот " + (params.slot + 1) + "?")) {
+            return;   // the first press asks on the button itself, the second sends (as the AMS «…-go» buttons)
+          }
+          pcPopPressed = t;
+          try { await popCmd(pid, "cfs_" + action, params); } finally { pcPopPressed = null; }
           return;
         }
         if (!t.matches("[data-set],[data-speed],[data-ok],[data-menu]")) {
@@ -5824,6 +6442,27 @@
           return;
         }
       }
+      // «Домой» / one jog step from the motion popover: the popover stays open (the next press
+      // follows), the answer goes to its reply line; one command per card at a time.
+      async function motionCmd(pid, btn) {
+        if (cardUiOf(pid).busy || btn.classList.contains("is-wait")) { replyIn(pcPop, { k: "info", t: CTL_MSG.busy }); return; }
+        var action = "home", params = null;
+        if (btn.hasAttribute("data-move")) {
+          var mv = btn.dataset.move.split(":");
+          action = "move";
+          params = { axis: mv[0], dist: parseInt(mv[1], 10) };
+        } else if (btn.hasAttribute("data-extrude")) {
+          action = "extrude";
+          params = { dist: parseInt(btn.dataset.extrude, 10) };
+        }
+        btn.classList.add("is-wait");
+        btn.setAttribute("aria-busy", "true");
+        replyIn(pcPop, cmdWaitLine(action));
+        var out = await runCardCmd(pid, action, params, null);
+        btn.classList.remove("is-wait");
+        btn.removeAttribute("aria-busy");
+        if (out) replyIn(pcPop, cmdResult(action, out));
+      }
       // ⋯ menu items; a disabled one never gets here (onPopClick). «Снять с обслуживания»
       // asks in the menu itself (maintOffAskHtml, IA §10): «Снять» does it, «Отмена» is the menu again.
       function onMenuClick(pid, what) {
@@ -5831,6 +6470,10 @@
         if (!p) { closePop(); return; }
         if (what === "maint-open") {          // the note form in the same popover
           swapPop(maintPopHtml(p), "maint");
+          return;
+        }
+        if (what === "motion") {              // home and the jog in the same popover
+          if (isAdmin()) swapPop(motionPopHtml(p, cardUiOf(pid)), "motion");
           return;
         }
         if (what === "maint-off") {
@@ -5849,6 +6492,8 @@
         applyAndRender();
         if (what === "jobs" || what === "chrono") historyOpenFor(what, p);
         else if (what === "params") adminOpenPrinter(p);
+        else if (what === "files" && isAdmin() && window.ForgeFiles) window.ForgeFiles.open(p, apiFetch);   // printer-files.js
+        else if (what === "service" && isAdmin() && window.ForgeService) window.ForgeService.open(p, apiFetch);   // printer-service.js
       }
       // ⋯ «Печати / Хронология принтера ›»: «История» on that sub-tab, the head's printer set
       // to it by its stable id (IA §10), the period kept: #/history/jobs?printer=<id>.
@@ -6027,6 +6672,10 @@
                   : kind === "chamber"
                   ? [["40", 40], ["50", 50], ["60", 60], ["65", 65], ["Выкл", 0]]
                   : [["60", 60], ["80", 80], ["100", 100], ["Выкл", 0]];
+                var printer = findPrinter(pid);
+                if (kind === "chamber" && printer && printer.chamber_limit) {
+                  presets = presets.filter(function (entry) { return entry[1] <= printer.chamber_limit; });
+                }
                 openPop(chip, pid, tempPopHtml(kind, chip.dataset.cur || "", presets, hours), kind);
               } else {
                 var pt = findPrinter(pid), K = TEMP_KINDS[kind];
@@ -6037,7 +6686,15 @@
               openPop(chip, pid, speedPopHtml(chip.dataset.cur));
             } else if (kind === "fan") {
               openPop(chip, pid, fanPopHtml(+chip.dataset.part || 0, +chip.dataset.aux || 0, +chip.dataset.chamber || 0,
-                                            chip.dataset.fans ? chip.dataset.fans.split(",") : null));
+                                            chip.dataset.fans ? chip.dataset.fans.split(",") : null,
+                                            (findPrinter(pid) || {}).device_type === "ender5max",
+                                            isAdmin() ? (findPrinter(pid) || {}).airduct : null));
+            } else if (kind === "cfs") {
+              var pc = findPrinter(pid);
+              if (pc) {
+                cardUiOf(pid).pop = "cfs";
+                openPop(chip, pid, cfsPopHtml(pc), "cfs");
+              }
             } else if (kind === "ams" || kind === "ext") {
               // the AMS chip: an admin's opens the commands, anyone else's the read-only
               // popover; the external spool's chip its unload
@@ -6085,6 +6742,7 @@
             case "stop": askConfirm(pid2, "stop"); break;
             case "cool": coolCmd(pid2, p); break;
             case "eject": runCardCmd(pid2, "eject", null, "eject"); break;
+            case "motion": e.stopPropagation(); toggleMotionPop(btn, pid2); break;
           }
         });
         document.addEventListener("click", function (e) {
@@ -6461,12 +7119,13 @@
       // bell's predicate, so the two numbers always match (an offline status
       // carries no notifications). pct: the tab title's percent — the
       // printing printer nearest to its ETA; without any ETA the highest
-      // progress; floored, never 100 before the finish.
+      // progress; floored, never 100 before the finish. A printer in maintenance mode (its
+      // test prints) is left out of the percent, as out of «Дальше» and the farm's counts.
       function tabSummary(printers, statusOf, attentionOf) {
         var attention = 0, next = null, top = null;
         (printers || []).forEach(function (p) {
           if (attentionOf(p)) attention++;
-          if (p.state !== "printing" || p.progress_pct == null || statusOf(p) === "offline") return;
+          if (p.state !== "printing" || p.progress_pct == null || statusOf(p) === "offline" || p.maintenance) return;
           if (top === null || p.progress_pct > top) top = p.progress_pct;
           if (p.eta_seconds != null && p.eta_seconds > 0 && (next === null || p.eta_seconds < next.eta_seconds)) next = p;
         });
@@ -6612,6 +7271,8 @@
       }
       function updateTabStatus(printers, stale) {
         tabState.stale = !!stale;   // the status chip says «нет связи» exactly when the title does
+        // and the cards say it too: dimmed, their statuses and percents are the last answer's
+        if (grid) grid.classList.toggle("fleet-stale", !!stale);
         try {
           var sum = tabSummary(printers, computeUiStatus, nfAttention);
           var t = tabTitle(sum, "Кузница", stale);
@@ -6626,24 +7287,45 @@
       function renderLiveChip(ok) {
         var el = document.getElementById("liveChip");
         if (!el || !lastUpdate) return;
-        if (ok) tabState.okClock = new Date().toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+        if (ok) tabState.okClock = new Date().toLocaleTimeString(uiLocale(), { hour: "2-digit", minute: "2-digit", second: "2-digit" });
         var v = liveChip(ok ? "ok" : tabState.stale ? "down" : "late", tabState.okClock || "", (Date.now() - tabState.lastOkAt) / 1000);
         lastUpdate.textContent = v.text;
         el.className = "status-chip" + (v.cls ? " " + v.cls : "");
         el.setAttribute("data-tip", v.tip);
       }
 
+      // The farm's poll: every POLL_MS. Two polls without an answer (LIVE_DOWN_MS) and the header,
+      // the tab and the cards say «нет связи» — checked on every tick, so a poll hanging on a dead
+      // link counts too. Each poll is numbered and an answer older than the one on screen is
+      // dropped: a slow answer must not roll the cards back, nor make the browser's notifications
+      // fire twice (they follow prevPrinterStates). The timer sends no new poll while the last one
+      // is on its way, up to POLL_STUCK_MS (fetch has no timeout of its own); a click's load() goes.
+      var POLL_MS = 3000, LIVE_DOWN_MS = 2 * POLL_MS + 1000, POLL_STUCK_MS = 15000;
+      var pollSeq = 0, pollShown = 0, pollBusyAt = 0;
+      function loadTick() {
+        if (Date.now() - tabState.lastOkAt > LIVE_DOWN_MS) {
+          if (!tabState.stale) updateTabStatus(cachedAllPrinters, true);
+          renderLiveChip(false);   // «нет связи · 9 с»: the count goes on while nothing answers
+        }
+        if (pollBusyAt && Date.now() - pollBusyAt < POLL_STUCK_MS) return;
+        load();
+      }
       async function load() {
+        var seq = ++pollSeq;
+        pollBusyAt = Date.now();
         try {
           const response = await apiFetch("/api/printers");
           const data = await response.json();
+          if (seq < pollShown) return;
           if (!fleetPainted) {
             // the first paint waits up to 1.5 s for the last day's state changes: a printer
             // offline for days does not show in the grid and then jump into «Не в работе»
             fleetPainted = true;
             await Promise.race([fleetEvBusy || fleetLoadSince(), new Promise(function (r) { setTimeout(r, 1500); })]);
+            if (seq < pollShown) return;
           }
-          cachedAllPrinters = data.map((p) => Object.assign({}, p));
+          pollShown = seq;
+          cachedAllPrinters = data.map((p) => graceEta(Object.assign({}, p), Date.now() / 1000));
           nfResumedLines(cachedAllPrinters);
           applyAndRender();
           tabState.lastOkAt = Date.now();
@@ -6680,8 +7362,9 @@
           });
           renderLiveChip(true);
         } catch (error) {
+          if (seq < pollShown) return;   // a newer answer is on screen already
           console.error("Load failed:", error);
-          updateTabStatus(cachedAllPrinters, Date.now() - tabState.lastOkAt > 30000);
+          updateTabStatus(cachedAllPrinters, Date.now() - tabState.lastOkAt > LIVE_DOWN_MS);
           renderLiveChip(false);
           // Единичный сбой поллинга (каждые 3с) не должен стирать сетку —
           // если есть последние данные, оставляем их (статус-чип говорит, что они не свежие).
@@ -6693,6 +7376,8 @@
             </div>
           `;
           }
+        } finally {
+          if (seq === pollSeq) pollBusyAt = 0;
         }
       }
       // A tab (and the brand, «Принтеры») opens its screen from the top: the
@@ -6717,11 +7402,11 @@
       renderFilters();
       fleetLoadSince();
       load();
-      setInterval(load, 3000);
+      setInterval(loadTick, POLL_MS);
       setInterval(fleetLoadSince, FLEET_EV_EVERY_MS);
       // back in view after a while (a sleeping tab saw no changes): the times again
       document.addEventListener("visibilitychange", function () {
-        if (document.visibilityState === "visible" && Date.now() - fleetEvAt > 2 * 60 * 1000) fleetLoadSince();
+        if (document.visibilityState === "visible" && Date.now() - fleetEvAt > FLEET_EV_STALE_MS) fleetLoadSince();
       });
       initScrollTop();
       initTheme();
@@ -6850,10 +7535,12 @@
         }
       }
 
+      // timelineLoadingMore: the generation whose page is on its way (false: none). A page of an
+      // older window still out does not hold the new window's paging back.
       async function loadMoreTimeline() {
-        if (!timelineHasMore || timelineLoadingMore) return;
-        timelineLoadingMore = true;
+        if (!timelineHasMore || timelineLoadingMore === timelineLoadGen) return;
         var gen = timelineLoadGen;
+        timelineLoadingMore = gen;
         var from = timelineRange.from || (Date.now() / 1000 - 86400);
         var to = timelineRange.to || (Date.now() / 1000);
         timelineOffset += timelineLimit;
@@ -6874,7 +7561,7 @@
           // Не зацикливаем фоновую догрузку на постоянно падающем запросе.
           if (gen === timelineLoadGen) timelineHasMore = false;
         } finally {
-          timelineLoadingMore = false;
+          if (timelineLoadingMore === gen) timelineLoadingMore = false;
         }
       }
 
@@ -6941,6 +7628,9 @@
         return ctx.createPattern(pc, 'repeat');
       }
 
+      // The browser's offset from UTC at t, in seconds (UTC+7: 25200): the timeline's ticks are
+      // multiples of their step on the local clock (12 h: 00:00 and 12:00, not 07:00 and 19:00).
+      function tlTzOff(t) { return -new Date(t * 1000).getTimezoneOffset() * 60; }
       function drawTimeline() {
         var canvas = document.getElementById('timeline-canvas');
         if (!canvas) return;
@@ -7016,11 +7706,13 @@
         }
 
         // --- Vertical grid: major lines every 5 ticks, minor every tick ---
-        var gridStart = Math.ceil(viewStart / tickStep) * tickStep;
+        // on the local clock (tlTzOff): a day's tick falls on the local midnight, not on UTC's
+        var tzOff = tlTzOff(viewStart);
+        var gridStart = Math.ceil((viewStart + tzOff) / tickStep) * tickStep - tzOff;
         for (var gt = gridStart; gt <= viewEnd; gt += tickStep) {
           var gx = txof(gt);
           if (gx < labelW - 5 || gx > W - marginR + 5) continue;
-          var tickNum = Math.round(gt / tickStep);
+          var tickNum = Math.round((gt + tzOff) / tickStep);
           var isMajor = (tickNum % 5 === 0) || (tickStep >= 21600);
           ctx.strokeStyle = isMajor ? tc.gridMajor : tc.gridMinor;
           ctx.lineWidth = isMajor ? 0.8 : 0.3;
@@ -7064,14 +7756,14 @@
         ctx.font = 'bold 12px sans-serif';
         ctx.textAlign = 'center';
         ctx.textBaseline = 'top';
-        var tickStart = Math.ceil(viewStart / tickStep) * tickStep;
+        var tickStart = gridStart;
         var showDate = viewSpan > 21600;
         var lastLabelX = -100;
         var minGap = 45;
         for (var tt = tickStart; tt <= viewEnd; tt += tickStep) {
           var ttx = txof(tt);
           if (ttx < labelW - 30 || ttx > W - marginR + 30) continue;
-          var tickNum2 = Math.round(tt / tickStep);
+          var tickNum2 = Math.round((tt + tzOff) / tickStep);
           var isMajor2 = (tickNum2 % 5 === 0) || (tickStep >= 21600);
           // Tick mark
           ctx.strokeStyle = isMajor2 ? tc.tickMajor : tc.tickMinor;
@@ -7314,7 +8006,7 @@
           if (!best) { tip.style.display='none'; return; }
 
           var dt = new Date(best.recorded_at * 1000);
-          var timeStr = dt.toLocaleString('ru-RU', { day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit' });
+          var timeStr = dt.toLocaleString(uiLocale(), { day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit' });
           var desc = '<div style="font-weight:600;margin-bottom:2px;color:' + (STATE_COLORS[best.state]||'#9ca3af') + '">' +
                      safeText(printerMap[pid2].label, '') + '</div>' +
                      '<div style="color:var(--text-dim)">' + timeStr + ' &mdash; ' + safeText(stateNames[best.state]||best.state, '') + '</div>';
@@ -7323,10 +8015,7 @@
           if (best.progress != null) details.push('Прогресс: ' + Math.round(best.progress) + '%');
           if (best.nozzle_temp != null && best.nozzle_temp > 0) details.push('Сопло: ' + Math.round(best.nozzle_temp) + '\u00b0C');
           if (best.bed_temp != null && best.bed_temp > 0) details.push('Стол: ' + Math.round(best.bed_temp) + '\u00b0C');
-          if (best.eta_sec != null && best.eta_sec > 0) {
-            var em = Math.round(best.eta_sec / 60);
-            details.push('Осталось: ' + (em>=60?Math.floor(em/60)+'ч'+em%60+'м':em+'м'));
-          }
+          if (best.eta_sec != null && best.eta_sec > 0) details.push('Осталось: ' + timeFmt(best.eta_sec));
           if (details.length > 0) desc += '<div style="color:var(--text-muted);font-size:11px;margin-top:3px;line-height:1.4">' + details.join(' &middot; ') + '</div>';
           tip.innerHTML = desc;
           tip.style.display = 'block';
@@ -7545,6 +8234,7 @@
         if (historySub === "jobs") loadJobsView();
         else if (historySub === "chrono") loadTimeline();
         else if (historySub === "stats") loadHistStats();
+        else if (historySub === "plastic") loadPlastic();
         else if (historySub === "actions") loadActs();
       }
       // A new filter from the head: the address follows in place (a click on a period is no
@@ -7669,7 +8359,7 @@
           if (histStats.ssReq || histStats.stBusy) return;
           els.loader.style.display = "none";
         }
-        var q = jobsFilterQuery({ fr: w.fr, to: w.to, printer: histFilter.printer }, now, false);
+        var q = jobsFilterQuery({ fr: w.fr, to: w.to, printer: histFilter.printer }, now, false) + histTzQuery();
         histFetchJson("/api/history/jobs/stats?" + q).then(function (st) {
           if (gen !== histStats.gen) return;
           histStats.st = st;
@@ -7707,6 +8397,56 @@
           });
         }
         renderHistStats();
+      }
+      // «Пластик»: /api/history/jobs/stats for the head's filter (its grams), with the prints in
+      // maintenance mode — their plastic is used all the same. The numbers on screen stay until the
+      // new ones land; a late answer of an older filter is dropped.
+      var plastic = { gen: 0, key: "", at: 0, st: null, err: false };
+      var plasticEls = {
+        kpi: document.getElementById("plasticKpi"), days: document.getElementById("plasticDays"),
+        printers: document.getElementById("plasticPrinters"), loader: document.getElementById("plasticLoader"),
+        empty: document.getElementById("plasticEmpty")
+      };
+      function plasticToday() {
+        var d = new Date(), p = function (n) { return (n < 10 ? "0" : "") + n; };
+        return d.getFullYear() + "-" + p(d.getMonth() + 1) + "-" + p(d.getDate());
+      }
+      function renderPlastic() {
+        var els = plasticEls, st = plastic.st, today = plasticToday();
+        if (!els.kpi) return;
+        els.kpi.innerHTML = st ? plasticKpiHtml(st, today) : "";
+        els.days.innerHTML = st ? plasticDayBarsHtml(st, today) : "";
+        els.printers.innerHTML = st ? plasticPrintersHtml(st) : "";
+        els.empty.hidden = !plastic.err;
+        els.empty.textContent = plastic.err ? "Расход не загрузился — откройте вкладку ещё раз" : "";
+      }
+      function loadPlastic(force) {
+        var els = plasticEls;
+        if (!els.kpi) return;
+        var key = JSON.stringify(histQueryOf(histFilter));
+        if (!force && key === plastic.key && plastic.st && Date.now() - plastic.at < HIST_STATS_FRESH_MS) { renderPlastic(); return; }
+        if (key !== plastic.key) plastic.st = null;
+        var gen = ++plastic.gen, now = Date.now() / 1000, w = histWindow(histFilter, now);
+        plastic.key = key;
+        plastic.at = Date.now();
+        plastic.err = false;
+        els.loader.textContent = histLoadingText(histFilter);
+        els.loader.style.display = "";
+        var q = jobsFilterQuery({ fr: w.fr, to: w.to, printer: histFilter.printer }, now, false) + "&include_maint=true" + histTzQuery();
+        histFetchJson("/api/history/jobs/stats?" + q).then(function (st) {
+          if (gen !== plastic.gen) return;
+          plastic.st = st;
+        }, function (e) {
+          if (gen !== plastic.gen) return;
+          console.error("loadPlastic: jobs stats failed", e);
+          plastic.err = true;
+          plastic.at = 0;                                  // the next open asks again
+        }).then(function () {
+          if (gen !== plastic.gen) return;
+          els.loader.style.display = "none";
+          renderPlastic();
+        });
+        renderPlastic();
       }
       (function initHistStats() {
         var els = histStatsEls;
@@ -8072,6 +8812,7 @@
           }
           var page = await res[0].json(), counts = res[1] ? await res[1].json() : null;
           if (gen !== acts.gen) return;
+          actSetServiceTitles(page.service_titles);
           acts.rows = page.rows || [];
           acts.hasMore = !!page.has_more;
           acts.offset = 0;
@@ -8095,6 +8836,7 @@
           if (!r.ok) throw new Error("HTTP " + r.status);
           var page = await r.json();
           if (gen !== acts.gen) return;
+          actSetServiceTitles(page.service_titles);
           var seen = {};
           acts.rows.forEach(function (e) { seen[e.id] = true; });
           acts.rows = acts.rows.concat((page.rows || []).filter(function (e) { return !seen[e.id]; }));
@@ -8169,10 +8911,8 @@
       }
 
       // --- Admin panel ---
-      function escHtml(s) {
-        return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
-          .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
-      }
+      // HTML-escaped text, nothing for null / undefined: safeText with no fallback (one behaviour).
+      function escHtml(s) { return safeText(s, ""); }
 
       // ===== Вкладка AMS: влажность / температура / сушка =====
       var amsHours = 24;
@@ -8462,27 +9202,28 @@
           var al = autodryLine(adu, amsAutodry.config, amsAutodry.limits, amsAutodry.now);
           auto = { card: al.card, cls: al.cls, status: adu.status };
         }
-        var dry = amsTabDryHtml(u, p, can, auto, amsAsk === key);
+        var unitName = u.system === "cfs" ? "CFS " + u.unit_index : amsUnitName(u.unit_index);
+        var dry = u.system === "cfs" ? "" : amsTabDryHtml(u, p, can, auto, amsAsk === key);
         var amsModel = u.dry && u.dry.type === 'n3f' ? 'AMS 2 Pro' : u.dry && u.dry.type === 'n3s' ? 'AMS HT' : '';
         var z = amsZonesNow();
         var open = !!amsRowOpen[key];
         var row = '<button type="button" class="ams-row' + (dryActive(u) ? ' drying' : '') + '" data-ams-row="' + key +
           '" aria-expanded="' + (open ? 'true' : 'false') + '"><span class="ams-row-n">' + escHtml(u.label) +
-          (multi ? ' · ' + amsUnitName(u.unit_index) : '') + '</span>' + humBadge +
+          (multi || u.system === 'cfs' ? ' · ' + unitName : '') + '</span>' + humBadge +
           '<span class="ams-row-s">' + amsRowText(u, auto) + '</span><span class="ams-row-chev" aria-hidden="true">▾</span></button>';
         // «H1 · AMS 1 · AMS 2 Pro», the printer's model under it
         return row + '<div class="ams-card' + cls.slice(8) + (open ? '' : ' ph-closed') + '" data-key="' + key + '">' +
           '<div class="ams-chead"><div class="ams-spool">🧵</div>' +
-          '<div class="ams-ctitle"><div class="ams-cname">' + escHtml(u.label) + ' · ' + amsUnitName(u.unit_index) +
+          '<div class="ams-ctitle"><div class="ams-cname">' + escHtml(u.label) + ' · ' + unitName +
           (amsModel ? ' · ' + amsModel : '') + ' <span class="ams-dot ' + (u.online ? 'on' : 'off') + '"></span></div>' +
-          '<div class="ams-csub">' + (u.device_type ? escHtml(u.device_type) : 'AMS') + '</div></div>' +
+          '<div class="ams-csub">' + (u.model_name || u.device_type ? escHtml(u.model_name || u.device_type) : 'AMS') + '</div></div>' +
           '<div class="ams-badges">' + badges + '</div></div>' +
           (u.maintenance ? '<div class="ams-maint"><span class="ams-badge warn">на обслуживании</span></div>' : '') +
           slots + dry +
           // the block's command answer (IA §10, amsReplySet): kept through the minute's redraw
           '<div class="reply-slot" data-ams-reply="' + key + '">' + cmdLineHtml(amsReply[key], 'data-reply-x') + '</div>' +
           '<div class="ams-gwrap"><div class="ams-gtitle"><span class="t">' +
-          (u.humidity_pct != null ? 'Влажность, %' + (z.goal ? ' · зелёное — цель ≤ ' + z.ok + ' %' : '')
+          (u.humidity_pct != null ? 'Влажность, %' + (z.goal ? ' · зелёное — цель ≤ ' + z.ok + '%' : '')
             : 'Уровень влажности (0–5)') + '</span>' +
           '<span class="mm" data-mm="hum-' + key + '"></span></div>' +
           '<div data-g="hum-' + key + '"><div class="ams-nodata">загрузка…</div></div></div>' +
@@ -8491,10 +9232,21 @@
           '<div data-g="temp-' + key + '"><div class="ams-nodata">загрузка…</div></div></div>' +
           '</div>';
       }
+      // minutes as the rest of the panel says a duration (timeFmt): 712 -> "11ч 52м", 40 -> "40м"
       function amsFmtMin(m) {
         m = parseInt(m, 10) || 0;
-        var h = Math.floor(m / 60), mm = m % 60;
-        return h > 0 ? h + ':' + (mm < 10 ? '0' : '') + mm : m + ' мин';
+        return m > 0 ? timeFmt(m * 60) : '0м';
+      }
+      // The temperature chart's scale: 20–60 °C, widened by whole tens to what was measured —
+      // a drying runs up to 85 °C (ams_autodry), a cold room under 20.
+      function amsTempRange(vals) {
+        var lo = 20, hi = 60;
+        vals.forEach(function (v) {
+          if (v == null || !isFinite(v)) return;
+          lo = Math.min(lo, Math.floor(v / 10) * 10);
+          hi = Math.max(hi, Math.ceil(v / 10) * 10);
+        });
+        return [lo, hi];
       }
       function amsDrawGraphs(key, u, rows, fr, to) {
         var humBox = document.querySelector('[data-g="hum-' + key + '"]');
@@ -8518,10 +9270,11 @@
         humBox.innerHTML = usePct
           ? amsChart(humPts, fr, to, 0, top, amsHumColorVar(hcls), { zones: amsZoneBands(z, top), dry: bands, thr: thr })
           : amsChart(humPts, fr, to, 0, 5, 'var(--ok)', { dry: bands });
-        tempBox.innerHTML = amsChart(tempPts, fr, to, 20, 60, 'var(--info)', { dry: bands });
+        var tr = amsTempRange(tempPts.map(function (p) { return p.v; }));
+        tempBox.innerHTML = amsChart(tempPts, fr, to, tr[0], tr[1], 'var(--info)', { dry: bands });
         if (usePct) amsAttachHover(humBox, humPts, fr, to, 0, top, amsHumColorVar(hcls), '%');
         else amsAttachHover(humBox, humPts, fr, to, 0, 5, 'var(--ok)', '/5');
-        amsAttachHover(tempBox, tempPts, fr, to, 20, 60, 'var(--info)', '°');
+        amsAttachHover(tempBox, tempPts, fr, to, tr[0], tr[1], 'var(--info)', '°');
         if (mm && humPts.length) {
           var vals = humPts.map(function (p) { return p.v; });
           var suf = usePct ? '%' : '';
@@ -8529,11 +9282,15 @@
             ' · макс ' + Math.round(Math.max.apply(null, vals)) + suf;
         }
       }
+      // amsLoadGen: a newer loadAms (another period, the minute's refresh) makes the answers of
+      // the older one stale — a slow 30-day history must not be drawn into the 24 h view.
+      var amsLoadGen = 0;
       async function loadAms() {
         amsInit();
         var grid = document.getElementById('amsGrid');
         var empty = document.getElementById('amsEmpty');
         if (!grid) return;
+        var gen = ++amsLoadGen;
         var units, ad = null;
         try {
           var both = await Promise.all([
@@ -8544,6 +9301,7 @@
           units = await both[0].json();
           ad = both[1];
         } catch (e) { console.error('loadAms current failed', e); return; }
+        if (gen !== amsLoadGen) return;
         amsAutodry = ad;
         if (!units.length) {
           grid.innerHTML = '';
@@ -8565,6 +9323,7 @@
           var url = '/api/ams/history?printer_id=' + encodeURIComponent(u.printer_id) +
             '&unit=' + u.unit_index + '&fr=' + fr + '&to=' + to;
           apiFetch(url).then(function (r) { return r.json(); }).then(function (d) {
+            if (gen !== amsLoadGen) return;
             amsDrawGraphs(key, u, d.rows || [], fr, to);
           }).catch(function (e) { console.error('ams history failed', e); });
         });
@@ -8626,15 +9385,6 @@
           var inl = sel.parentNode.querySelector(".inl");
           if (inl) inl.classList.toggle("on", sel.value === "custom");
         });
-      }
-      function adMatBadges(u) {
-        var m = u.materials || [];
-        if (!m.length) return '<span class="mat none">пусто</span>';
-        return m.map(function (x) {
-          var hex = amsHex(x.color);
-          return '<span class="mat' + (x.ht ? " ht" : "") + '"><i' + (hex ? ' style="background:#' + hex + '"' : "") + '></i>' +
-            safeText(x.type, "?") + (x.count > 1 ? " ×" + Number(x.count) : "") + "</span>";
-        }).join("");
       }
       function adPlanOf(u) {
         if (!u.dry) return null;
@@ -9062,12 +9812,14 @@
         };
       }
       // «Автопропуск ошибок»: the saved codes (auto_ignore_print_errors), the list being edited, Bambu's texts.
-      var ai = { saved: null, codes: [], texts: {}, busy: false };
+      var ai = { saved: null, codes: [], texts: {}, busy: false, failed: false };
       function aiIsDirty() { return !!(ai && ai.saved && !aiSame(ai.saved, ai.codes)); }
       function aiRender() {
         var box = adEl("aiCodes");
         if (!box) return;
-        box.innerHTML = ai.saved === null ? '<div class="ai-empty">Загрузка…</div>' : aiCodesHtml(ai.codes, ai.texts);
+        box.innerHTML = ai.saved !== null ? aiCodesHtml(ai.codes, ai.texts)
+          : ai.failed ? '<div class="ai-empty">Список не загрузился — откройте «Автоматику» ещё раз</div>'
+          : '<div class="ai-empty">Загрузка…</div>';
         var dirty = aiIsDirty(), save = adEl("aiSaveBtn"), mark = adEl("aiDirty");
         if (save) save.disabled = !dirty || ai.busy;
         if (mark) mark.hidden = !dirty;
@@ -9091,14 +9843,20 @@
       async function loadAutoIgnore() {
         if (!isAdmin()) return;
         if (aiIsDirty()) { aiRender(); return; }               // unsaved edits stay as they are
+        // not read: no list at all (not an empty one — «Сохранить» would write it over the server's)
         try {
           var r = await apiFetch("/api/admin/settings");
           var d = r.ok ? await r.json() : null;
-          var codes = d && d.values && Array.isArray(d.values.auto_ignore_print_errors) ? d.values.auto_ignore_print_errors : [];
+          if (!d || !d.values) throw new Error("HTTP " + r.status);
+          var codes = Array.isArray(d.values.auto_ignore_print_errors) ? d.values.auto_ignore_print_errors : [];
           if (aiIsDirty()) return;
           ai.saved = codes.slice();
           ai.codes = codes.slice();
-        } catch (e) { console.error("loadAutoIgnore failed", e); }
+          ai.failed = false;
+        } catch (e) {
+          console.error("loadAutoIgnore failed", e);
+          if (ai.saved === null) ai.failed = true;
+        }
         aiRender();
         aiLoadTexts();
       }
@@ -9328,7 +10086,8 @@
           if (act === 'del') { admUsersUi = { pw: null, del: id, role: null, err: {} }; renderAdminUsers(); return; }
           if (act === 'pw-save') {
             var inp = tbody.querySelector('[data-pw-for="' + id + '"]'), pass = inp ? inp.value : '';
-            if (pass.length < 8) { admUsersUi.err = {}; admUsersUi.err[id] = 'Пароль — не меньше 8 символов'; renderAdminUsers(); return; }
+            var pwBad = admPwError(pass);
+            if (pwBad) { admUsersUi.err = {}; admUsersUi.err[id] = pwBad; renderAdminUsers(); return; }
             admUserSend(id, 'PUT', { password: pass }, 'Пароль обновлён');
           } else if (act === 'role-yes' && admUsersUi.role) {
             admUserSend(id, 'PUT', { role: admUsersUi.role.role }, 'Роль обновлена');
@@ -9350,38 +10109,51 @@
         });
       })();
 
+      // A new or changed password: what the server would refuse, said before asking it
+      // (bcrypt takes 72 bytes: a Cyrillic letter is two); null — fine.
+      var PW_MIN_CHARS = 8, PW_MAX_BYTES = 72;
+      function admPwError(p) {
+        if (p.length < PW_MIN_CHARS) return 'Пароль — не меньше 8 символов';
+        if (new TextEncoder().encode(p).length > PW_MAX_BYTES) return 'Пароль — не длиннее 72 байт: 72 латинских знака или 36 русских букв';
+        return null;
+      }
+      // «Добавить»: off while its request is on its way — a second press sent a second POST,
+      // which answered «Username already exists» although the user had been created.
+      function admAddUser(btn) {
+        if (btn.disabled) return null;
+        var username = document.getElementById('newUsername').value.trim();
+        var password = document.getElementById('newPassword').value;
+        var role = document.getElementById('newUserRole').value;
+        var err = document.getElementById('adminError');
+        err.textContent = '';
+        if (!username || !password) { err.textContent = 'Заполните логин и пароль'; return null; }
+        var bad = admPwError(password);
+        if (bad) { err.textContent = bad; return null; }
+        btn.disabled = true;
+        return apiFetch('/api/admin/users', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ username: username, password: password, role: role }),
+        }).then(function(res) { return res.json().then(function(data) { return {ok: res.ok, data: data}; }); })
+          .then(function(r) {
+            if (r.ok) {
+              document.getElementById('newUsername').value = '';
+              document.getElementById('newPassword').value = '';
+              var form = document.getElementById('addUserForm'), open = document.getElementById('addUserOpen');
+              if (form) form.hidden = true;
+              if (open) open.setAttribute('aria-expanded', 'false');
+              showToast('Пользователь добавлен', true);
+              loadAdminUsers();
+            } else {
+              err.textContent = r.data.detail || 'Ошибка';
+            }
+          })
+          .catch(function() { err.textContent = 'Ошибка сети'; })
+          .then(function () { btn.disabled = false; });
+      }
       (function() {
         var addUserBtn = document.getElementById('addUserBtn');
-        if (addUserBtn) {
-          addUserBtn.addEventListener('click', function() {
-            var username = document.getElementById('newUsername').value.trim();
-            var password = document.getElementById('newPassword').value;
-            var role = document.getElementById('newUserRole').value;
-            var err = document.getElementById('adminError');
-            err.textContent = '';
-            if (!username || !password) { err.textContent = 'Заполните логин и пароль'; return; }
-            if (password.length < 8) { err.textContent = 'Пароль должен быть не менее 8 символов'; return; }
-            apiFetch('/api/admin/users', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ username: username, password: password, role: role }),
-            }).then(function(res) { return res.json().then(function(data) { return {ok: res.ok, data: data}; }); })
-              .then(function(r) {
-                if (r.ok) {
-                  document.getElementById('newUsername').value = '';
-                  document.getElementById('newPassword').value = '';
-                  var form = document.getElementById('addUserForm'), open = document.getElementById('addUserOpen');
-                  if (form) form.hidden = true;
-                  if (open) open.setAttribute('aria-expanded', 'false');
-                  showToast('Пользователь добавлен', true);
-                  loadAdminUsers();
-                } else {
-                  err.textContent = r.data.detail || 'Ошибка';
-                }
-              })
-              .catch(function() { err.textContent = 'Ошибка сети'; });
-          });
-        }
+        if (addUserBtn) addUserBtn.addEventListener('click', function () { admAddUser(addUserBtn); });
       })();
 
       // --- Admin: реестр принтеров ---
@@ -9502,7 +10274,7 @@
           // data-l: a phone's card says what a cell is (plan step 15: no table there)
           return '<tr' + (p.pending === 'deleted' ? ' class="row-del"' : '') + '>' +
             '<td class="prk-name">' + name + '</td>' +
-            '<td class="dim prk-model" data-l="модель">' + escHtml(p.model || '—') + '</td>' +
+            '<td class="dim prk-model" data-l="модель">' + escHtml(p.model_name || p.model || '—') + '</td>' +
             '<td class="prk-kind">' + (KIND_BADGES[p.kind] || escHtml(p.kind)) + '</td>' +
             '<td class="prk-ip">' + ip + '</td>' +
             '<td class="prk-fw" data-l="прошивка">' + fwCell(p) + '</td>' +
@@ -9551,6 +10323,19 @@
         });
       }
 
+      // The form's list of Creality models, {code: name}: the server's table
+      // (GET /api/admin/printer-models), asked once; a failed answer is asked again next time.
+      var prnCrealityNamesReq = null;
+      function prnCrealityNames() {
+        if (!prnCrealityNamesReq) {
+          prnCrealityNamesReq = apiFetch('/api/admin/printer-models').then(function (r) {
+            if (!r.ok) throw new Error('HTTP ' + r.status);
+            return r.json();
+          }).then(function (d) { return (d && d.creality) || {}; }, function () { prnCrealityNamesReq = null; return {}; });
+        }
+        return prnCrealityNamesReq;
+      }
+
       function prnCurrentKind() {
         var on = document.querySelector('#prnKindSeg button.on');
         return on ? on.dataset.kind : 'bambu';
@@ -9559,6 +10344,7 @@
       function prnOpenForm(id) {
         var form = document.getElementById('prnForm');
         if (!form) return;
+        var suggestions = document.getElementById('prnCrealityModels');
         prnEditingId = id;
         form.style.display = '';
         document.getElementById('prnError').textContent = '';
@@ -9575,9 +10361,17 @@
         document.getElementById('prnSerial').value = p && p.serial ? p.serial : '';
         // a Creality's light switch: the setting printer_light_disabled (every Creality has it by default)
         document.getElementById('prnLight').checked = parkLightOn(prnLightOff, p ? p.id : null);
-        if (kind === 'bambu') document.getElementById('prnModelBambu').value = (p && p.model) || 'X1C';
-        else if (kind === 'creality') document.getElementById('prnModelCreality').value = (p && p.model) || 'k1max';
-        else document.getElementById('prnModelText').value = (p && p.model) || '';
+        document.getElementById('prnModelBambu').value = kind === 'bambu' && p && p.model || 'X1C';
+        var crealityField = document.getElementById('prnModelCreality');
+        crealityField.value = kind === 'creality' && p ? (p.model_name || p.model || '') : '';
+        prnCrealityNames().then(function (names) {
+          if (!suggestions.options.length) {
+            Object.keys(names).forEach(function (code) { suggestions.appendChild(new Option(names[code], names[code])); });
+          }
+          // a new printer: K1 Max, unless the form is another one's by now or already has a model
+          if (!p && prnEditingId === id && !crealityField.value) crealityField.value = names.k1max || '';
+        });
+        document.getElementById('prnModelText').value = p && (kind === 'klipper' || kind === 'mks') && p.model || '';
         form.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
       }
 
@@ -9602,7 +10396,9 @@
           payload.serial = document.getElementById('prnSerial').value.trim();
           if (!payload.access_code || !payload.serial) { err.textContent = 'Для Bambu нужны код доступа и серийный номер'; return; }
         } else if (kind === 'creality') {
-          payload.model = document.getElementById('prnModelCreality').value;
+          var name = document.getElementById('prnModelCreality').value.trim();
+          if (!name) { err.textContent = 'Укажите модель Creality'; return; }
+          payload.model = name;   // a known name is stored as its code (creality_models.code_for)
         } else {
           var mt = document.getElementById('prnModelText').value.trim();
           if (mt) payload.model = mt;
@@ -9650,6 +10446,21 @@
         } catch (x) { return 'Свет не сохранился: ошибка сети'; }
       }
 
+      // «Применить и перезапустить»: the restart is waited for only once the server said it is
+      // restarting ({status: "restarting"}); a refusal (403, 5xx, the session gone) or no answer
+      // is said in the bar — the configuration was not applied.
+      var PRN_RESTART_FIRST_MS = 6000, PRN_RESTART_EVERY_MS = 3000, PRN_RESTART_MAX_MS = 90000;
+      function prnApply(txt) {
+        return apiFetch('/api/admin/printers/apply', { method: 'POST' }).then(function (res) {
+          return res.json().catch(function () { return null; }).then(function (d) {
+            if (res.ok && d && d.status === 'restarting') { prnWaitForRestart(); return; }
+            replyIn(txt, { k: 'bad', t: 'Не применено: ' + (d && typeof d.detail === 'string' ? d.detail : 'ошибка ' + res.status) });
+          });
+        }).catch(function (e) {
+          replyIn(txt, { k: 'bad', t: e && e.message === 'Unauthorized' ? 'Не применено: сессия истекла — войдите снова'
+            : 'Не применено: нет связи с сервером' });
+        });
+      }
       // The restart's progress is said in the apply bar it was asked from; the bar goes once
       // nothing is pending, and then a toast says it (replyIn, IA §10).
       function prnWaitForRestart() {
@@ -9669,15 +10480,15 @@
             }
             throw new Error('not up');
           }).catch(function () {
-            if (Date.now() - start > 90000) {
+            if (Date.now() - start > PRN_RESTART_MAX_MS) {
               prnRestarting = false;
               prnBarAsk(null);
               replyIn(txt, { k: 'bad', t: 'Сервис не поднялся за 90 сек — проверь вручную' });
               return;
             }
-            setTimeout(poll, 3000);
+            setTimeout(poll, PRN_RESTART_EVERY_MS);
           });
-        }, 6000);
+        }, PRN_RESTART_FIRST_MS);
       }
 
       (function initAdminPrinters() {
@@ -9745,12 +10556,7 @@
           var what = prnBarWhat, txt = document.getElementById('printersApplyTxt');
           if (!what || prnRestarting) return;
           prnBarAsk(null);
-          if (what === 'apply') {
-            apiFetch('/api/admin/printers/apply', { method: 'POST' }).then(function () {
-              prnWaitForRestart();
-            }).catch(function () { prnWaitForRestart(); });
-            return;
-          }
+          if (what === 'apply') { prnApply(txt); return; }
           apiFetch('/api/admin/printers/discard', { method: 'POST' }).then(function (res) {
             if (!res.ok) { replyIn(txt, { k: 'bad', t: 'Не отменилось (' + res.status + ')' }); return; }
             prnCloseForm();
@@ -9764,6 +10570,8 @@
       // Бэкенд применяет без рестарта сервиса (смена токена/включение бота
       // перезапускает только телеграм-поток).
       var SRV_DEBOUNCE_MS = 600;
+      // the bot's restart (a long poll of up to ~25 s): its status asked again after these
+      var SRV_BOT_RECHECK_MS = [4000, 28000];
       var srvValues = null;       // последний известный values с сервера
       var srvTimers = {};         // дебаунс-таймеры по ключам
 
@@ -9832,12 +10640,13 @@
         var lc = srvEl('proxyLastCheck');
         if (lc) {
           lc.textContent = 'Последняя проверка: ' + (tg.last_check
-            ? new Date(tg.last_check * 1000).toLocaleTimeString('ru-RU') : '—');
+            ? new Date(tg.last_check * 1000).toLocaleTimeString(uiLocale()) : '—');
         }
       }
 
       function fillServerSettings(values, tg) {
         srvValues = values;
+        if (srvEl('hideSamplesToggle')) srvEl('hideSamplesToggle').checked = values.hide_sample_files !== false;   // «Общие»
         srvEl('tgEnabledToggle').checked = !!values.telegram_enabled;
         // Токен/поля не перетираем, пока в них печатают.
         [['tgToken', values.telegram_token],
@@ -9869,11 +10678,33 @@
         if (pxOff) pxOff.hidden = !!values.telegram_enabled;
       }
 
+      // The settings could not be read (on opening, or the read-back after a refused save): what the
+      // form shows is not what the server holds — its switches and fields go off (not a believable
+      // «выключено»), a line says so with «Повторить». on=false: read, all back.
+      function srvLoadFailed(on) {
+        var box = srvEl('srvLoadError');
+        if (box) box.hidden = !on;
+        ['generalSection', 'tgSection'].forEach(function (id) {
+          var sec = srvEl(id);
+          if (!sec) return;
+          sec.classList.toggle('srv-unknown', on);
+          sec.querySelectorAll('input, select, textarea, #proxyAddBtn, #proxyCheckNowBtn').forEach(function (el) { el.disabled = on; });
+        });
+        if (on && srvEl('tgStatusLine')) srvEl('tgStatusLine').textContent = '—';
+      }
       function loadServerSettings() {
         if (!isAdmin()) return;
-        apiFetch('/api/admin/settings').then(function (res) { return res.json(); })
-          .then(function (data) { fillServerSettings(data.values, data.telegram); })
-          .catch(function () {});
+        apiFetch('/api/admin/settings').then(function (res) {
+          if (!res.ok) throw new Error('HTTP ' + res.status);
+          return res.json();
+        }).then(function (data) {
+          if (!data || !data.values) throw new Error('no values');
+          srvLoadFailed(false);
+          fillServerSettings(data.values, data.telegram);
+        }).catch(function (e) {
+          console.error('loadServerSettings failed', e);
+          srvLoadFailed(true);
+        });
       }
 
       function saveServerSettings(patch, flashId, errId) {
@@ -9893,8 +10724,7 @@
           // Перезапуск телеграм-потока занимает до ~25 сек (long-poll) —
           // подтягиваем статус, чтобы «перезапускается…» сменилось итогом.
           if (data.bot_restarting) {
-            setTimeout(loadServerSettings, 4000);
-            setTimeout(loadServerSettings, 28000);
+            SRV_BOT_RECHECK_MS.forEach(function (ms) { setTimeout(loadServerSettings, ms); });
           }
           return data;
         }).catch(function (e) {
@@ -9923,7 +10753,12 @@
       (function initServerSettings() {
         var tgSection = srvEl('tgSection');
         if (!tgSection) return;
+        if (srvEl('srvRetryBtn')) srvEl('srvRetryBtn').addEventListener('click', loadServerSettings);
 
+        // «Общие» → «Скрывать заводские образцы» (hide_sample_files: printer_files.is_sample)
+        if (srvEl('hideSamplesToggle')) srvEl('hideSamplesToggle').addEventListener('change', function () {
+          saveServerSettings({ hide_sample_files: this.checked }, 'genSavedFlash', 'genError').catch(function () {});
+        });
         srvEl('tgEnabledToggle').addEventListener('change', function () {
           saveServerSettings({ telegram_enabled: this.checked }, 'tgSavedFlash', 'tgError').catch(function () {});
         });
@@ -10034,10 +10869,21 @@
           var btn = this;
           btn.disabled = true;
           btn.textContent = 'Проверяю…';
+          // a failed check says so: the statuses on screen are the last check's, not this one's
           apiFetch('/api/admin/settings/proxy-check', { method: 'POST' })
-            .then(function (res) { return res.json(); })
-            .then(function (data) { renderTgStatus(data.telegram); renderProxies(data.telegram); })
-            .catch(function () {})
+            .then(function (res) {
+              return res.json().catch(function () { return null; }).then(function (data) {
+                if (!res.ok || !data || !data.telegram) {
+                  throw new Error(data && typeof data.detail === 'string' ? data.detail : 'ошибка ' + res.status);
+                }
+                return data;
+              });
+            })
+            .then(function (data) { srvError('proxyError', null); renderTgStatus(data.telegram); renderProxies(data.telegram); })
+            .catch(function (e) {
+              srvError('proxyError', 'Проверка не прошла: ' + (e && e.message === 'Unauthorized' ? 'сессия истекла'
+                : e instanceof TypeError ? 'нет связи с сервером' : e.message) + ' — статусы ниже от прошлой проверки');
+            })
             .finally(function () { btn.disabled = false; btn.textContent = 'Проверить сейчас'; });
         });
       })();

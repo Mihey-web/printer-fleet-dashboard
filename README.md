@@ -7,20 +7,37 @@ of 3D printers from one web page. Built for print farms that run more than one
 brand of machine and want a single, always-on status board with history,
 notifications, and basic remote control.
 
-Supports **Bambu Lab**, **Creality** (K1 series / Sonic Pad), **Klipper /
-Moonraker**, and **MKS WiFi** printers side by side.
+Supports **Bambu Lab**, **Creality** (K1 / K2 series, Ender-5 Max, Sonic Pad),
+**Klipper / Moonraker**, and **MKS WiFi** printers side by side.
 
 *All screenshots use a synthetic demo farm — no real printers or jobs.*
 
 ![Printers — a mixed Bambu / Creality / Klipper / MKS farm on one page](docs/screenshots/dashboard.png)
 
-*Printers — every printer on one page: state, progress, ETA, temperatures, AMS
-slots and humidity, the notification that needs a decision with its action,
-state chips, which prints finish next, and the admin's control row.*
+*Printers — every printer on one page: state, progress, the job's slicer
+picture and weight, ETA, temperatures, AMS slots and humidity, the notification
+that needs a decision with its action, state chips, which prints finish next,
+and the admin's control row.*
 
 <p align="center"><img src="docs/screenshots/mobile.png" width="320" alt="The same board on a phone, with the bottom navigation"></p>
 
 <p align="center"><em>On a phone — one column, bottom navigation, popovers as bottom sheets.</em></p>
+
+![Job card — the plate, each filament with its weight, the print settings and the plate map](docs/screenshots/job-card.png)
+
+*Job card — the slicer's picture of the plate, each filament with colour, type,
+grams and metres, the print settings and the parts on the plate, where an admin
+skips a part mid-print.*
+
+![Files on the printer — the stored files and one opened to start it](docs/screenshots/printer-files.png)
+
+*Files on the printer — the print files stored on a Bambu or Creality printer,
+and one opened to pick the plate and the AMS slots and start it.*
+
+![Shared files by model — where each file is and the sync plan](docs/screenshots/file-pool.png)
+
+*Shared files by model — every file of a model's printers, which printer has
+it, and the plan before the missing ones are copied.*
 
 ![History → Prints — one row per print with plan vs actual, pauses and the result](docs/screenshots/history-jobs.png)
 
@@ -36,6 +53,15 @@ shares of every printer, prints per day and the most frequent errors.*
 
 *History → Timeline — every printer's state over the chosen period.*
 
+![History → Filament — plastic used per day and by printer](docs/screenshots/plastic.png)
+
+*History → Filament — the plastic used over the period, per day and per
+printer, from the slicer's weight of each print.*
+
+<p align="center"><img src="docs/screenshots/plastic-mobile.png" width="320" alt="History → Filament on a phone"> <img src="docs/screenshots/job-card-mobile.png" width="320" alt="The job card on a phone"></p>
+
+<p align="center"><em>On a phone — History → Filament, and the job card as a bottom sheet.</em></p>
+
 ![AMS — humidity and temperature per unit with auto-drying](docs/screenshots/ams.png)
 
 *AMS — humidity and temperature of every unit with drying periods, and the
@@ -44,38 +70,71 @@ auto-drying line on top.*
 ## Features
 
 - **Unified live board** — every printer on one page: state, progress, ETA,
-  nozzle/bed/chamber temperatures, current job, Wi-Fi signal, AMS status.
-  Cards follow live telemetry every 2 s; state chips filter the grid and the
-  «Финиши» line shows which prints end next.
+  nozzle/bed/chamber temperatures, the current job with the slicer's picture
+  of the plate and its weight, Wi-Fi signal, AMS / CFS status, the official
+  picture of each model. Cards follow live telemetry every 3 s; state chips
+  filter the grid and the «Финиши» line shows which prints end next.
+- **Job card for every print** — the slicer's picture of the plate, each
+  filament with colour, type, profile, grams and metres, the slicer's time,
+  layer height, infill, walls, supports and their weight, the bed,
+  temperatures and the parts on the plate. Read from the job's own file (a
+  Bambu 3MF from the printer's memory or storage, the Creality file list, the
+  K2 Plus's G-code settings) and kept with the print in the history.
+- **Skip parts mid-print** — click parts on the job card's plate map and skip
+  them (Bambu with object labelling, Creality K2 Plus / K1C / Ender-5 Max);
+  never all of them, checked against the running job.
+- **Files on the printer** — list the print files stored on a Bambu or
+  Creality printer (a USB stick on P2S / H2S, whose internal storage stays
+  closed; the K2 Plus through Klipper's API) and start one from the panel with
+  the plate, AMS slots, bed levelling and timelapse. Factory samples can be
+  hidden.
+- **Shared files by model** — upload a file once (or take it from one
+  printer) and copy it to every printer of that model with one button: a plan
+  first, progress per printer, never deleting or overwriting anything.
+- **Plastic used** — History → Filament («Пластик»): the plastic used over the
+  period, per day and per printer, from the slicer's weight of each print; a
+  cancelled print counts the share it printed, a print over midnight is split
+  by the hours it ran.
 - **Four screens, phone-ready** — Printers · AMS · History · Admin (three for a
   viewer), each screen and sub-tab in the address so reloads and shared links
   keep it; on a phone a bottom navigation, popovers as bottom sheets and admin
   tables as cards. Installable as an app (PWA) with progress in the tab title.
-- **Multi-protocol** — Bambu (MQTT), Creality and Klipper/Moonraker (WebSocket),
-  and MKS WiFi, polled concurrently.
+- **Multi-protocol** — Bambu (MQTT), Creality and Klipper/Moonraker (WebSocket;
+  a K2 Plus through both), and MKS WiFi, polled concurrently.
 - **Printer notifications with actions** — every HMS message and print error on
   its card, the buttons Bambu Studio shows (from Bambu's own tables), each
   checked against the live printer before it is sent; a bell for what needs a
-  decision; hide a lasting one; browser push notifications.
+  decision; hide a lasting one; browser push notifications. Creality errors
+  get «Сбросить ошибку» (clear the error) or «Перезапустить прошивку» (restart
+  the firmware), as on the printer's own web page.
 - **History** — a print journal (one row per print: plan vs actual, pauses and
-  their reasons, result, CSV export for admins), a per-printer state timeline,
-  statistics (fleet load, success rate, state durations) and, for admins, an
-  audit of every action.
+  their reasons, result, the slicer's weight, the job card, CSV export for
+  admins), a per-printer state timeline, statistics (fleet load, success rate,
+  state durations), the plastic used and, for admins, an audit of every
+  action.
 - **Maintenance mode** — take a printer out of the fleet's counts, alerts,
   bulk commands and automation without losing its live status.
 - **Temperature charts** — nozzle, bed and chamber over 6 h / 24 h / 7 d in the
   temperature chip's popover.
 - **Telegram notifications** (optional, off by default) — alerts on finish /
   pause / error, with an outbound proxy pool, all editable from the UI.
-- **Remote control** — a control row on every card for admins: light,
-  pause/resume, stop, cool down, bed down, AMS and print speed on Bambu;
-  pause/resume/stop, the light and cool down on Creality (K1 series, Ender-5
-  Max); pause/resume/cancel and the light (an `output_pin`, found
-  automatically) on Klipper. Nozzle, bed, fan, and speed control on Bambu and
-  Creality, plus chamber temperature on models with an actively heated
-  chamber (H2 series). AMS on Bambu: load and unload filament (idle printers
-  only, checked against live telemetry) and AMS 2 Pro / AMS HT drying with
-  Bambu Studio's temperature limits. Each control appears only where the
+- **Remote control** — a control row on every card for admins that follows
+  the printer (printing: pause / stop; standing: cool down, bed down, move):
+  light, pause/resume, stop, cool down, bed down, AMS and print speed on Bambu;
+  pause/resume/stop, the light, cool down and bed down on Creality (K1 / K2
+  series, Ender-5 Max); pause/resume/cancel and the light (an `output_pin`,
+  found automatically) on Klipper. Home and axis jog on all three, filament
+  push / retract at the nozzle on Bambu and Klipper. Nozzle, bed, fan, and
+  speed control on Bambu and Creality, plus chamber temperature on models with
+  an actively heated chamber (H2 series, K2 Plus / K2 Pro). AMS on Bambu: load and
+  unload filament (idle printers only, checked against live telemetry), AMS 2
+  Pro / AMS HT drying with Bambu Studio's temperature limits, «Катушки…»
+  (spools: re-read a slot's tag or set its spool by hand) and the AMS refill
+  settings the printer reports; the air duct mode on P2S / H2. Creality:
+  chamber temperature, the CFS laid out like the AMS (load / unload, tags,
+  spools, refill setting), model-specific limits, and on a K2 Plus its
+  calibrations and firmware restart. The lamp goes on by itself when a
+  printer pauses, fails or is cancelled. Each control appears only where the
   printer can carry it out (the firmware's acceptance is read from the
   printer's reports, or probed), the server refuses commands the printer's live
   state forbids (no cooling or bed move mid-print), and the card shows each
@@ -97,11 +156,14 @@ auto-drying line on top.*
 - **Backend:** Python 3 + [FastAPI](https://fastapi.tiangolo.com/) / Uvicorn
 - **Frontend:** vanilla JavaScript, HTML, and CSS (no build step)
 - **Storage:** SQLite (`printer_history.db` for fleet/settings/history,
-  `users.db` for accounts/audit)
+  `users.db` for accounts/audit, `ams_history.db` for AMS humidity) and `data/`
+  (job previews and cards, the shared file pool)
 - **Printer libraries:** a vendored copy of `pybambu` from
   [ha-bambulab](https://github.com/greghesp/ha-bambulab) (Bambu; MIT,
-  `app/vendor/pybambu`), `websocket-client` (Creality / Klipper), plus a small
-  MKS WiFi client
+  `app/vendor/pybambu`), a standalone client copied from
+  [ha_creality_ws](https://github.com/3dg1luk43/ha_creality_ws) (Creality;
+  AGPL-3.0, `app/vendor/ha_creality_ws`), `websocket-client` (Klipper), plus a
+  small MKS WiFi client
 - **Bot:** `aiogram` for Telegram
 
 ## Requirements
@@ -123,13 +185,17 @@ auto-drying line on top.*
 ```bash
 git clone <your-fork-url> kuznitsa && cd kuznitsa
 touch printer_history.db users.db ams_history.db   # so Docker mounts them as files
+mkdir -p data                          # job previews and cards, the shared file pool
 docker compose up -d --build
 docker compose logs -f                 # read the first-run admin password once
 ```
 
-Open `http://<host>:8000` and log in as `admin`. Databases persist in the repo
-directory; `git pull` and `docker compose up -d --build` pick up new versions
-(run the `touch` line again first: older versions did not mount `ams_history.db`).
+Open `http://<host>:8000` and log in as `admin`. Databases and `data/` persist in
+the repo directory; `git pull` and `docker compose up -d --build` pick up new
+versions (run the `touch` and `mkdir` lines again first: older versions did not
+mount `ams_history.db` and `data/`). To keep the previews and pool files of such
+an older container, copy them out before the rebuild:
+`docker cp kuznitsa:/app/data/. ./data/`.
 
 **Exposure.** `docker-compose.yml` publishes port 8000 on **all** interfaces
 with `COOKIE_SECURE=0` — meant for a trusted LAN. Docker writes its own iptables
@@ -205,13 +271,19 @@ All runtime configuration is optional and has safe defaults. See
 | `FORGE_BAMBU_TLS_VERIFY` | empty (off) | Verify Bambu printer TLS certificates against Bambu's CAs: `*` or comma-separated models |
 | `HISTORY_RETENTION_DAYS` / `JOBS_RETENTION_DAYS` | `90` / `730` | Days of state / AMS history and of the print journal |
 | `FORGE_TZ_OFFSET_MIN` | `180` | Farm time zone for the auto-drying window, minutes from UTC |
+| `FORGE_DATA_DIR` | the project root | Folder with the three databases and `data/`; changing it moves no files |
+| `FORGE_FILE_POOL_MAX_GB` / `FORGE_FILE_POOL_FILE_MAX_MB` | `8` / `512` | Shared file pool on the panel: all uploads together / one file |
+| `FORGE_FILE_POOL_KEEP_FREE_MB` | `1024` | Uploads to the pool stop while the panel's disk has less free space than this |
 
 The **Telegram bot token, chat id, notification templates, and proxy list** are
 managed in the database and edited from **Admin → System** in the UI — not via env or
-code. One expert setting has no UI: `printer_light_disabled`, a list of
-Creality printer ids without a controllable lamp (no `lightSw`, e.g. K1 SE),
-whose light button is hidden, set with `PUT /api/admin/settings`
-`{"printer_light_disabled": ["<printer id>"]}`.
+code. A Creality without a controllable lamp (no `lightSw`, e.g. K1 SE) is
+switched off with **Allow light control** in its printer form (stored as
+`printer_light_disabled`). One expert setting has no UI: `auto_light_states`,
+the states that switch a printer's lamp on when it steps into them (default
+`["paused", "error", "cancelled"]`; `finished` is allowed too, `[]` turns it
+off), set with `PUT /api/admin/settings`
+`{"auto_light_states": ["paused", "error"]}`.
 
 Run behind a TLS reverse proxy (e.g. nginx) in production and keep
 `COOKIE_SECURE=1`. Serve the app with a process manager such as a systemd
@@ -220,8 +292,11 @@ unit; bind it to `127.0.0.1` and let the proxy terminate TLS.
 Ready-to-adapt examples (placeholders, no real hosts) live in
 [`deploy/`](./deploy/): a systemd unit (`bambudiagnostic.service`) with an
 installer (`install_service.sh`), an nginx TLS vhost (`nginx-bambu.conf`), a
-self-signed HTTPS bootstrap (`setup_https.sh`), and an optional SSH
-reverse-tunnel unit for exposing a LAN instance through a public VPS.
+self-signed HTTPS bootstrap (`setup_https.sh`), a nightly backup to a separate
+disk (`forge_db_backup.py` with `forge-db-backup.service` / `.timer`: the three
+databases, `config.py` and `data/job_previews/`, unchanged previews hard-linked
+to the night before), and an optional SSH reverse-tunnel unit for exposing a
+LAN instance through a public VPS.
 
 ## Running the tests
 
@@ -234,9 +309,13 @@ python -m pytest -q
 
 Самостоятельно размещаемая панель мониторинга фермы 3D-принтеров: Bambu Lab,
 Creality, Klipper/Moonraker и MKS WiFi на одной странице — состояние, прогресс,
-температуры (с графиками), уведомления принтеров с кнопками как в Bambu Studio,
-журнал печатей, хронология и статистика, режим обслуживания, управление с
-карточки, групповые команды «Вся ферма» (свет, пауза, продолжение) и автосушка
+картинка задания из слайсера и его вес, температуры (с графиками), уведомления
+принтеров с кнопками как в Bambu Studio, карточка каждой печати (пластики,
+настройки печати, детали на столе, пропуск деталей на ходу), файлы на принтере
+с запуском печати, общие файлы по моделям, журнал печатей, хронология,
+статистика и расход пластика по дням и принтерам, режим обслуживания,
+управление с карточки (в том числе «Домой», перемещение осей, CFS у Creality),
+групповые команды «Вся ферма» (свет, пауза, продолжение) и автосушка
 AMS по влажности в покое. Четыре экрана — Принтеры · AMS · История · Админ, на
 телефоне нижняя навигация, ставится как приложение (PWA). Парк
 принтеров, токен Telegram и прокси задаются в веб-интерфейсе (хранятся в БД), а
@@ -263,3 +342,10 @@ under the MIT License, © 2023 ha-bambulab contributors (see its
 [`LICENSE`](./app/vendor/pybambu/LICENSE) and
 [`VENDORED.md`](./app/vendor/pybambu/VENDORED.md)). It stays under the MIT
 License and is not covered by the dual-licensing grant above.
+
+[`app/vendor/ha_creality_ws/`](./app/vendor/ha_creality_ws/) is the standalone
+Creality client copied from
+[ha_creality_ws](https://github.com/3dg1luk43/ha_creality_ws), licensed under
+the AGPL-3.0 (see its [`LICENSE`](./app/vendor/ha_creality_ws/LICENSE) and
+[`VENDORED.md`](./app/vendor/ha_creality_ws/VENDORED.md)). It stays under the
+AGPL-3.0 and is not covered by the dual-licensing grant above.

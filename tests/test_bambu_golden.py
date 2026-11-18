@@ -171,7 +171,8 @@ def expected(p: dict, model: str = "") -> dict:
             else:
                 slots.append({"type": None, "color": None, "name": None, "remain_pct": -1, "empty": True,
                               "nozzle_temp": None})
-        units.append({"index": int(u["id"]), "humidity": int(u["humidity"]),
+        # the level 1 (dry) .. 5 (wet) the panel reads: the printer's index runs 5 = driest
+        units.append({"index": int(u["id"]), "humidity": 6 - int(u["humidity"]),
                       "humidity_pct": raw_pct if 1 <= raw_pct <= 100 else None,
                       "dry_time": int(u.get("dry_time", 0)) or None,
                       "temp": float(u["temp"]), "slots": slots,

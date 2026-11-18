@@ -3,11 +3,51 @@
 All notable changes to this project are documented here.
 The format is loosely based on [Keep a Changelog](https://keepachangelog.com/).
 
-Tagged releases are `1.0.0`, `2.0.0` and `2.1.0`. The dated entries between
+Tagged releases are `1.0.0`, `2.0.0`, `2.1.0` and `2.2.0`. The dated entries between
 them are sync points; they match the `Sync to internal v<date>` commits in
 this repository's history.
 
-## [Unreleased]
+## [2.2.0] — 2026-11-18
+
+Files on the printers, a card for every print, plastic used per day, and a
+much fuller Creality.
+
+### Added
+- Files on the printer: each card lists the files on the printer — Bambu
+  storage (a USB stick on P2S / H2S, whose internal storage stays closed),
+  the Creality list, the K2 Plus through Klipper — and starts a print from the
+  panel. Factory sample models can be hidden (a general setting).
+- Shared print files per printer model: upload a file once, send it to every
+  printer of that model with one button.
+- Job card for every print: the slicer's picture of the plate and what was
+  printed — each filament with colour, type, profile, grams and metres, the
+  slicer's time, layer height, infill, walls, supports and their weight, the
+  bed, temperatures, the parts on the plate. Read from the job's own file (a
+  Bambu 3MF from the printer's memory or storage, the Creality file list, the
+  K2 Plus's G-code settings) and kept in the history.
+- Skip parts mid-print from the job card's plate map (Bambu and Creality).
+- History → «Пластик» (Plastic): plastic used over the period, per day and per
+  printer. A print over midnight is split by the hours it ran, a cancelled one
+  counts the share it printed, the daily average uses only days where nearly
+  every print has a weight. Each print records the slicer's planned grams
+  (Bambu, Creality; the Ender-5 Max from its filament length).
+- Creality: chamber temperature, CFS telemetry and slot controls laid out like
+  the AMS, model-specific commands, the firmware's own homing, jog, light,
+  «Сбросить ошибку» (Clear error) and «Перезапустить прошивку» (Restart
+  firmware). The K2 Plus also through Klipper's own API: files, «Продолжить
+  печать» (Resume print) and its service commands. Creality printers are
+  reached through a standalone client copied from ha_creality_ws (AGPL-3.0,
+  `app/vendor/ha_creality_ws`).
+- Home and axis jog from the card's ✥ button (in the control row while the
+  printer stands) on Bambu, Creality and Klipper; filament push / retract at the
+  nozzle there too on Bambu and Klipper (Creality: from its own screen only).
+- Air duct mode switch for P2S / H2 in the fans popover.
+- AMS «Катушки…» (Spools): re-read a slot's spool tag or set a slot's spool by
+  hand; the AMS / CFS refill settings the printer reports.
+- Official pictures for 29 Bambu and Creality models, combo photos when an
+  AMS / CFS is fitted.
+- The lamp goes on when a printer stops.
+- `FORGE_DATA_DIR`: one folder for the three databases and `data/`.
 
 ### Changed
 - Themes reworked so the dark ones differ in how they are built, not just in
@@ -24,10 +64,30 @@ this repository's history.
 - «Своё фото» (Own photo) in 👤 → «Оформление» while «Стекло» is on: any picture
   under the glass, made smaller in the browser and kept in it only (the login
   page shows it too); «Убрать фото» brings the built-in one back.
+- Printer models are named the way people write them everywhere — «K2 Plus»,
+  «Ender-5 Max» — from one table on the server; what each Bambu model can do
+  is one table too.
+- The nightly backup also copies the job cards (`data/job_previews/`),
+  unchanged files hard-linked to the previous copy.
+- Docker keeps `data/` on the host, out of the image.
 
 ### Removed
 - Theme «Неон»; it is replaced by «Янтарь» (Amber), a warm dark with little
   blue light. A browser that had «Неон» moves to «Янтарь» on its own.
+
+### Fixed
+- The first sign-in did nothing until a page reload when the address had a
+  «#/…» part.
+- A P1S starting a print reports the last one done for a second; that second
+  no longer becomes a separate one-second «finished» print in the history.
+- A print stopped at 0 % counts as 0 g of plastic, not as a print without a
+  weight.
+- About 80 findings of a four-tester QA pass: phone layout, translations,
+  settings, user names, logout, the printer address form, a users.db lock,
+  low heat mid-print, Creality / Klipper / MKS telemetry, auto-drying edge
+  cases, notifications after a bot outage, the file pool's limits.
+- The Telegram live summary falls back to 2 s on a broken stored interval
+  instead of stopping.
 
 ## [2.1.0] — 2026-11-02
 

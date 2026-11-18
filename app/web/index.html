@@ -12,7 +12,9 @@
   <script src="/i18n.js?v=1"></script>
   <!-- favicon replaced inline below -->
     <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='7' fill='%231e293b'/><polygon points='16,3 29,12 29,24 16,30 3,24 3,12' fill='none' stroke='%2360a5fa' stroke-width='2.5'/><circle cx='16' cy='16' r='3' fill='%2360a5fa'/></svg>">
-    <link rel="stylesheet" href="/static/styles.css?v=121" />
+    <link rel="stylesheet" href="/static/styles.css?v=134" />
+    <link rel="stylesheet" href="/static/preview.css?v=11" />
+  <link rel="stylesheet" href="/static/printer-files.css?v=6" />
 
 </head>
 <body>
@@ -50,7 +52,7 @@
                 <span class="farm-lbl" id="sortLbl">Порядок</span>
                 <span class="farm-seg" id="sortSeg" role="group" aria-labelledby="sortLbl">
                   <button type="button" class="active" data-sort="name" aria-pressed="true" data-tip="По имени: P2 раньше P10">Имя</button>
-                  <button type="button" data-sort="eta" aria-pressed="false" data-tip="Печатающие — по времени до конца, остальные по имени">Финиш</button>
+                  <button type="button" data-sort="eta" aria-pressed="false" data-tip="Готовые первыми, печатающие — по времени до конца, остальные по имени">Финиш</button>
                 </span>
               </span>
               <!-- a phone (IA §5): the order and the farm's commands are in the «Ферма» sheet -->
@@ -88,6 +90,7 @@
           <button type="button" class="active" data-sub="jobs" aria-pressed="true">Печати</button>
           <button type="button" data-sub="chrono" aria-pressed="false">Хронология</button>
           <button type="button" data-sub="stats" aria-pressed="false">Статистика</button>
+          <button type="button" data-sub="plastic" aria-pressed="false" data-tip="Расход пластика по дням и принтерам">Пластик</button>
           <button type="button" data-sub="actions" aria-pressed="false" hidden>Действия</button>
         </div>
         <button type="button" class="hist-sum" id="histSum" aria-expanded="false" aria-controls="histFilters">
@@ -178,6 +181,20 @@
           </div>
         </div>
       </section>
+      <!-- «Пластик» (17.11.2026): the plastic used per day and by printer, from the slicer's weight of
+           each print (recorded since 2.2.0), for the head's period and printer. -->
+      <section class="section-panel hist-plastic" data-hsub="plastic" id="plasticPanel" hidden>
+        <div class="hist-kpis" id="plasticKpi"></div>
+        <div id="plasticLoader" class="dash-log-loader" style="display:none">Считаем…</div>
+        <div class="dash-stats-empty" id="plasticEmpty" hidden></div>
+        <div class="jobs-block">
+          <h4 class="jobs-h">Расход по дням</h4>
+          <div id="plasticDays"></div>
+          <h4 class="jobs-h">По принтерам</h4>
+          <div id="plasticPrinters"></div>
+        </div>
+        <p class="plastic-note">Вес — из слайсера (файл задания); отменённая печать считается по напечатанной доле, печать через полночь делится между днями по часам. Светлые столбцы — сегодняшний день и дни, где вес известен не у всех печатей. Вес записывается с версии 2.2.0 панели.</p>
+      </section>
       <!-- «Действия» (admins, IA §7): who did what — people and the automation. The chips are the
            groups with their counts, «Служебные» (token refreshes, ~90 % of the rows) hidden by
            default, «Кто»; the head's period and printer apply. By 50, a row unfolds its IP,
@@ -234,7 +251,7 @@
         <div class="panel-head">
           <div class="panel-title-group">
             <h3>Журнал сушки</h3>
-            <p>Почему автосушка решила так. RH — до сушки → после остывания.</p>
+            <p>Почему автосушка решила так. Влажность: до сушки → после остывания.</p>
           </div>
           <button type="button" class="ams-rules" id="adJournalMore" hidden>Все ›</button>
         </div>
@@ -297,8 +314,8 @@
             </div>
             <div class="fgrid">
               <div class="fld" data-kinds="bambu creality klipper mks"><label for="prnLabel">Название</label><input type="text" id="prnLabel" /></div>
-              <div class="fld" data-kinds="bambu"><label for="prnModelBambu">Модель</label><select id="prnModelBambu"><option value="X1">X1</option><option value="X1C">X1 Carbon</option><option value="X1E">X1E</option><option value="P1P">P1P</option><option value="P1S">P1S</option><option value="P2S">P2S</option><option value="A1">A1</option><option value="A1MINI">A1 mini</option><option value="H2D">H2D</option><option value="H2S">H2S</option></select></div>
-              <div class="fld" data-kinds="creality"><label for="prnModelCreality">Модель</label><select id="prnModelCreality"><option value="k1max">K1 Max</option><option value="k1c">K1C</option><option value="ender5max">Ender-5 Max</option></select></div>
+              <div class="fld" data-kinds="bambu"><label for="prnModelBambu">Модель</label><select id="prnModelBambu"><option value="X1">X1</option><option value="X1C">X1 Carbon</option><option value="X1E">X1E</option><option value="P1P">P1P</option><option value="P1S">P1S</option><option value="P2S">P2S</option><option value="A1">A1</option><option value="A1MINI">A1 mini</option><option value="A2L">A2L</option><option value="H2C">H2C</option><option value="H2D">H2D</option><option value="H2DPRO">H2D Pro</option><option value="X2D">X2D</option><option value="H2S">H2S</option></select></div>
+              <div class="fld" data-kinds="creality"><label for="prnModelCreality">Модель</label><input type="text" id="prnModelCreality" list="prnCrealityModels" placeholder="Выберите или введите модель" /><datalist id="prnCrealityModels"></datalist></div>
               <div class="fld" data-kinds="klipper mks"><label for="prnModelText">Модель (не обязательно)</label><input type="text" id="prnModelText" /></div>
               <div class="fld" data-kinds="bambu creality klipper mks"><label for="prnHost">IP-адрес</label><input type="text" id="prnHost" class="mono" /></div>
               <div class="fld" data-kinds="klipper mks"><label for="prnPort">Порт</label><input type="number" id="prnPort" class="mono" min="1" max="65535" /></div>
@@ -313,6 +330,7 @@
             </div>
           </div>
         </section>
+        <section class="section-panel" id="filePool"></section>
       </div>
       <div class="adm-pane" data-asub-panel="auto" hidden>
         <!-- «Автоматика» (IA §8): the auto-dry rules and the blocks («По блокам» without the status:
@@ -497,6 +515,26 @@
         </section>
       </div>
       <div class="adm-pane" data-asub-panel="system" hidden>
+        <div class="srv-load-err" id="srvLoadError" role="alert" hidden><span>Настройки не загрузились — переключатели ниже не показывают, что сохранено на сервере.</span> <button type="button" class="ghost-btn" id="srvRetryBtn">Повторить</button></div>
+        <section class="section-panel" id="generalSection">
+          <div class="panel-head">
+            <div class="panel-title-group">
+              <h3>Общие</h3>
+              <p>Настройки панели. Сохраняются на лету.</p>
+            </div>
+          </div>
+          <div class="setting-row">
+            <div class="setting-text">
+              <strong>Скрывать заводские образцы</strong>
+              <span>Демо-модели из прошивки (3DBenchy, Vase и т. п.) не показываются в «Файлах на принтере» и в общих файлах; синхронизация их не копирует никогда. <span class="saved-flash" id="genSavedFlash"><span class="sf-dot"></span>Сохранено</span></span>
+            </div>
+            <label class="toggle-switch">
+              <input type="checkbox" id="hideSamplesToggle" aria-label="Скрывать заводские образцы" />
+              <span class="toggle-slider"></span>
+            </label>
+          </div>
+          <div class="settings-error" id="genError" style="display:none"></div>
+        </section>
         <section class="section-panel adm-tg" id="tgSection">
           <div class="panel-head">
             <div class="panel-title-group">
@@ -633,6 +671,7 @@
       <symbol id="i-stop" viewBox="0 0 24 24"><path d="M5 5m0 2a2 2 0 0 1 2 -2h10a2 2 0 0 1 2 2v10a2 2 0 0 1 -2 2h-10a2 2 0 0 1 -2 -2z"/></symbol>
       <symbol id="i-snow" viewBox="0 0 24 24"><path d="M12 3v18"/><path d="M4.2 7.5l15.6 9"/><path d="M4.2 16.5l15.6 -9"/><path d="M9.5 4.5l2.5 2l2.5 -2"/><path d="M9.5 19.5l2.5 -2l2.5 2"/></symbol>
       <symbol id="i-bed-down" viewBox="0 0 24 24"><path d="M4 6h16"/><path d="M12 9v10"/><path d="M8.5 15.5l3.5 3.5l3.5 -3.5"/></symbol>
+      <symbol id="i-move" viewBox="0 0 24 24"><path d="M12 3v18"/><path d="M3 12h18"/><path d="M9 6l3 -3l3 3"/><path d="M9 18l3 3l3 -3"/><path d="M6 9l-3 3l3 3"/><path d="M18 9l3 3l-3 3"/></symbol>
       <symbol id="i-dots" viewBox="0 0 24 24"><path stroke-width="3.2" d="M5 12h.01M12 12h.01M19 12h.01"/></symbol>
       <symbol id="i-lock" viewBox="0 0 24 24"><path d="M5 13a2 2 0 0 1 2 -2h10a2 2 0 0 1 2 2v6a2 2 0 0 1 -2 2h-10a2 2 0 0 1 -2 -2v-6z"/><path d="M11 16a1 1 0 1 0 2 0a1 1 0 0 0 -2 0"/><path d="M8 11v-4a4 4 0 1 1 8 0v4"/></symbol>
       <!-- printer notifications (badge, strip, popover, bell, «Сбросить ошибки») -->
@@ -738,7 +777,11 @@
       </div>
     </aside>
     <script src="/static/theme.js?v=8"></script>
-  <script src="/static/app.js?v=126"></script>
+  <script src="/static/preview.js?v=14"></script>
+  <script src="/static/printer-files.js?v=7"></script>
+  <script src="/static/printer-service.js?v=2"></script>
+  <script src="/static/file-pool.js?v=6"></script>
+  <script src="/static/app.js?v=177"></script>
 
   <button type="button" class="scroll-top-btn" id="scrollTopBtn" aria-label="Наверх" data-tip="Наверх">↑</button>
 </body>

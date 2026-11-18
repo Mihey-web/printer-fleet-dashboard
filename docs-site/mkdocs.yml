@@ -90,6 +90,7 @@ plugins:
             AMS screen: Экран «AMS»
             History screen: Экран «История»
             Admin screen: Экран «Админ»
+            Shared files by model: Общие файлы по моделям
             Phone and app (PWA): Телефон и приложение (PWA)
             Telegram and proxy: Telegram и прокси
             Users and security: Пользователи и безопасность
@@ -112,6 +113,7 @@ nav:
       - AMS screen: interface/ams.md
       - History screen: interface/history.md
       - Admin screen: interface/admin.md
+      - Shared files by model: interface/shared-files.md
       - Phone and app (PWA): interface/mobile-pwa.md
   - Telegram and proxy: telegram.md
   - Users and security: security.md

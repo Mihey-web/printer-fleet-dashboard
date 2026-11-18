@@ -272,7 +272,7 @@ def test_bambu_ams_real_unit_extracted():
     assert len(s.ams["units"]) == 1  # tray-less unit dropped
     unit = s.ams["units"][0]
     assert unit["index"] == 0
-    assert unit["humidity"] == 2
+    assert unit["humidity"] == 4      # level 1 dry .. 5 wet: the printer's index 2 (5 = driest)
     assert unit["humidity_pct"] == 24
     assert unit["dry_time"] is None   # 0 = not drying
     assert unit["temp"] == 39.9
@@ -289,7 +289,7 @@ def test_bambu_ams_humidity_pct_absent_is_none():
     ams.data[0].humidity = 0
     s = normalize_bambu("bambu-2", "P2S", _bambu_result_with_ams(ams))
     assert s.ams["units"][0]["humidity_pct"] is None
-    assert s.ams["units"][0]["humidity"] == 2
+    assert s.ams["units"][0]["humidity"] == 4
 
 
 def test_bambu_ams_drying_time_reported():
@@ -321,12 +321,13 @@ def test_bambu_ams_attribute_missing_is_none():
 
 
 def test_bambu_ams_unknown_material_sentinel():
-    # The vendored lib marks a loaded spool with no material assigned as "?".
+    # The vendored lib marks a loaded spool with no material assigned as "?": the slot is
+    # taken (a spool without RFID), colour or not (QA 17.11: it read «пусто», load refused).
     no_colour = SimpleNamespace(color="00000000", type="?", name="?", remain=-1)
     coloured = SimpleNamespace(color="FF0000FF", type="?", name="?", remain=-1)
     ams = SimpleNamespace(data={0: _unit([no_colour, coloured])}, active_ams_index=0, active_tray_index=1)
     slots = normalize_bambu("bambu-2", "P2S", _bambu_result_with_ams(ams)).ams["units"][0]["slots"]
-    assert slots[0] == {"type": None, "color": None, "name": None, "remain_pct": -1, "empty": True,
+    assert slots[0] == {"type": None, "color": None, "name": None, "remain_pct": -1, "empty": False,
                         "nozzle_temp": None}
     assert slots[1] == {"type": None, "color": "FF0000", "name": None, "remain_pct": -1, "empty": False,
                         "nozzle_temp": None}

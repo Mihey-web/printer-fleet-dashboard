@@ -294,7 +294,7 @@ def test_send_creality_rejects_bambu_only_action(cmd_env, monkeypatch):
     _creality_registry(monkeypatch)
     store = _CrealityStore()
     printer_commands.set_store(store)
-    for action in ("chamber", "eject", "ams_load", "ams_unload", "dry_start", "dry_stop"):
+    for action in ("ams_load", "ams_unload", "dry_start", "dry_stop"):
         r = printer_commands.send("p1", action, {"temp": 40, "ams": 0, "slot": 0})
         assert not r["success"] and "Creality" in r["detail"]
     assert store.calls == []
@@ -1375,7 +1375,7 @@ def test_confirmed_light_is_written_into_the_libs_lights(cmd_env, monkeypatch):
     assert printer_commands.send("p1", "light_on") == CONFIRMED
     lights = device.lights
     assert (lights.chamber_light, lights.chamber_light2) == ("on", "on")
-    assert (lights.chamber_light_override, lights.chamber_light2_override) == ("on", "on")
+    assert (lights.chamber_light_override, lights.chamber_light2_override) == ("", "")
     assert normalize_bambu("p1", "H1", device, device_type="H2S").light_on is True
     # unanswered: it may not have switched anything — the lib's state is left alone
     device.lights = _lights()
@@ -1408,7 +1408,7 @@ def test_lamp2_mode_is_written_only_after_its_own_reply(cmd_env, monkeypatch, la
     # bulb that is still lit after a confirmed «off» does not go unexplained
     assert printer_commands.send("p1", "light_off") == dict(
         CONFIRMED, detail="подтверждено принтером (вторая лампа: %s)" % note)
-    assert (lights.chamber_light, lights.chamber_light_override) == ("off", "off")
+    assert (lights.chamber_light, lights.chamber_light_override) == ("off", "")
     assert (lights.chamber_light2, lights.chamber_light2_override) == ("on", "")
     for _ in range(5):
         lights.print_update({"lights_report": [{"node": "chamber_light", "mode": "off"},
@@ -1657,12 +1657,14 @@ def test_print_control_without_live_state_is_left_to_the_printer(cmd_env, monkey
     assert published[0]["print"]["command"] == "resume"
 
 
-def test_object_skip_is_gone(cmd_env, monkeypatch):
+def test_object_skip_never_publishes_raw_ids(cmd_env, monkeypatch):
+    # removed 12.10 (ids typed without a map skipped the wrong parts), back 16.11 with the
+    # plate map: the old raw obj_list is refused before any I/O (tests/test_skip_objects.py)
     _bambu_registry(monkeypatch)
     published = []
     printer_commands.set_store(_Store(lambda payload: published.append(payload) or True))
-    assert printer_commands.send("p1", "skip_objects", {"obj_list": [3]}) == REFUSED("Неизвестная команда: skip_objects")
-    assert published == [] and not hasattr(printer_commands, "build_skip_objects")
+    assert printer_commands.send("p1", "skip_objects", {"obj_list": [3]}) == REFUSED(printer_commands.MSG_SKIP_NONE)
+    assert published == []
 
 
 # --- one result contract for every path of send() (shared with the auto-dry branch) ---
@@ -1798,7 +1800,7 @@ def test_caps_klipper_ready_in_any_state(state, extra, pin, light):
     d = _klipper_row(state=state, pin=pin, **extra)
     assert d["state"] == {"standby": "idle"}.get(state, state)
     caps, note = printer_commands.caps_for(d)
-    assert caps == dict(ALL_FALSE, pause=True, resume=True, stop=True, light=light)
+    assert caps == dict(ALL_FALSE, pause=True, resume=True, stop=True, light=light, motion=True)
     assert note is None
 
 
@@ -1807,7 +1809,7 @@ def test_caps_klipper_not_ready_or_offline():
     assert (caps, note) == (ALL_FALSE, "Klipper не готов")
     offline = normalize_ws_dict("klipper-1", "Ghost 6", PrinterKind.KLIPPER, {}).to_dict()
     caps, note = printer_commands.caps_for(offline)
-    assert (caps, note) == (dict(ALL_FALSE, pause=None, resume=None, stop=None, light=None), None)
+    assert (caps, note) == (dict(ALL_FALSE, pause=None, resume=None, stop=None, light=None, motion=None), None)
     caps, note = printer_commands.caps_for(dict(_klipper_row(pin="caselight"), online=False))
     assert caps["pause"] is None and caps["light"] is None
 
@@ -1828,9 +1830,9 @@ def test_caps_creality_and_mks(cmd_env, monkeypatch):
     from app.services import settings_service
 
     # Creality (27.10): light, print control, tune (temperatures / fans / speed) and
-    # cooldown in any state; eject and the CFS are not wired yet
+    # cooldown in any state, home / jog (04.11); eject and the CFS are not wired yet
     row = {"id": "creality-1", "kind": "creality", "online": True}
-    want = dict(ALL_FALSE, pause=True, resume=True, stop=True, light=True, cooldown=True, tune=True)
+    want = dict(ALL_FALSE, pause=True, resume=True, stop=True, light=True, cooldown=True, tune=True, motion=True)
     assert printer_commands.caps_for(row) == (want, None)
     assert printer_commands.caps_for(dict(row, online=False)) == (want, None)
     monkeypatch.setattr(settings_service, "get",
@@ -1976,15 +1978,16 @@ K1C_CANCEL_FRAMES = [
 
 
 def _k1c_after(frames):
-    """A live CrealityCollector (no socket: ws is a list) fed `frames` through on_message."""
+    """Replay printer telemetry through the collector with a recording sender."""
     from app.collectors.creality_collector import CrealityCollector
 
     col = CrealityCollector("K1", "host")
-    col.client.connected = True
+    col.client._client._ws = object()
+    col.client._client._ws_ready.set()
     sent = []
-    col.client.ws = SimpleNamespace(send=sent.append)
+    col.client._send = sent.append
     for f in frames:
-        col.client.on_message(None, json.dumps(f))
+        col.client._parse_report(f)
     return col, sent
 
 
@@ -1998,12 +2001,11 @@ def test_creality_cooldown_after_a_cancel(cmd_env, monkeypatch):
     assert printer_commands.live_status("c1").state == PrinterState.UNKNOWN          # 7 = busy finishing the cancel
     assert printer_commands.send("c1", "cooldown") == REFUSED(printer_commands.STATE_MSG["unknown"])
     for f in K1C_CANCEL_FRAMES[-3:]:
-        col.client.on_message(None, json.dumps(f))
+        col.client._parse_report(f)
     assert col.client.get_data()["state"] == "cancelled"
     assert printer_commands.live_status("c1").state == PrinterState.CANCELLED
     assert printer_commands.send("c1", "cooldown") == SENT
-    assert [json.loads(s) for s in sent] == [{"method": "set", "params": {"nozzleTempControl": 0}},
-                                             {"method": "set", "params": {"bedTempControl": {"num": 0, "val": 0}}}]
+    assert sent == [{"nozzleTempControl": 0}, {"bedTempControl": {"num": 0, "val": 0}}]
     msg = printer_commands.STATE_MSG
     for action, params, want in (("pause", {}, msg["pause_other"]), ("resume", {}, msg["resume"]),
                                  ("stop", {}, msg["stop"]), ("speed", {"level": 2}, msg["speed"])):
@@ -2043,12 +2045,12 @@ def test_creality_partial_send_is_sent_not_rejected(cmd_env, monkeypatch):
         if sent:
             raise OSError("socket is already closed.")
         sent.append(raw)
-    col.client.ws = SimpleNamespace(send=flaky)
+    col.client._send = flaky
     printer_commands.set_store(SimpleNamespace(get_collector=lambda pid: col, get_one=lambda pid: None))
     assert printer_commands.send("c1", "cooldown") == {
         "success": True, "status": "sent", "replied": False,
         "detail": "отправлено частично: 1 из 2 (socket is already closed.)"}
-    assert [json.loads(s)["params"] for s in sent] == [{"nozzleTempControl": 0}]
+    assert sent == [{"nozzleTempControl": 0}]
     sent.append("x")                                                  # now the first frame fails too
     assert printer_commands.send("c1", "preheat", {"nozzle": 200, "bed": 60}) == REJECTED(
         "socket is already closed.", replied=False)
@@ -2382,3 +2384,312 @@ def test_review_f11_cooldown_and_eject_wait_for_a_sent_filament_change(live, act
     assert printer_commands.send("p1", "ams_load", {"ams": 1, "slot": 2})["success"]
     assert printer_commands.send("p1", action, params) == REFUSED(printer_commands.MSG_INFLIGHT)
     assert len(store.published) == 1
+
+
+def test_lamp_lit_by_the_printer_after_a_confirmed_off_shows_lit(cmd_env, monkeypatch):
+    # P4 03.11.2026: «off» from the panel, confirmed; the P2S lit the lamp again
+    # mid-print and reported it — the card must follow, not keep «off» (the lib's
+    # override waited for an «off» report that never came).
+    from app.vendor.pybambu.models import Lights
+
+    _bambu_registry(monkeypatch, "P2S")
+    lights = Lights(client=None)
+    lights.print_update({"lights_report": [{"node": "chamber_light", "mode": "on"}]})
+    device = _fake_device("P2S", lights=lights, gcode="RUNNING")
+    printer_commands.set_store(_LampStore(device=device))
+    assert printer_commands.send("p1", "light_off") == CONFIRMED
+    assert lights.chamber_light == "off"
+    lights.print_update({})                                            # a delta without lights: still off
+    assert lights.chamber_light == "off"
+    lights.print_update({"lights_report": [{"node": "chamber_light", "mode": "on"}]})
+    assert lights.chamber_light == "on"
+    assert normalize_bambu("p1", "P4", device, device_type="P2S").light_on is True
+
+
+# --- «Домой» and the axis jog (owner, 04.11.2026: everything the printers can do) ------
+
+def test_build_home_and_move_are_bambu_studios_gcode():
+    assert printer_commands.build_home()["print"] == {"sequence_id": "0", "command": "gcode_line", "param": "G28\n"}
+    param = printer_commands.build_move("x", -10)["print"]["param"]
+    # soft limits on (M211) in the ref mode, one relative step, then back to absolute
+    assert param == ("M211 S\nM211 X1 Y1 Z1\nM1002 push_ref_mode\nG91 \nG1 X-10.0 F3000\n"
+                     "M1002 pop_ref_mode\nM211 R\n")
+    assert "G1 Z50.0 F900" in printer_commands.build_move("z", 50)["print"]["param"]
+
+
+@pytest.mark.parametrize("params", [{}, {"axis": "e", "dist": 1}, {"axis": "x", "dist": 0},
+                                    {"axis": "x", "dist": 101}, {"axis": "y", "dist": -101},
+                                    {"axis": "z", "dist": 1.5}, {"axis": "z", "dist": True}, {"axis": "z", "dist": "5"}])
+def test_bad_move_params_are_refused_before_any_io(live, params):
+    store = live(_report(gcode="IDLE", home_flag=7))
+    r = printer_commands.send("p1", "move", params)
+    assert r["status"] == "refused" and r["detail"] in (printer_commands.MSG_BAD_STEP, "Ось: X, Y или Z")
+    assert store.published == []
+
+
+@pytest.mark.parametrize("gcode", ["IDLE", "FINISH", "FAILED"])
+def test_home_and_move_sent_when_the_printer_stands(live, gcode):
+    store = live(_report(gcode=gcode, home_flag=7))
+    assert printer_commands.send("p1", "home") == CONFIRMED
+    assert printer_commands.send("p1", "move", {"axis": "y", "dist": 10}) == CONFIRMED
+    params = [p["print"]["param"] for p in store.published]
+    assert params[0] == "G28\n" and "G1 Y10.0 F3000" in params[1]
+
+
+@pytest.mark.parametrize("gcode,detail", [("RUNNING", "motion"), ("PREPARE", "motion"), ("PAUSE", "motion"),
+                                          ("", "unknown")])
+@pytest.mark.parametrize("action", ["home", "move"])
+def test_home_and_move_refused_unless_the_printer_stands(live, gcode, detail, action):
+    store = live(_report(gcode=gcode, home_flag=7))
+    assert printer_commands.send("p1", action, {"axis": "x", "dist": 1}) == REFUSED(STATE_MSG[detail])
+    assert store.published == []
+
+
+def test_move_never_waits_for_home_flag_bits(live):
+    # a real P2S / X1C mid-print reports home_flag ...110 (X «not homed»): the bits are no
+    # homing state, so the jog never refuses on them (its M211 soft limits guard it)
+    store = live(_report(gcode="IDLE", home_flag=-1066969954))
+    assert printer_commands.send("p1", "move", {"axis": "x", "dist": 10}) == CONFIRMED
+    assert printer_commands.send("p1", "move", {"axis": "z", "dist": -1}) == CONFIRMED
+    assert len(store.published) == 2
+
+
+@pytest.mark.parametrize("action,params,gcode", [
+    ("move", {"axis": "x", "dist": 50}, {"setPosition": "X50 F3000"}),
+    ("move", {"axis": "z", "dist": -1}, {"setPosition": "Z-1 F600"}),
+])
+def test_creality_move_is_the_firmwares_jog(creality, action, params, gcode):
+    # E5, 03.11: setPosition «X50» moved the head 50 mm right; G-code in gcodeCmd did nothing
+    store = creality(K1C_IDLE)
+    assert printer_commands.send("c1", action, params) == SENT
+    assert store.calls == [("set", [gcode])]
+
+
+@pytest.mark.parametrize("snapshot,want", [(K1C_PRINTING, "motion"), (K1C_PAUSED, "motion"),
+                                           (dict(K1C_IDLE, state="unknown"), "unknown")])
+def test_creality_motion_state_refusals(creality, snapshot, want):
+    store = creality(snapshot)
+    for action in ("home", "move"):
+        assert printer_commands.send("c1", action, {"axis": "x", "dist": 1}) == REFUSED(STATE_MSG[want])
+    assert store.calls == []
+
+
+class _KlipperGcodeClient(_KlipperClient):
+    def __init__(self, **kw):
+        super().__init__(**kw)
+        self.scripts = []
+
+    def run_gcode(self, script, timeout=None):
+        self.scripts.append(script)
+        return dict(self.reply or {"success": True, "replied": True, "detail": "подтверждено принтером"})
+
+
+def test_klipper_home_and_move_run_a_gcode_script(cmd_env, monkeypatch):
+    client = _klipper_env(monkeypatch, _kstatus(), _KlipperGcodeClient(snapshot=dict(
+        state="standby", progress=0, remaining_time=0, debug={"webhooks_state": "ready"})))
+    assert printer_commands.send("k1", "home") == CONFIRMED
+    assert printer_commands.send("k1", "move", {"axis": "z", "dist": 10}) == CONFIRMED
+    assert client.scripts == ["G28", "G91\nG1 Z10 F600\nG90"] and client.actions == []
+    # Klipper refuses a move of an axis not homed itself: its words reach the card
+    client.reply = {"success": False, "replied": True, "detail": "Klipper отклонил: Must home axis first"}
+    r = printer_commands.send("k1", "move", {"axis": "x", "dist": 1})
+    assert r["status"] == "rejected" and "Must home axis first" in r["detail"]
+
+
+def test_klipper_motion_refused_while_printing(cmd_env, monkeypatch):
+    client = _klipper_env(monkeypatch, _kstatus(), _KlipperGcodeClient(snapshot=dict(
+        state="printing", progress=10, remaining_time=100, debug={"webhooks_state": "ready"})))
+    assert printer_commands.send("k1", "home") == REFUSED(STATE_MSG["motion"])
+    assert client.scripts == []
+
+
+def test_caps_motion_per_kind():
+    caps, _ = printer_commands.caps_for({"kind": "creality", "id": "c1", "online": True})
+    assert caps["motion"] is True
+    caps, _ = printer_commands.caps_for({"kind": "klipper", "id": "k1", "online": True, "ctl_ready": True})
+    assert caps["motion"] is True
+    caps, _ = printer_commands.caps_for({"kind": "klipper", "id": "k1", "online": True, "ctl_ready": False})
+    assert caps["motion"] is False
+    caps, _ = printer_commands.caps_for({"kind": "mks", "id": "m1", "online": True})
+    assert caps["motion"] is False
+
+
+# --- filament push / retract at the nozzle (04.11.2026) ---------------------------------
+
+def test_build_extrude_is_bambu_studios_gcode():
+    assert printer_commands.build_extrude(-10)["print"]["param"] == "M83 \nG0 E-10.0 F900\n"
+
+
+@pytest.mark.parametrize("dist", [0, 51, -51, 1.5, True, "5", None])
+def test_bad_extrude_length_is_refused(live, dist):
+    store = live(_report(gcode="IDLE"))
+    r = printer_commands.send("p1", "extrude", {"dist": dist})
+    assert r == REFUSED(printer_commands.MSG_BAD_EXTRUDE) and store.published == []
+
+
+def test_extrude_only_with_a_hot_nozzle(live):
+    store = live(_report(gcode="IDLE"))                       # the fixture's nozzle: 25 °C
+    assert printer_commands.send("p1", "extrude", {"dist": 10}) == REFUSED(printer_commands.MSG_COLD_NOZZLE)
+    hot = _report(gcode="IDLE")
+    hot["device"]["extruder"]["info"][0]["temp"] = 215        # (target << 16) | current; target 0
+    store.feed(hot)
+    assert printer_commands.send("p1", "extrude", {"dist": 10}) == CONFIRMED
+    assert store.published[-1]["print"]["param"] == "M83 \nG0 E10.0 F900\n"
+
+
+def test_extrude_refused_while_printing(live):
+    busy = _report(gcode="RUNNING")
+    busy["device"]["extruder"]["info"][0]["temp"] = 220
+    store = live(busy)
+    assert printer_commands.send("p1", "extrude", {"dist": 5}) == REFUSED(STATE_MSG["motion"])
+    assert store.published == []
+
+
+def test_creality_and_klipper_extrude(creality, cmd_env, monkeypatch):
+    store = creality(dict(K1C_IDLE, nozzle_temp=220))
+    assert printer_commands.send("c1", "extrude", {"dist": -5}) == REFUSED(printer_commands.MSG_CREALITY_NO_EXTRUDE)
+    assert store.calls == []
+    client = _klipper_env(monkeypatch, _kstatus(), _KlipperGcodeClient(snapshot=dict(
+        state="standby", progress=0, remaining_time=0, nozzle_temp=230, debug={"webhooks_state": "ready"})))
+    assert printer_commands.send("k1", "extrude", {"dist": 20}) == CONFIRMED
+    assert client.scripts == ["M83\nG1 E20 F300"]
+
+
+# --- Creality light: confirmed by the printer's own push (04.11.2026) -------------------
+
+def test_creality_light_confirmed_once_the_printer_reports_it(creality, monkeypatch):
+    # owner: «у E5 переключение работало, а панель показывала ошибку» — every Creality
+    # light was «sent» (no reply), and «Свет всем» counts «sent» as not done
+    clock = kit.FakeClock()
+    monkeypatch.setattr(printer_commands, "_monotonic", clock)
+    store = creality(dict(K1C_IDLE, light_on=False))
+
+    def sleep(s):
+        clock.advance(s)
+        if clock() > 1.0:
+            store.snapshot["light_on"] = True        # the push lands ~1 s later
+
+    monkeypatch.setattr(printer_commands, "_sleep", sleep)
+    assert printer_commands.send("c1", "light_on") == CONFIRMED
+    assert store.calls == [("light_on", None)]
+
+
+def test_creality_light_without_the_push_stays_sent(creality, monkeypatch):
+    clock = kit.FakeClock()
+    monkeypatch.setattr(printer_commands, "_monotonic", clock)
+    monkeypatch.setattr(printer_commands, "_sleep", clock.advance)
+    store = creality(dict(K1C_IDLE, light_on=True))
+    assert printer_commands.send("c1", "light_off") == SENT      # still on after 4 s: not confirmed
+    assert clock() >= printer_commands.CREALITY_LIGHT_WAIT_S
+
+
+
+# --- AMS slot: re-read the spool tag, set the spool by hand (04.11.2026) -----------------
+
+def test_rfid_reread_is_ams_get_rfid_in_idle(live):
+    store = live(_report(snow=0x0000, gcode="IDLE"), version="01.02.00.00")
+    assert printer_commands.send("p1", "ams_rfid", {"ams": 1, "slot": 2}) == CONFIRMED
+    assert [dict(x, sequence_id="0") for x in _sent(store)] == [{"sequence_id": "0", "command": "ams_get_rfid", "ams_id": 1, "slot_id": 2}]
+
+
+def test_rfid_reread_falls_back_to_m620_on_old_firmware():
+    assert printer_commands.build_ams_rfid(1, 2, command=False)["print"]["param"] == "M620 R6\n"
+
+
+@pytest.mark.parametrize("gcode,detail", [("RUNNING", STATE_MSG["rfid"]), ("PAUSE", STATE_MSG["rfid"]),
+                                          ("", printer_commands.MSG_STATE_UNKNOWN)])
+def test_rfid_reread_only_in_idle(live, gcode, detail):
+    store = live(_report(gcode=gcode))
+    assert printer_commands.send("p1", "ams_rfid", {"ams": 0, "slot": 1}) == REFUSED(detail)
+    assert store.published == []
+
+
+@pytest.mark.parametrize("params,detail", [
+    ({"ams": 0, "slot": 2}, "Слот 3 пуст"),
+    ({"ams": 255, "slot": 0}, printer_commands.MSG_RFID_EXTERNAL),
+    ({"ams": 7, "slot": 0}, None),
+    ({"ams": 0, "slot": 9}, None),
+    ({"ams": 0}, printer_commands.MSG_PICK_SLOT),
+])
+def test_rfid_reread_needs_a_real_slot_with_a_spool(live, params, detail):
+    store = live(_report(gcode="IDLE"))
+    r = printer_commands.send("p1", "ams_rfid", params)
+    assert r["status"] == "refused" and (detail is None or r["detail"] == detail)
+    assert store.published == []
+
+
+def test_ams_set_writes_the_generic_profile(live):
+    store = live(_report(snow=0x0000, gcode="IDLE"))
+    r = printer_commands.send("p1", "ams_set", {"ams": 1, "slot": 3, "material": "PETG", "color": "ff8800",
+                                                "tmin": 220, "tmax": 260})
+    assert r == CONFIRMED
+    assert [dict(x, sequence_id="0") for x in _sent(store)] == [{"sequence_id": "0", "command": "ams_filament_setting", "ams_id": 1, "tray_id": 3,
+                             "slot_id": 3, "tray_info_idx": "GFG99", "tray_color": "FF8800FF",
+                             "nozzle_temp_min": 220, "nozzle_temp_max": 260, "tray_type": "PETG"}]
+
+
+@pytest.mark.parametrize("extra,detail", [
+    ({"material": "WOOD"}, printer_commands.MSG_SPOOL_MATERIAL),
+    ({"color": "red"}, printer_commands.MSG_SPOOL_COLOR),
+    ({"color": "FF8800FF"}, printer_commands.MSG_SPOOL_COLOR),
+    ({"tmin": 270, "tmax": 260}, printer_commands.MSG_SPOOL_TEMPS),
+    ({"tmin": 100}, printer_commands.MSG_SPOOL_TEMPS),
+    ({"tmax": 400}, printer_commands.MSG_SPOOL_TEMPS),
+])
+def test_ams_set_bad_fields_are_refused(live, extra, detail):
+    store = live(_report(gcode="IDLE"))
+    params = dict({"ams": 0, "slot": 1, "material": "PLA", "color": "FFFFFF", "tmin": 190, "tmax": 230}, **extra)
+    assert printer_commands.send("p1", "ams_set", params) == REFUSED(detail)
+    assert store.published == []
+
+
+def test_ams_set_while_printing_only_for_a_slot_that_does_not_feed(live):
+    store = live(_report(snow=0x0000, gcode="RUNNING"))      # slot 1 of AMS A feeds the print
+    params = {"material": "PLA", "color": "FFFFFF", "tmin": 190, "tmax": 230}
+    assert printer_commands.send("p1", "ams_set", dict(params, ams=0, slot=0)) == REFUSED(printer_commands.MSG_SPOOL_FEEDING)
+    assert printer_commands.send("p1", "ams_set", dict(params, ams=0, slot=1)) == CONFIRMED
+    assert len(store.published) == 1
+
+
+def test_creality_home_is_the_firmwares_autohome(creality):
+    # E5, 03.11: a G28 in gcodeCmd was ignored; {"autohome": ...} moved the head
+    store = creality(K1C_IDLE)
+    assert printer_commands.send("c1", "home") == SENT
+    assert store.calls == [("set", [{"autohome": "X Y Z"}])]
+
+
+def _with_parts(snapshot, excluded="[ ]"):
+    from app.services import creality_parts
+    objects = '[ { "name": "A_ID_0_COPY_0", "polygon": [[0, 0], [1, 0], [1, 1]] }, { "name": "B_ID_1_COPY_0" } ]'
+    return dict(snapshot, **creality_parts.Reader().absorb({"objects": objects, "excluded_objects": excluded}))
+
+
+@pytest.mark.parametrize("snapshot", [K1C_PRINTING, K1C_PAUSED])
+def test_creality_skip_is_the_printers_exclude_objects(creality, snapshot):
+    # the printer's own web page (K1C / Ender-5 Max, 16.11): excludeObjects, one name per frame
+    store = creality(_with_parts(snapshot))
+    assert printer_commands.send("c1", "skip_objects", {"objects": ["B_ID_1_COPY_0"]}) == SENT
+    assert store.calls == [("set", [{"excludeObjects": ["B_ID_1_COPY_0"]}])]
+
+
+@pytest.mark.parametrize("snapshot,params,detail", [
+    (K1C_IDLE, {"objects": ["A_ID_0_COPY_0"]}, printer_commands.STATE_MSG["pause_other"]),
+    (dict(K1C_PRINTING, state="finished", progress=100, remaining_time=0), {"objects": ["A_ID_0_COPY_0"]},
+     printer_commands.STATE_MSG["pause_other"]),
+    (K1C_PRINTING, {"objects": [5]}, "Не выбраны детали"),
+    (K1C_PRINTING, {"objects": ["A_ID_0_COPY_0", "B_ID_1_COPY_0"]}, "Пропустить все детали нельзя — для этого есть «Стоп»"),
+    (K1C_PRINTING, {"objects": ["C"]}, "Таких деталей нет в текущем задании"),
+])
+def test_creality_skip_refusals_send_nothing(creality, snapshot, params, detail):
+    store = creality(_with_parts(snapshot))
+    assert printer_commands.send("c1", "skip_objects", params) == REFUSED(detail)
+    assert store.calls == []
+
+
+def test_creality_skip_needs_the_jobs_parts_and_live_telemetry(creality):
+    store = creality(K1C_PRINTING)                                       # no reqPrintObjects reply
+    assert printer_commands.send("c1", "skip_objects", {"objects": ["A"]})["detail"].startswith(
+        "Принтер не сообщает детали задания")
+    creality({})
+    assert printer_commands.send("c1", "skip_objects", {"objects": ["A"]}) == REFUSED(printer_commands.MSG_NO_TELEMETRY)
+    assert store.calls == []

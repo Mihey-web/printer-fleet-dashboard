@@ -46,7 +46,7 @@ def _node(src: str):
 
 
 def _lib() -> str:
-    src = "\n".join(_function(n) for n in ("safeText", "icon", "amsUnitName", "amsFmtMin", "hasTelemetry", "isOffline"))
+    src = "\n".join(_function(n) for n in ("safeText", "icon", "amsUnitName", "amsFmtMin", "timeFmt", "hasTelemetry", "isOffline"))
     return src + "\n" + _block("ams-ui") + "\n" + _block("ctl-ui")
 
 
@@ -63,7 +63,7 @@ def test_block_is_pure():
 
 # --- the card's control row --------------------------------------------------------
 
-CAP_KEYS = ("light", "pause", "resume", "stop", "cooldown", "eject", "tune", "ams")
+CAP_KEYS = ("light", "pause", "resume", "stop", "cooldown", "eject", "tune", "ams", "motion")
 ALL_CAPS = dict.fromkeys(CAP_KEYS, True)
 NO_CAPS = dict.fromkeys(CAP_KEYS, False)
 ADMIN = {"admin": True, "offline": False, "now": 1000}
@@ -105,15 +105,14 @@ def test_no_row_for_viewers_or_offline_cards():
     assert row(_p(), opts={"admin": True, "offline": True, "now": 0}) == ""
 
 
-def test_bambu_printing_has_five_buttons():
-    # IA §5 (plan step 5, deliberately changed from seven): 💡 ⏸/▶ ■ ❄ ⤓ — no 🧵 (the AMS chip opens
-    # the AMS popover) and no ⋯ (the card's one ⋯ is in its head, test_one_more_in_the_head_of_every_card)
+def test_bambu_printing_has_three_buttons():
+    # owner, 04.11: the row follows the printer — mid-print 💡 ⏸ ■ only (❄ and ⤓ were grey
+    # on every printing card); no 🧵 (the AMS chip) and no ⋯ (the card's head)
     html = row(_p())
     b = buttons(html)
-    assert [x[0] for x in b] == ["light", "pp", "stop", "cool", "eject"]
-    assert [x[1] for x in b] == ["light", "pause", "stop", "cool", "eject"]
-    assert [x[4] for x in b] == [False, False, False, True, True]
-    assert b[3][3] == MSG["cooldown"] and b[4][3] == MSG["eject"]
+    assert [x[0] for x in b] == ["light", "pp", "stop"]
+    assert [x[1] for x in b] == ["light", "pause", "stop"]
+    assert [x[4] for x in b] == [False, False, False]
     assert b[0][2] == ["lit"] and b[0][3] == "Свет горит — выключить"
     assert b[1][3] == "Пауза" and b[2][2] == ["danger"] and b[2][3] == "Остановить печать"
     assert 'data-cmd="ams"' not in html and 'data-cmd="more"' not in html
@@ -122,18 +121,19 @@ def test_bambu_printing_has_five_buttons():
 
 
 def test_paused_finished_and_idle_states():
-    b = buttons(row(_p(state="paused")))
-    assert (b[1][1], b[1][3], b[1][4]) == ("resume", "Продолжить печать", False)
-    assert b[3][4] is False and (b[4][4], b[4][3]) == (True, MSG["eject"])
-    b = buttons(row(_p(state="finished")))
-    assert (b[1][4], b[1][3]) == (True, MSG["pause_finished"]) and (b[2][4], b[2][3]) == (True, MSG["stop"])
-    assert b[3][4] is False and b[4][4] is False
+    b = buttons(row(_p(state="paused")))                     # a pause: resume, stop and cool (it asks first)
+    assert [x[0] for x in b] == ["light", "pp", "stop", "cool"]
+    assert (b[1][1], b[1][3], b[1][4]) == ("resume", "Продолжить печать", False) and b[3][4] is False
+    for state in ("finished", "idle", "error", "cancelled"):  # standing: cool, eject, motion
+        b = buttons(row(_p(state=state)))
+        assert [x[0] for x in b] == ["light", "cool", "eject", "motion"], state
+        assert [x[4] for x in b] == [False, False, False, False], state
     b = buttons(row(_p(state="idle", chamber_ctl=True)))
-    assert (b[1][3], b[3][3]) == (MSG["pause_other"], "Остудить всё: сопло, стол, камера")
-    assert buttons(row(_p(state="idle")))[3][3] == "Остудить всё: сопло и стол"
-    assert buttons(row(_p(state="error")))[1][3] == MSG["pause_error"]
+    assert b[1][3] == "Остудить всё: сопло, стол, камера"
+    assert buttons(row(_p(state="idle")))[1][3] == "Остудить всё: сопло и стол"
+    assert buttons(row(_p(state="idle")))[3][3] == "Перемещение, «Домой», филамент"
     b = buttons(row(_p(state="idle", filament_change={"action": "load", "step": "heat"})))
-    assert b[3][3] == b[4][3] == "Идёт смена филамента — дождитесь окончания"
+    assert b[1][3] == b[2][3] == "Идёт смена филамента — дождитесь окончания"
 
 
 @pytest.mark.parametrize("light,cls,tip", [(True, ["lit"], "Свет горит — выключить"),
@@ -146,9 +146,9 @@ def test_light_button(light, cls, tip):
 
 def test_eject_guard_disables_the_button_until_it_lapses():
     ui = {"ejectUntil": 1500}
-    b = buttons(row(_p(state="idle"), ui, dict(ADMIN, now=1000)))[4]
-    assert (b[4], b[3]) == (True, EJECT_WAIT)
-    assert buttons(row(_p(state="idle"), ui, dict(ADMIN, now=1600)))[4][4] is False
+    b = buttons(row(_p(state="idle"), ui, dict(ADMIN, now=1000)))[2]
+    assert b[0] == "eject" and (b[4], b[3]) == (True, EJECT_WAIT)
+    assert buttons(row(_p(state="idle"), ui, dict(ADMIN, now=1600)))[2][4] is False
 
 
 EXT_CHIP = ('<span class="pc-chip pc-ext pc-editable" data-edit="ext" data-tip="Внешняя катушка: выгрузка">'
@@ -172,7 +172,7 @@ def test_external_spool_chip_without_an_ams():
     assert run("extSpoolChip(%s, true)" % json.dumps(_p())) == ""                                  # an AMS: its own chip
     card = _decl("renderPrinterCard")
     assert "var canAms = isAdmin() && !offlineFlag && caps.ams === true && !p.grace_period_active;" in card
-    assert "var sub = amsChip(p, canAms, true) || extSpoolChip(p, canAms);" in card
+    assert "var sub = cfsChip(p) || amsChip(p, canAms, true, amsZonesNow()) || extSpoolChip(p, canAms);" in card
     assert "${sub ? '<div class=\"pc-subrow\">' + sub + '</div>' : \"\"}" in card      # no empty row
     assert "printer-meta" not in card and "printer-meta" not in CSS        # «BAMBU · X1C»: the model is in the head
     ctl = JS[JS.index("(function initPrinterControls() {"):JS.index("// --- Printer notifications")]
@@ -198,15 +198,18 @@ def test_creality_and_klipper_rows():
     assert [x[0] for x in buttons(row(_p(kind="creality", caps=creality, ams=None)))] == ["pp", "stop"]
     listed = dict(creality, light=True)
     assert [x[0] for x in buttons(row(_p(kind="creality", caps=listed, ams=None)))] == ["light", "pp", "stop"]
-    klipper = dict(NO_CAPS, pause=True, resume=True, stop=True, light=True)
-    for state, pp in (("idle", "pause"), ("paused", "resume"), ("printing", "pause")):
+    klipper = dict(NO_CAPS, pause=True, resume=True, stop=True, light=True, motion=True)
+    for state, want in (("idle", [("light", "light"), ("motion", "motion")]),
+                        ("paused", [("light", "light"), ("pp", "resume"), ("stop", "stop")]),
+                        ("printing", [("light", "light"), ("pp", "pause"), ("stop", "stop")])):
         b = buttons(row(_p(kind="klipper", caps=klipper, state=state, ams=None)))
-        assert [(x[0], x[1]) for x in b] == [("light", "light"), ("pp", pp), ("stop", "stop")]
+        assert [(x[0], x[1]) for x in b] == want, state
 
 
 def test_grace_disables_every_button():
-    b = buttons(row(_p(grace_period_active=True)))
-    assert len(b) == 5 and all(x[4] and x[3] == GRACE for x in b)
+    for state, n in (("printing", 3), ("idle", 4)):
+        b = buttons(row(_p(grace_period_active=True, state=state)))
+        assert len(b) == n and all(x[4] and x[3] == GRACE for x in b), state
 
 
 def test_busy_result_and_open_popover_classes():
@@ -298,7 +301,7 @@ def test_menu_repeats_nothing_from_the_card():
         viewer = menu(p)
         assert [m for m, _d in _ITEM.findall(viewer)] == ["jobs", "chrono"] and "pm-sep" not in viewer
         html = run("ctlMenuHtml(%s, null, 1000, {admin: true})" % json.dumps(p))
-        assert [m for m, _d in _ITEM.findall(html)] == ["maint-open", "jobs", "chrono", "params"]
+        assert [m for m, _d in _ITEM.findall(html)] == ["maint-open", "jobs", "chrono", "files", "params"]
         assert html.count("pm-sep") == 1
         for gone in ("Остудить", "Опустить стол", "Скорость", "data-speed"):
             assert gone not in html and gone not in viewer, gone
@@ -312,8 +315,24 @@ def test_menu_links():
     assert html.endswith('<div class="pm-sep"></div>'
                          '<button type="button" class="pm-item" data-menu="jobs">%s<span class="lbl">Печати принтера ›</span></button>'
                          '<button type="button" class="pm-item" data-menu="chrono">%s<span class="lbl">Хронология принтера ›</span></button>'
+                         '<button type="button" class="pm-item" data-menu="files">%s<span class="lbl">Файлы на принтере ›'
+                         '<span class="sub">список и запуск печати</span></span></button>'
                          '<button type="button" class="pm-item" data-menu="params">%s<span class="lbl">Параметры принтера ›'
-                         '<span class="sub">Админ → Парк, откроется форма</span></span></button>' % (ic("file"), ic("clock"), ic("tool")))
+                         '<span class="sub">Админ → Парк, откроется форма</span></span></button>'
+                         % (ic("file"), ic("clock"), ic("file"), ic("tool")))
+    # «Файлы на принтере ›»: admins, a live Bambu / Creality card (printer-files.js); never offline or Klipper
+    for p, opts in ((_p(), {"admin": False}), (_p(kind="klipper"), {"admin": True}),
+                    (_p(), {"admin": True, "offline": True})):
+        assert 'data-menu="files"' not in run("ctlMenuHtml(%s, null, 1000, %s)" % (json.dumps(p), json.dumps(opts)))
+    assert 'data-menu="files"' in run("ctlMenuHtml(%s, null, 1000, {admin: true})" % json.dumps(_p(kind="creality")))
+    # «Сервис ›»: admins, a live Creality with Klipper's API only (printer-service.js)
+    k2 = _p(kind="creality", klipper_api=True)
+    assert 'data-menu="service"' in run("ctlMenuHtml(%s, null, 1000, {admin: true})" % json.dumps(k2))
+    for p, opts in ((k2, {"admin": False}), (k2, {"admin": True, "offline": True}),
+                    (_p(kind="creality"), {"admin": True}), (_p(kind="klipper", klipper_api=True), {"admin": True})):
+        assert 'data-menu="service"' not in run("ctlMenuHtml(%s, null, 1000, %s)" % (json.dumps(p), json.dumps(opts)))
+    assert ('else if (what === "service" && isAdmin() && window.ForgeService) window.ForgeService.open(p, apiFetch);'
+            in _decl("onMenuClick"))
     sprite = set(re.findall(r'<symbol id="i-([\w-]+)"', HTML))
     assert {"file", "clock", "tool", "dots"} <= sprite
     # the links: the printer's stable id (IA §10) in the one head of «История», the period kept (plan
@@ -321,6 +340,7 @@ def test_menu_links():
     click = _decl("onMenuClick")
     assert 'if (what === "jobs" || what === "chrono") historyOpenFor(what, p);' in click
     assert 'else if (what === "params") adminOpenPrinter(p);' in click
+    assert 'else if (what === "files" && isAdmin() && window.ForgeFiles) window.ForgeFiles.open(p, apiFetch);' in click
     hist = _decl("historyOpenFor")
     for line in ("printer: String(p.id) });", "period: histFilter.period, from: histFilter.from, to: histFilter.to,",
                  "histRenderHead();", 'setHistorySub(what === "jobs" ? "jobs" : "chrono");', 'setActiveView("history");'):
@@ -566,8 +586,8 @@ def test_chip_rows_never_leave_a_lone_chip():
 BAMBU_OK = dict(ALL_CAPS)
 BAMBU_BLOCKED = dict(NO_CAPS, light=True)
 # = printer_commands.caps_for of a Creality (27.10): light, print control, tune, cooldown
-CREALITY = dict(NO_CAPS, pause=True, resume=True, stop=True, light=True, tune=True, cooldown=True)
-KLIPPER = dict(NO_CAPS, pause=True, resume=True, stop=True, light=True)
+CREALITY = dict(NO_CAPS, pause=True, resume=True, stop=True, light=True, tune=True, cooldown=True, motion=True)
+KLIPPER = dict(NO_CAPS, pause=True, resume=True, stop=True, light=True, motion=True)
 
 
 def _farm():
@@ -709,6 +729,10 @@ def test_the_model_is_always_in_the_head():
              ({"label": "K2", "device_type": "k1max"}, "K1 Max"), ({"label": "Ghost 6", "device_type": "ghost6"}, ""),
              ({"label": "Varan", "device_type": "Varan"}, ""), ({"label": "Reborn 2", "device_type": "reborn2"}, ""),
              ({"label": "X", "device_type": None}, ""), ({"label": "X", "device_type": "  "}, "")]
+    # the Creality names come from the server's one table, as /api/printers adds them (model_name)
+    from app.services import creality_models
+    for c, _w in cases:
+        c["model_name"] = creality_models.display_name(c["device_type"])
     assert run("%s.map(cardModelText)" % json.dumps([c for c, _w in cases])) == [w for _c, w in cases]
     card = _decl("renderPrinterCard")
     assert "var model = cardModelText(p);" in card
@@ -734,7 +758,11 @@ def test_the_head_never_runs_past_the_card():
     # first, then «…»), never the pills; narrow cards still compact the pills (Wi-Fi as its icon, hidden
     # next to ⚠ / ⓘ, a narrower ⋯)
     assert re.search(r"(?m)^    \.pc-toprow \{ flex-wrap: nowrap; \}$", CSS)
-    assert not re.search(r"\.pc-toprow[^{,]*\{[^}]*flex-wrap: wrap", CSS)
+    # QA 17.11 (deliberately changed): a name that does not fit beside the pills takes its own line
+    # only where that moves nothing — one column, or a card without an AMS row (the head is the
+    # picture's 64 px either way): cardNameFit sets data-wrap, nothing else wraps the head
+    assert [m.group(0) for m in re.finditer(r"\.pc-toprow[^{,]*\{[^}]*flex-wrap: wrap", CSS)] == \
+        [".pc-toprow[data-wrap] { flex-wrap: wrap"]
     assert "flex: 0 1 auto" in _rule(".pc-toprow > .printer-name")
     assert "margin-left: auto" in _rule(".pc-toprow > .pc-toprow-right")
     q = re.search(r"@container pcard \(max-width: 320px\) \{(.*?)\n    \}", CSS, re.S).group(1)
@@ -793,7 +821,7 @@ def menu_opts(p, opts, ui=None, now=1000):
 def test_menu_maintenance_section_for_admins_only():
     idle = _p(state="idle")
     html = menu_opts(idle, {"admin": True, "offline": False})
-    assert [m for m, _d in _ITEM.findall(html)] == ["maint-open", "jobs", "chrono", "params"]
+    assert [m for m, _d in _ITEM.findall(html)] == ["maint-open", "jobs", "chrono", "files", "params"]
     assert html.index('data-menu="maint-open"') < html.index("pm-sep") < html.index('data-menu="jobs"')
     assert ('<span class="lbl">На обслуживание…<span class="sub">убрать из сводки, уведомлений и групповых команд</span>'
             '</span></button>') in html
@@ -1306,19 +1334,18 @@ def _creality_row(monkeypatch, state="idle", disabled=(), **data):
 
 def test_creality_row_from_the_server_caps(monkeypatch):
     p = _creality_row(monkeypatch)
-    assert p["caps"] == CREALITY
-    b = buttons(row(p))
-    assert [(x[0], x[1]) for x in b] == [("light", "light"), ("pp", "pause"), ("stop", "stop"), ("cool", "cool")]
-    assert b[0][3] == "Свет выключен — включить" and b[3][3] == "Остудить всё: сопло и стол" and b[3][4] is False
+    assert p["caps"] == dict(CREALITY, eject=True)
+    b = buttons(row(p))                                       # stationary K1C
+    assert [(x[0], x[1]) for x in b] == [("light", "light"), ("cool", "cool"), ("eject", "eject"), ("motion", "motion")]
+    assert b[0][3] == "Свет выключен — включить" and b[1][3] == "Остудить всё: сопло и стол" and b[1][4] is False
     b = buttons(row(_creality_row(monkeypatch, "printing", light_on=True)))
     assert (b[0][2], b[0][3]) == (["lit"], "Свет горит — выключить")
-    assert (b[3][3], b[3][4]) == (MSG["cooldown"], True)                  # no cooling mid-print, as Bambu
+    assert [x[0] for x in b] == ["light", "pp", "stop"]      # no cooling mid-print: no button at all
     b = buttons(row(_creality_row(monkeypatch, "paused")))
-    assert (b[1][1], b[3][4]) == ("resume", False)                        # cool on a pause: the card asks first
+    assert (b[1][1], b[3][0], b[3][4]) == ("resume", "cool", False)   # cool on a pause: the card asks first
     # a model without a lamp (printer_light_disabled): no light button, the rest stays
     b = buttons(row(_creality_row(monkeypatch, disabled=["c-1"])))
-    assert [x[0] for x in b] == ["pp", "stop", "cool"]
-    assert "eject" not in [x[0] for x in b] and "ams" not in [x[0] for x in b]
+    assert [x[0] for x in b] == ["cool", "eject", "motion"]
 
 
 def test_creality_chips_are_editable(monkeypatch):
@@ -1494,12 +1521,16 @@ def test_a_decision_always_rises_the_rest_by_name():
            {"id": "noeta", "label": "A1", "state": "printing", "online": True, "eta_seconds": None},
            {"id": "paused", "label": "B1", "state": "paused", "online": True, "eta_seconds": 300},
            {"id": "off", "label": "C1", "state": "offline", "online": False, "eta_seconds": 100},
-           {"id": "pause", "label": "Z9", "state": "paused", "online": True, "notifications": n("pause")}]
+           {"id": "pause", "label": "Z9", "state": "paused", "online": True, "notifications": n("pause")},
+           {"id": "done", "label": "Y1", "state": "finished", "online": True, "eta_seconds": 0},
+           {"id": "done2", "label": "D1", "state": "finished", "online": True},
+           {"id": "doneoff", "label": "D2", "state": "finished", "online": False}]
+    # the finished ones (ready to unload) right after the decisions, not sunk under the prints (03.11)
     order = _states_js("sortPrinters(%s).map(function (p) { return p.id; })" % json.dumps(ps2),
                        setup="currentSort = 'eta';")
-    assert order == ["pause", "p10", "p2", "noeta", "paused", "off"]
+    assert order == ["pause", "done2", "done", "p10", "p2", "noeta", "paused", "off", "doneoff"]
     order = _states_js("sortPrinters(%s).map(function (p) { return p.id; })" % json.dumps(ps2))
-    assert order == ["pause", "noeta", "paused", "off", "p2", "p10"]
+    assert order == ["pause", "noeta", "paused", "off", "done2", "doneoff", "p2", "p10", "done"]
     sort = _decl("sortPrinters")
     assert "alertsTop" not in JS and "alertsTopToggle" not in JS and "Проблемные сверху" not in HTML
 
@@ -1595,11 +1626,32 @@ def test_stats_and_timeline_know_maintenance():
     assert "'--warn-5'" in pattern and "'--warn-7'" in pattern
 
 
+def test_card_job_picture_stands_left_of_the_progress():
+    # owner's pick 16.11 (variant 2): the picture on the left, the grams under it; the name, the stat
+    # row and the bar beside it. Without a picture the old order: stat row, bar, the job's name line.
+    card = _decl("renderPrinterCard")
+    assert "var pv = showProgress ? cardPreviewParts(p) : null;" in card
+    with_pv = card[card.index("${showProgress && pv ?"):card.index(": showProgress ?")]
+    assert with_pv.index("${pv.thumb}") < with_pv.index('<div class="pc-pv-main">${pv.name}${statRow}${track}</div>')
+    without = card[card.index(": showProgress ?"):]
+    assert without.index("${statRow}${track}") < without.index("pc-jobrow")
+    assert "previewButton(p, false, false)" not in card
+    parts = _decl("cardPreviewParts")
+    # both halves open the job card (preview.js listens for .job-preview); the name is no extra tab stop
+    assert parts.count('class="job-preview ') == 2
+    assert "tabindex=\"-1\" aria-hidden=\"true\"" in parts
+    assert "previewData(p, false)" in parts and "safeText(d[k], \"\")" in parts
+    assert "pc-pv-grams" in parts
+    assert "ForgePreview.button(previewData(p, history), compact)" in _decl("previewButton")
+    assert ".pc-progress.pc-pv { grid-template-columns: auto minmax(0, 1fr);" in CSS
+    assert ".printer-card .pc-pv .pc-pv-thumb.preview-missing { width: auto; }" in CSS
+
+
 def test_card_menus_and_tabs_are_wired():
     card = _decl("renderPrinterCard")
     assert '${inMaint(p) ? " maint" : ""}' in card
     assert "${maintPlaqueHtml(p, isAdmin(), Date.now())}" in card
-    assert card.index("${maintPlaqueHtml(") < card.index("${showProgress ?")              # right under the header
+    assert card.index("${maintPlaqueHtml(") < card.index("${showProgress && pv ?")        # right under the header
     assert card.index('<div class="status-badge ${uiStatus}">') < card.index("${headMore}")
     assert "headMoreHtml(p, cardUi[p.id], { admin: isAdmin(), offline: offlineFlag })" in card
     # the head's ⋯ opens the menu with its options; the form is wired. No «снять» on the plaque (IA §5)
@@ -1669,3 +1721,87 @@ def test_maintenance_markup_and_styles():
     for theme in ("dark-classic", "light", "night", "cosmos", "amber", "glass"):
         block = re.search(r'html\[data-theme="%s"\] \{(.*?)\n    \}' % theme, CSS, re.S).group(1)
         assert "--warn-5:" in block and "--warn-7:" in block and "--warn-11:" in block and "--warn-soft:" in block, theme
+
+
+# --- «Перемещение и «Домой»…» (04.11.2026) ----------------------------------------------
+
+_JOG = re.compile(r'data-move="([xyz]):(-?\d+)"')
+
+
+def test_motion_button_only_with_the_cap_and_never_in_the_menu():
+    assert "motion" in [x[0] for x in buttons(row(_p(state="idle")))]
+    for cap in (False, None):
+        assert "motion" not in [x[0] for x in buttons(row(_p(state="idle", caps=dict(ALL_CAPS, motion=cap))))]
+    assert 'data-menu="motion"' not in menu_opts(_p(state="idle"), {"admin": True, "offline": False})
+
+
+def test_motion_popover_steps_and_jog():
+    html = run("motionPopHtml(%s, %s)" % (json.dumps(_p(state="idle", nozzle_temp=215)), json.dumps({"mstep": 50})))
+    assert sorted(_JOG.findall(html)) == sorted([("x", "50"), ("x", "-50"), ("y", "50"), ("y", "-50"),
+                                                 ("z", "50"), ("z", "-50")])
+    assert "data-home" in html and 'class="pc-pop-preset on" data-mstep="50"' in html
+    assert "aria-disabled" not in html
+    default = run("motionPopHtml(%s, null)" % json.dumps(_p(state="idle")))
+    assert ("x", "10") in _JOG.findall(default)                                # 10 mm unless chosen
+    assert ("x", "10") in _JOG.findall(run("motionPopHtml(%s, %s)" % (json.dumps(_p(state="idle")),
+                                                                      json.dumps({"mstep": 7}))))
+
+
+@pytest.mark.parametrize("state,want", [("printing", "motion"), ("paused", "motion"), ("unknown", "unknown")])
+def test_motion_popover_blocked_while_the_printer_works(state, want):
+    html = run("motionPopHtml(%s, null)" % json.dumps(_p(state=state)))
+    msg = run("CTL_MSG")[want]
+    assert html.count('aria-disabled="true"') == 9 and msg in html       # 6 jog buttons, «Домой», E− / E+
+
+
+def test_motion_refusal_text_matches_the_server():
+    assert run("CTL_MSG").get("motion") == printer_commands.STATE_MSG["motion"]
+    for s in ("idle", "finished"):
+        assert run("ctlStateBlock('move', %s)" % json.dumps(_p(state=s))) is None
+
+
+def test_motion_popover_filament_buttons_need_a_hot_nozzle():
+    _E = re.compile(r'data-extrude="(-?\d+)"( aria-disabled="true")?')
+    hot = run("motionPopHtml(%s, %s)" % (json.dumps(_p(state="idle", nozzle_temp=215)), json.dumps({"mstep": 10})))
+    assert _E.findall(hot) == [("-10", ""), ("10", "")] and "сопло 215°" in hot
+    cold = run("motionPopHtml(%s, null)" % json.dumps(_p(state="idle", nozzle_temp=30)))
+    assert [d for _v, d in _E.findall(cold)] == [' aria-disabled="true"'] * 2
+    assert printer_commands.MSG_COLD_NOZZLE in cold and run("CTL_MSG").get("cold") == printer_commands.MSG_COLD_NOZZLE
+    assert run("EXTRUDE_TEMP_MIN") == printer_commands.EXTRUDE_TEMP_MIN
+    busy = run("motionPopHtml(%s, null)" % json.dumps(_p(state="printing", nozzle_temp=220)))
+    assert [d for _v, d in _E.findall(busy)] == [' aria-disabled="true"'] * 2
+
+
+
+# --- «Катушки…» in the AMS popover (04.11.2026) ------------------------------------------
+
+def _ams_p(**kw):
+    units = [{"index": 0, "slots": [{"type": "PETG", "color": "FF8800", "empty": False, "nozzle_temp": [230, 260]},
+                                    {"type": None, "color": None, "empty": True, "nozzle_temp": None}]}]
+    return _p(ams={"tray_now": 0, "units": units}, **kw)
+
+
+def test_spool_materials_match_the_server():
+    js = run("SPOOL_MATERIALS")
+    assert js == {m: [v[2], v[3]] for m, v in printer_commands.SPOOL_MATERIALS.items()}
+    assert run("CTL_MSG").get("rfid") == printer_commands.STATE_MSG["rfid"]
+
+
+def test_spool_list_rfid_blocked_while_printing_and_on_an_empty_slot():
+    p = _ams_p(state="idle")
+    html = run("spoolListHtml(%s, %s)" % (json.dumps(p), json.dumps(p["ams"]["units"][0])))
+    assert 'data-rfid="0:0" data-tip' in html and 'data-rfid="0:1" aria-disabled="true"' in html
+    assert html.count("data-spool-edit=") == 2
+    p = _ams_p(state="printing")
+    html = run("spoolListHtml(%s, %s)" % (json.dumps(p), json.dumps(p["ams"]["units"][0])))
+    assert html.count('aria-disabled="true"') == 2 and printer_commands.STATE_MSG["rfid"] in html
+
+
+def test_spool_editor_starts_from_the_slot():
+    p = _ams_p(state="idle")
+    html = run("spoolEditHtml(%s, %s, 0)" % (json.dumps(p), json.dumps(p["ams"]["units"][0])))
+    assert 'class="pc-pop-preset on" data-spool-mat="PETG"' in html and 'value="#ff8800"' in html
+    assert 'data-spool="tmin" value="230"' in html and 'data-spool="tmax" value="260"' in html
+    assert 'data-spool-save="0:0"' in html
+    html = run("spoolEditHtml(%s, %s, 1)" % (json.dumps(p), json.dumps(p["ams"]["units"][0])))   # empty: PLA, white
+    assert 'data-spool-mat="PLA"' in html and 'value="#ffffff"' in html and 'data-spool="tmin" value="190"' in html

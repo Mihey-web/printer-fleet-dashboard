@@ -57,7 +57,9 @@ import threading
 import time
 from collections import Counter, defaultdict
 from dataclasses import dataclass
-from typing import Any, Callable, Dict, Iterator, List, Mapping, Optional, Tuple
+from typing import Any, Callable, Dict, Iterable, Iterator, List, Mapping, Optional, Tuple
+
+from app.services import sqlite_db
 
 logger = logging.getLogger(__name__)
 
@@ -85,7 +87,7 @@ COLUMNS = (
     "printer_id", "kind", "model", "job_name", "started_at", "start_exact", "ended_at", "end_exact",
     "last_seen", "result", "error_code", "error_text", "planned_sec", "planned_src", "actual_sec",
     "paused_sec", "pauses", "pauses_json", "offline_sec", "offline_n", "power_losses", "blips",
-    "end_progress", "layer", "total_layers", "source", "maint", "ctx",
+    "planned_filament_g", "preview_key", "project_key", "end_progress", "layer", "total_layers", "source", "maint", "ctx",
 )
 
 # --- error text parsing (spec §4.1) ---
@@ -106,7 +108,8 @@ _RX_CREALITY = re.compile(r"Ошибка Creality (-?\d+)/([^\s|]+)")
 # The reason column / notifications.top_reason: "<code>: <text>" (code without "HMS_").
 _RX_REASON = re.compile(r"^([0-9A-F]{4}(?:_[0-9A-F]{4}){1,3}):\s*(.*)$", re.S)
 # Bambu Studio names the gcode inside every .3mf like this: not a job identity.
-_RX_GENERIC_NAME = re.compile(r"(^|/)Metadata/plate_\d+\.gcode$", re.I)
+# Firmware placeholders, replaced by the real name once it is known (project_summary.generic_name).
+_RX_GENERIC_NAME = re.compile(r"(^|/)(Metadata/plate_\d+\.gcode|project_file(\.3mf)?)$", re.I)
 
 
 def _clip(text: Any) -> Optional[str]:
@@ -193,6 +196,9 @@ class Sample:
     eta: Optional[int] = None
     print_time: Optional[int] = None
     layer: Optional[int] = None
+    preview_key: Optional[str] = None
+    project_key: Optional[str] = None
+    planned_filament_g: Optional[float] = None
     total_layers: Optional[int] = None
     name: Optional[str] = None
     err_code: Optional[str] = None
@@ -247,6 +253,9 @@ def sample_from_status(status: Any, now: float, maint: bool = False) -> Sample:
         grace=bool(getattr(status, "grace_period_active", False)),
         progress=_num(status.progress_pct), eta=_int(status.eta_seconds),
         print_time=_int(status.print_time_seconds), layer=_int(status.current_layer),
+        planned_filament_g=getattr(status, "planned_filament_g", None),
+        preview_key=getattr(status, "preview_key", None),
+        project_key=getattr(status, "project_key", None),
         total_layers=_int(status.total_layers), name=clean_name(status.job_name),
         err_code=code, err_text=text, reason=reason, stage=stage,
         model=getattr(status, "device_type", None), kind=_enum(status.kind),
@@ -269,11 +278,11 @@ def sample_from_row(row: Mapping[str, Any]) -> Sample:
 
 # The printer_history columns of _history_sample(), in its argument order.
 _SAMPLE_COLS = ("recorded_at", "state", "online", "grace_period_active", "progress", "eta_sec", "print_time",
-                "layer", "total_layer", "job_name", "last_error", "reason", "device_type", "kind")
+                "layer", "total_layer", "job_name", "last_error", "reason", "device_type", "kind", "planned_filament_g")
 
 
 def _history_sample(ts: Any, state: Any, online: Any, grace: Any, progress: Any, eta: Any, print_time: Any,
-                    layer: Any, total: Any, name: Any, last_error: Any, reason: Any, model: Any, kind: Any) -> Sample:
+                    layer: Any, total: Any, name: Any, last_error: Any, reason: Any, model: Any, kind: Any, planned_filament_g: Any = None) -> Sample:
     state = str(state or "unknown")
     code, text = parse_reason(reason) if reason else (None, None)
     if code is None:
@@ -286,7 +295,7 @@ def _history_sample(ts: Any, state: Any, online: Any, grace: Any, progress: Any,
         ts=float(ts), state=state, online=True if online is None else bool(online), grace=bool(grace),
         progress=_num(progress), eta=_int(eta), print_time=_int(print_time), layer=_int(layer),
         total_layers=_int(total), name=clean_name(name), err_code=code, err_text=text, reason=reason,
-        model=model, kind=kind, maint=state == "maintenance")
+        model=model, kind=kind, maint=state == "maintenance", planned_filament_g=planned_filament_g)
 
 
 def _tuple_sampler(cols: List[str]) -> Callable[[Tuple[Any, ...]], Sample]:
@@ -364,6 +373,9 @@ class Job:
         self.end_progress: Optional[float] = None
         self.layer: Optional[int] = None
         self.total_layers: Optional[int] = None
+        self.preview_key: Optional[str] = None
+        self.project_key: Optional[str] = None
+        self.planned_filament_g: Optional[float] = None
         self.source = source
         self.maint = 0
         # working state, saved as ctx while the print is open
@@ -400,6 +412,9 @@ class Job:
             "job_name": self.job_name, "started_at": self.started_at, "start_exact": self.start_exact,
             "ended_at": self.ended_at, "end_exact": self.end_exact, "last_seen": self.last_seen,
             "result": self.result, "error_code": self.error_code, "error_text": self.error_text,
+            "planned_filament_g": self.planned_filament_g,
+            "preview_key": self.preview_key,
+            "project_key": self.project_key,
             "planned_sec": self.planned_sec, "planned_src": self.planned_src, "actual_sec": self.actual_sec,
             "paused_sec": self.paused_sec, "pauses": self.pauses,
             "pauses_json": json.dumps(self.pause_list, ensure_ascii=False, separators=(",", ":"))
@@ -546,10 +561,12 @@ def classify_terminal(job: Job, s: Sample, silent: float
         if _all_done(job):   # P2S goes FAILED without a code after the last layer
             return "finished", end, exact, None, None
         return "stopped", end, exact, None, None
+    if job.lp is not None and job.lp >= 99:   # MKS and Creality end like this, after an outage too
+        if not long_gap:
+            return "finished", s.ts, 1, None, None
+        return "finished", min(s.ts, job.last_seen + (job.le or 0)), 0, None, None
     if long_gap:
         return "lost", job.last_seen, 0, None, None
-    if job.lp is not None and job.lp >= 99:   # MKS and Creality end like this
-        return "finished", s.ts, 1, None, None
     return "stopped", s.ts, 1, None, None
 
 
@@ -565,6 +582,13 @@ def _frozen(kind: Optional[str], s: Sample) -> bool:
     print time and layers 0 (25 runs in 3 months, every one up to the next print). Not printing."""
     return (kind == "creality" and s.state == "printing" and s.eta == 0 and s.print_time == 0
             and not s.total_layers and s.progress is not None and 0 < s.progress < 99)
+
+
+def _done_echo(s: Sample) -> bool:
+    """A print's first report still showing the last print done: 100 %, nothing left. A P1S
+    does it for a second or so right after a start (14 «prints» of 0.3-17 s, 19.10-17.11, each
+    followed ~30 s later by the real one under the same name): no print starts there."""
+    return s.progress is not None and s.progress >= 99 and s.eta == 0
 
 
 def _power_loss(job: Job, base: str, code: Optional[str], text: Optional[str]
@@ -654,6 +678,7 @@ class JobMachine:
         self._newest: Optional[float] = None    # newest accepted sample (clock check)
         self._data_ts: Optional[float] = None   # last sample with a state (not offline / maintenance)
         self._data_state: Optional[str] = None
+        self._echo_start: Optional[Tuple[float, float]] = None   # (start, last echo): a start held back
 
     @classmethod
     def restore(cls, row: Mapping[str, Any], source: str = "live") -> "JobMachine":
@@ -664,6 +689,20 @@ class JobMachine:
         job = Job.from_row(row)
         m = cls(job.printer_id, job.kind, job.model, source)
         m.job = job
+        return m
+
+    @classmethod
+    def restore_closed(cls, row: Mapping[str, Any], info: Mapping[str, Any]) -> "JobMachine":
+        """A machine whose last closed print (`row`, closed as `info` says: _reopen_meta)
+        may still come back, as before the restart: a Bambu reconnect's blank idle
+        closes a print that goes on minutes or hours later (_Closed)."""
+        job = Job.from_row(row)
+        snap = job.snapshot()   # the print as it was open: its end undone
+        snap.update(result=None, ended_at=None, end_exact=None, actual_sec=None, error_code=None,
+                    error_text=None, state="printing")
+        base = info.get("base") if row.get("result") == "power_loss" else row.get("result")
+        m = cls(job.printer_id, job.kind, job.model)
+        m.last_closed = _Closed(job, snap, float(info["at"]), base, info.get("state"), bool(info.get("blank")))
         return m
 
     # -- public --
@@ -732,6 +771,17 @@ class JobMachine:
             if lc is None or not lc.reopenable() or not same_job(lc.job, s, self.seq) or not (
                     s.ts - lc.at <= JOBS_TERM_GRACE_S or lc.resumes(s)):
                 started, exact = self._start_of(s)
+                held = self._echo_start
+                if held is not None and s.ts - held[1] >= JOBS_LOST_GAP_S:
+                    held = None
+                if _done_echo(s) and (exact or held is not None):
+                    # A start just seen can't be at 100 %: the last print's numbers. The print
+                    # opens on its first real progress, from this start (a P1S: ~30 s later).
+                    self._echo_start = (held[0] if held else started, s.ts)
+                    return []
+                self._echo_start = None
+                if held is not None:
+                    started, exact = held[0], 1
                 return [self._open(s, started, exact)]
             job = lc.job
             job.restore(lc.snap)
@@ -797,6 +847,18 @@ class JobMachine:
                         changed = True
                 else:
                     self._pause_close(job, s.ts)
+        from app.services.print_material import grams
+        from app.services.job_previews import valid_key
+        if valid_key(s.preview_key) and s.preview_key != job.preview_key:
+            job.preview_key = s.preview_key
+            changed = True
+        if valid_key(s.project_key) and s.project_key != job.project_key:
+            job.project_key = s.project_key
+            changed = True
+        material = grams(s.planned_filament_g)
+        if material is not None and material != job.planned_filament_g:
+            job.planned_filament_g = material
+            changed = True
         if s.progress is not None:
             job.lp = job.end_progress = float(s.progress)
         if s.eta is not None:
@@ -853,10 +915,21 @@ class JobMachine:
 
     # -- terminal samples --
     def _terminal(self, s: Sample) -> List[Op]:
+        self._echo_start = None     # the held start never printed
         job = self.job
         if job is None:
             lc = self._closed_alive(s.ts)
             return self._amend(lc, s) if lc is not None and s.ts - lc.at <= JOBS_TERM_GRACE_S else []
+        from app.services.print_material import grams
+        material = grams(s.planned_filament_g)
+        if clean_name(s.name) == job.job_name:
+            if material is not None:
+                job.planned_filament_g = material
+            from app.services.job_previews import valid_key
+            if valid_key(s.preview_key):
+                job.preview_key = s.preview_key
+            if valid_key(s.project_key):
+                job.project_key = s.project_key
         base, end, exact, code, text = classify_terminal(job, s, max(0.0, s.ts - job.last_seen))
         if base == "finished" and s.progress is not None and s.progress > (job.end_progress or 0):
             job.end_progress = float(s.progress)
@@ -956,6 +1029,9 @@ _JOBS_TABLE = (
     ("result", "TEXT"),                    # NULL while the print is open
     ("error_code", "TEXT"),
     ("error_text", "TEXT"),
+    ("planned_filament_g", "REAL"),
+    ("preview_key", "TEXT"),
+    ("project_key", "TEXT"),
     ("planned_sec", "INTEGER"),
     ("planned_src", "TEXT"),
     ("actual_sec", "INTEGER"),
@@ -1020,6 +1096,16 @@ def prune(conn: sqlite3.Connection, now: float) -> None:
                      (now - JOBS_RETENTION_S,))
     except Exception:
         logger.error("[jobs] print_jobs retention prune failed", exc_info=True)
+        return
+    try:
+        from app.services import job_previews
+        referenced = {key for row in conn.execute("SELECT preview_key, project_key FROM print_jobs")
+                      for key in row if key}
+        removed = job_previews.prune(referenced, time.time())
+        if removed:
+            logger.info("[jobs] removed %d unreferenced previews", removed)
+    except Exception:
+        logger.error("[jobs] preview prune failed", exc_info=True)
 
 
 def read_meta(conn: sqlite3.Connection, key: str) -> Optional[str]:
@@ -1057,6 +1143,61 @@ def insert_job(conn: sqlite3.Connection, fields: Mapping[str, Any], now: float) 
                        % (", ".join(cols + ["updated_at"]), ", ".join("?" * (len(cols) + 1))),
                        vals + [now])
     return int(cur.lastrowid)
+
+
+# job_journal_meta key + printer id: its last closed print a restart must still let come back (_Closed).
+REOPEN_META = "reopen:"
+
+
+def _reopen_meta(job_id: int, lc: "_Closed") -> str:
+    return json.dumps({"id": job_id, "at": lc.at, "base": lc.base, "state": lc.state, "blank": lc.blank},
+                      separators=(",", ":"))
+
+
+def _reopen_candidates(conn: sqlite3.Connection, open_printers: Iterable[str]
+                       ) -> List[Tuple[Dict[str, Any], Dict[str, Any]]]:
+    """(row, info) of the closed prints that may still come back after a restart.
+
+    A printer's note stays only while its print is the printer's newest and still
+    closed as a print that can be reopened; any other note is dropped here.
+    """
+    out: List[Tuple[Dict[str, Any], Dict[str, Any]]] = []
+    notes = conn.execute("SELECT key, value FROM job_journal_meta WHERE key LIKE ?",
+                         (REOPEN_META + "%",)).fetchall()
+    for key, value in notes:
+        pid = key[len(REOPEN_META):]
+        row = None
+        try:
+            info = json.loads(value)
+            ok = (pid not in open_printers and isinstance(info, dict) and _int(info.get("id")) is not None
+                  and _num(info.get("at")) is not None)
+        except (TypeError, ValueError):
+            ok = False
+        if ok:
+            rows = _dicts(conn.execute(
+                "SELECT * FROM print_jobs WHERE id = ? AND printer_id = ?"
+                " AND id = (SELECT MAX(id) FROM print_jobs WHERE printer_id = ?)", (info["id"], pid, pid)))
+            row = rows[0] if rows else None
+        if row is None or (row["result"] not in _REOPENABLE and row["result"] != "power_loss"):
+            conn.execute("DELETE FROM job_journal_meta WHERE key = ?", (key,))
+            continue
+        out.append((row, info))
+    return out
+
+
+def _carry_on(job: Optional[Job], progress: Any, eta: Any, print_time: Any, layer: Any, name: Any) -> None:
+    """A restored open print takes the newest history row after its checkpoint
+    (up to JOBS_CHECKPOINT_S newer): the same print, never going back."""
+    p = _num(progress)
+    if job is None or p is None or (job.lp is not None and p < job.lp):
+        return
+    name = clean_name(name)
+    if name is not None and job.job_name is not None and name != job.job_name:
+        return
+    job.lp = job.end_progress = p
+    for attr, value in (("le", eta), ("lpt", print_time), ("layer", layer)):
+        if _int(value) is not None:
+            setattr(job, attr, _int(value))
 
 
 def _update_job(conn: sqlite3.Connection, job_id: int, fields: Mapping[str, Any], now: float) -> bool:
@@ -1132,6 +1273,16 @@ class JournalDB:
                     full[key] = job.row()
                     if rid is None or not _update_job(conn, rid, full[key], now):
                         insert(job, full[key])
+            # A print that may still come back (a reconnect's blank idle): the note lets
+            # load_open() keep that chance across a restart.
+            lc = machine.last_closed
+            if lc is not None and id(lc.job) not in dropped and any(job is lc.job for _, job in steps):
+                jid = new_ids.get(id(lc.job), lc.job.id)
+                if jid is not None:
+                    try:
+                        write_meta(conn, {REOPEN_META + pid: _reopen_meta(jid, lc)})
+                    except sqlite3.Error:
+                        logger.debug("[jobs] %s: reopen note not written", pid, exc_info=True)
 
         if not self._store.db_write(write):
             keep: List[Job] = []
@@ -1163,19 +1314,24 @@ class JournalDB:
         """
         now = self._clock() if now is None else float(now)
         rows: List[Dict[str, Any]] = []
+        latest: Dict[Any, Tuple[Any, ...]] = {}
+        closed: List[Tuple[Dict[str, Any], Dict[str, Any]]] = []
 
         def read(conn: sqlite3.Connection) -> None:
             # The partial index (init_db made it): the planner would scan the whole table.
             rows[:] = _dicts(conn.execute("SELECT * FROM print_jobs INDEXED BY idx_jobs_one_open"
                                           " WHERE result IS NULL ORDER BY id"))
             for row in rows:
-                seen = conn.execute(
-                    "SELECT MAX(recorded_at) FROM printer_history WHERE printer_id = ?"
-                    " AND recorded_at > ? AND recorded_at <= ? AND state IN ('printing', 'paused')"
-                    " AND COALESCE(grace_period_active, 0) = 0",
-                    (row["printer_id"], row["last_seen"] or row["started_at"], now)).fetchone()[0]
-                if seen is not None:
-                    row["last_seen"] = seen
+                last = conn.execute(
+                    "SELECT recorded_at, progress, eta_sec, print_time, layer, job_name FROM printer_history"
+                    " WHERE printer_id = ? AND recorded_at > ? AND recorded_at <= ?"
+                    " AND state IN ('printing', 'paused') AND COALESCE(grace_period_active, 0) = 0"
+                    " ORDER BY recorded_at DESC LIMIT 1",
+                    (row["printer_id"], row["last_seen"] or row["started_at"], now)).fetchone()
+                if last is not None:
+                    row["last_seen"] = last[0]
+                    latest[row["id"]] = last[1:]
+            closed[:] = _reopen_candidates(conn, {row["printer_id"] for row in rows})
 
         if not self._store.db_write(read):
             return {}
@@ -1183,11 +1339,18 @@ class JournalDB:
         for row in rows:
             try:
                 m = JobMachine.restore(row)
+                if row["id"] in latest:
+                    _carry_on(m.job, *latest[row["id"]])
             except Exception:
                 logger.error("[jobs] open print #%s could not be restored", row.get("id"), exc_info=True)
                 continue
             self.apply(m, m.expire(now), now)
             machines[m.printer_id] = m
+        for row, info in closed:
+            try:
+                machines[row["printer_id"]] = JobMachine.restore_closed(row, info)
+            except Exception:
+                logger.error("[jobs] closed print #%s could not be restored", row.get("id"), exc_info=True)
         return machines
 
 
@@ -1212,7 +1375,7 @@ def set_verdict(db: str, job_id: int, verdict: Optional[str], by: Optional[str],
     if not os.path.exists(db):
         return "missing"   # mode=rw below never creates the file
     at = time.time() if now is None else float(now)
-    conn = sqlite3.connect(pathlib.Path(db).absolute().as_uri() + "?mode=rw", uri=True, timeout=10)
+    conn = sqlite_db.connect(pathlib.Path(db).absolute().as_uri() + "?mode=rw", uri=True)
     try:
         if conn.execute("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'print_jobs'").fetchone() is None:
             return "missing"
@@ -1256,7 +1419,7 @@ def _db_file(store: Any) -> Optional[str]:
 def _connect_ro(path: str) -> sqlite3.Connection:
     """A read-only connection: the backfill can never write the history by mistake."""
     uri = pathlib.Path(path).absolute().as_uri() + "?mode=ro"
-    return sqlite3.connect(uri, uri=True, timeout=10)
+    return sqlite_db.connect(uri, uri=True)
 
 
 def _replay(conn: sqlite3.Connection, chunk: int, pause: float, cancel: Optional[threading.Event]
@@ -1340,7 +1503,8 @@ def _write_backfill(conn: sqlite3.Connection, jobs: List[Job], info: Dict[str, A
     - a re-run (new BACKFILL_VERSION) replaces the closed backfilled prints that
       started from the oldest history day + BACKFILL_KEEP_S on; older ones are
       beyond what the history still shows and stay. Their «Годно/Брак» verdicts
-      come back by (printer, start second);
+      and their slicer preview / job card keys (printer_history has no column
+      for them) come back by (printer, start second);
     - a rebuilt print overlapping a print that stays (live ones are never
       touched, an open one is being continued by the tracker) is not inserted.
     """
@@ -1352,6 +1516,11 @@ def _write_backfill(conn: sqlite3.Connection, jobs: List[Job], info: Dict[str, A
     verdicts = {(pid, int(round(st))): (v, by, at) for pid, st, v, by, at in conn.execute(
         "SELECT printer_id, started_at, verdict, verdict_by, verdict_at FROM print_jobs WHERE source = 'backfill'"
         " AND result IS NOT NULL AND started_at >= ? AND verdict IS NOT NULL", (keep_before,)).fetchall()}
+    from app.services.job_previews import valid_key
+    keys = {(pid, int(round(st))): (pk, jk) for pid, st, pk, jk in conn.execute(
+        "SELECT printer_id, started_at, preview_key, project_key FROM print_jobs WHERE source = 'backfill'"
+        " AND result IS NOT NULL AND started_at >= ? AND (preview_key IS NOT NULL OR project_key IS NOT NULL)",
+        (keep_before,)).fetchall()}
     replaced = conn.execute("DELETE FROM print_jobs WHERE source = 'backfill' AND result IS NOT NULL"
                             " AND started_at >= ?", (keep_before,)).rowcount
     spans: Dict[str, List[Tuple[float, float]]] = defaultdict(list)
@@ -1359,12 +1528,20 @@ def _write_backfill(conn: sqlite3.Connection, jobs: List[Job], info: Dict[str, A
         spans[pid].append(_span(st, en))
     kept = {pid: _Kept(lst) for pid, lst in spans.items()}
     results: Counter = Counter()
-    skipped = restored = 0
+    skipped = restored = previews = 0
     for job in sorted(jobs, key=lambda j: j.result is None):   # stable: closed first, then the open ones
         k = kept.get(job.printer_id)
         if k is not None and k.overlaps(*_span(job.started_at, job.ended_at)):
             skipped += 1
             continue
+        carried = keys.get((job.printer_id, int(round(job.started_at)))) if job.result is not None else None
+        if carried is not None:
+            before = (job.preview_key, job.project_key)
+            if not valid_key(job.preview_key) and valid_key(carried[0]):
+                job.preview_key = carried[0]
+            if not valid_key(job.project_key) and valid_key(carried[1]):
+                job.project_key = carried[1]
+            previews += (job.preview_key, job.project_key) != before
         fields = job.row()
         verdict = verdicts.get((job.printer_id, int(round(job.started_at)))) if job.result is not None else None
         if verdict is not None:
@@ -1380,7 +1557,7 @@ def _write_backfill(conn: sqlite3.Connection, jobs: List[Job], info: Dict[str, A
         results[job.result or "open"] += 1
     stats = {"rows": info["rows"], "late_rows": info["late_rows"], "jobs": len(jobs),
              "inserted": sum(results.values()), "skipped": skipped, "replaced": replaced,
-             "verdicts": restored, "results": dict(sorted(results.items()))}
+             "verdicts": restored, "previews": previews, "results": dict(sorted(results.items()))}
     write_meta(conn, {"backfill_version": BACKFILL_VERSION, "backfill_done_at": now,
                       "backfill_max_id": info["max_id"],
                       "backfill_stats": json.dumps(stats, sort_keys=True, separators=(",", ":"))})

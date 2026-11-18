@@ -3,8 +3,9 @@
 The panel is translated on the client, keyed by the Russian string (app/web/i18n.js).
 This script finds the Russian strings by parsing the sources, not by eye:
 
-* app/web/app.js — every string literal and every static chunk of a template
-  literal (comments and regex literals skipped);
+* app/web/app.js and the dialog modules (JS_FILES: the job card preview.js, the printer's
+  files, the file pool, «Сервис») — every string literal and every static chunk of a
+  template literal (comments and regex literals skipped);
 * app/web/i18n.js — the same (the switcher's label);
 * app/web/pwa/manifest.webmanifest — the names (served translated, app/api/i18n.py);
 * app/web/index.html, app/web/login.html — text nodes and the attributes the
@@ -33,6 +34,8 @@ WEB = ROOT / "app" / "web"
 
 CYR = re.compile(r"[А-Яа-яЁё]")
 ATTRS = ("title", "placeholder", "aria-label", "alt", "data-tip", "data-l", "content", "label")
+# the JS of app/web whose strings reach the screen (index.html loads each of them)
+JS_FILES = ("app.js", "i18n.js", "preview.js", "printer-files.js", "file-pool.js", "printer-service.js")
 
 # Server modules whose strings reach the panel's screen (API errors, stage and state
 # labels, notification texts and hints, journal reasons, command answers) or the bot.
@@ -58,6 +61,16 @@ SERVER_FILES = [
     "app/services/printer_registry.py",
     "app/services/bambu_extras.py",
     "app/services/audit_service.py",
+    "app/services/printer_files.py",
+    "app/services/file_pool.py",
+    "app/services/klipper_service.py",
+    # the job card's words (infill, supports, bed: preview.js shows them) and the plate map's note
+    "app/services/project_summary.py",
+    "app/services/creality_parts.py",
+    # Creality / Klipper command answers (CFS, light, «отправлено частично»)
+    "app/services/creality_features.py",
+    "app/clients/klipper_client.py",
+    "app/clients/creality_client.py",
     # the Telegram bot's texts (its language: settings «telegram_lang», app/services/i18n.py)
     "main.py",
     "app/services/telegram_bot_async.py",
@@ -332,7 +345,7 @@ def _py_format_parts(s):
 def collect():
     """[{file, line, text}] — every Cyrillic piece, in source order (duplicates kept)."""
     rows = []
-    for name in ("app.js", "i18n.js"):
+    for name in JS_FILES:
         for line, s in js_strings((WEB / name).read_text(encoding="utf-8")):
             for p in pieces(s):
                 rows.append({"file": "app/web/" + name, "line": line, "text": p})

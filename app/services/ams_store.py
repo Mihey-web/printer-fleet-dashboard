@@ -6,15 +6,14 @@ from threading import Lock
 from typing import List, Dict, Any
 
 from app.domain.models import PrinterStatus
+from app.services import data_dir, sqlite_db
 
 logger = logging.getLogger(__name__)
 
 # Отдельная БД под телеметрию AMS — изолирована от printer_history.db: свой
 # темп роста, своя (пока отсутствующая) ретенция, чтобы не раздувать запросы
 # истории принтеров.
-DB_PATH = os.path.join(
-    os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "ams_history.db"
-)
+DB_PATH = data_dir.AMS_DB
 
 # Retention so ams_history.db can't grow unbounded to SQLITE_FULL (where
 # record_ams would then fail silently). Shares the printer-history window.
@@ -36,7 +35,7 @@ class AmsStore:
         # Одно долгоживущее write-соединение под self._lock — как в StateStore,
         # чтобы не плодить connect/close на SD-карте Pi. check_same_thread
         # безопасно отключить: все записи сериализованы локом.
-        self._db = sqlite3.connect(DB_PATH, timeout=10, check_same_thread=False)
+        self._db = sqlite_db.connect(DB_PATH, check_same_thread=False)
         self._db.execute("PRAGMA journal_mode=WAL")
         self._db.execute("PRAGMA synchronous=NORMAL")
         self._init_db()
@@ -67,6 +66,9 @@ class AmsStore:
         # poll_loop, где его приняли бы за провал фетча принтера. Логируем и
         # идём дальше.
         ams = status.ams
+        if status.cfs:
+            from app.services.creality_features import history_units
+            ams = {"units": history_units(status.cfs)}
         if not ams or not ams.get("units"):
             return
         try:

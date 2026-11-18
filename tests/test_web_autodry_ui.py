@@ -46,7 +46,7 @@ def _node(src: str):
 
 
 def _lib() -> str:
-    src = "\n".join(_function(n) for n in ("safeText", "icon", "amsUnitName", "amsFmtMin"))
+    src = "\n".join(_function(n) for n in ("safeText", "icon", "amsUnitName", "amsFmtMin", "timeFmt"))
     return src + "\n" + _block("ams-ui") + "\n" + _block("autodry-ui")
 
 
@@ -103,7 +103,7 @@ def line(status, cfg=None, **kw):
      "23% — ниже старта 25%", None),
     ({"kind": "wait", "rest": {"reason": "holding", "last": 26, "above_since": NOW - 40 * 60,
                                "ready_at": NOW + 80 * 60}}, {"rh": 26}, "wait",
-     "ждёт · 26% держится 40\u00a0мин из 2\u00a0ч", "Ждёт", "≥25% с 11:20 · старт в 13:20", None),
+     "ждёт · 26% держится 40м из 2\u00a0ч", "Ждёт", "≥25% с 11:20 · старт в 13:20", None),
     ({"kind": "wait", "rest": {"reason": "after_dry", "ready_at": NOW + 2 * H}}, {}, "wait",
      "ждёт · покой считаем с 12:00", "Ждёт", "после сушки — 2\u00a0ч покоя до старта", None),
     ({"kind": "wait", "rest": {"reason": "no_data"}}, {}, "wait", "ждёт · мало данных о влажности", "Ждёт",
@@ -124,20 +124,20 @@ def line(status, cfg=None, **kw):
      "ждёт окна с 22:00", "Ждёт окна", "окно 22:00–08:00 (МСК)", None),
     ({"kind": "starting"}, {}, "dry", "запускаем сушку…", "Запуск", "ждём подтверждения от AMS", None),
     ({"kind": "dry", "series": 1, "origin": "auto", "temp": 65, "filament": "PETG", "remaining_min": 425}, {}, "dry",
-     "сушит · прогон 1 · ещё 7\u00a0ч 05\u00a0мин", "Сушит · прогон 1", "осталось 7:05 · 65° · PETG · 1 из 2 за сутки", None),
+     "сушит · прогон 1 · ещё 7ч\u00a05м", "Сушит · прогон 1", "осталось 7ч\u00a05м · 65° · PETG · 1 из 2 за сутки", None),
     ({"kind": "dry", "series": 1, "origin": "now", "temp": 45, "filament": "PLA", "remaining_min": 40}, {}, "dry",
-     "сушит (вручную) · ещё 40\u00a0мин", "Сушит вручную", "осталось 40\u00a0мин · 45° · PLA · в лимит не входит", None),
+     "сушит (вручную) · ещё 40м", "Сушит вручную", "осталось 40м · 45° · PLA · в лимит не входит", None),
     ({"kind": "dry", "series": 1, "origin": "manual", "temp": 45, "filament": "PLA", "remaining_min": 40}, {}, "dry",
-     "сушит (вручную) · ещё 40\u00a0мин", "Сушит вручную", "осталось 40\u00a0мин · 45° · PLA · в лимит не входит", None),
+     "сушит (вручную) · ещё 40м", "Сушит вручную", "осталось 40м · 45° · PLA · в лимит не входит", None),
     ({"kind": "foreign", "since": NOW - 2 * H, "remaining_min": 600}, {}, "foreign",
-     "чужая сушка · ещё 10\u00a0ч 00\u00a0мин — не вмешиваемся", "Чужая сушка",
-     "с 10:00 · осталось 10:00 · засчитаем как прогон", None),
+     "чужая сушка · ещё 10ч — не вмешиваемся", "Чужая сушка",
+     "с 10:00 · осталось 10ч · засчитаем как прогон", None),
     ({"kind": "fault", "reason": "overheat", "remaining_min": 300}, {}, "alert",
      "⚠ ошибка сушки AMS (перегрев) — проверьте блок", "⚠ Ошибка сушки", "перегрев · сами не останавливаем", None),
     ({"kind": "fault", "reason": "error", "remaining_min": 300}, {}, "alert",
      "⚠ ошибка сушки AMS (ошибка) — проверьте блок", "⚠ Ошибка сушки", "ошибка · сами не останавливаем", None),
     ({"kind": "fault", "reason": "stuck", "remaining_min": 30}, {}, "alert",
-     "⚠ сушка идёт дольше плана — проверьте блок", "⚠ Дольше плана", "осталось 30\u00a0мин · сами не останавливаем", None),
+     "⚠ сушка идёт дольше плана — проверьте блок", "⚠ Дольше плана", "осталось 30м · сами не останавливаем", None),
     ({"kind": "cool", "end_kind": "finish", "series": 1, "until": NOW + H, "dry_end_at": NOW}, {}, "cool",
      "остывает после прогона 1 · замер в 13:00", "Остывает", "закончилась в 12:00 · замер в 13:00, цель ≤ 20%", None),
     ({"kind": "cool", "end_kind": "foreign_end", "series": 1, "until": NOW + H, "dry_end_at": NOW}, {}, "cool",
@@ -491,7 +491,7 @@ def test_journal_row():
 
 def test_formatting():
     assert run("[adFmtHM(425), adFmtHM(40), adFmtHM(600), adFmtHM(0)]") == \
-        ["7\u00a0ч 05\u00a0мин", "40\u00a0мин", "10\u00a0ч 00\u00a0мин", "0\u00a0мин"]
+        ["7ч\u00a05м", "40м", "10ч", "0м"]
     assert run("[adPlural(1,'a','b','c'), adPlural(3,'a','b','c'), adPlural(11,'a','b','c'), adPlural(22,'a','b','c')]") == \
         ["a", "b", "c", "b"]
     assert run("[adClock(%d, %d), adClock(%d, %d)]" % (NOW, NOW, NOW + 13 * H, NOW)) == ["12:00", "13.10 01:00"]
@@ -677,13 +677,13 @@ def _text(html):
 
 def test_strip_says_what_dries_and_the_goal():
     html = run("autodryStripHtml(%s)" % json.dumps(_ad()))
-    assert _text(html) == "Автосушка: вкл · сушит 3 из 5 (1 чужая) · цель ≤\u00a05\u00a0% · пробный режим выкл"
+    assert _text(html) == "Автосушка: вкл · сушит 3 из 5 (1 чужая) · цель ≤\u00a05% · пробный режим выкл"
     assert '<b class="on">вкл</b>' in html and 'class="ams-strip-tail"' in html
     ad = _ad()
     ad["config"].update(enabled=False, dry_run=True)
     ad["units"] = ad["units"][2:3]
     html = run("autodryStripHtml(%s)" % json.dumps(ad))
-    assert _text(html) == "Автосушка: выкл · сушит 0 из 1 · цель ≤\u00a05\u00a0% · пробный режим вкл"
+    assert _text(html) == "Автосушка: выкл · сушит 0 из 1 · цель ≤\u00a05% · пробный режим вкл"
     assert 'class="ams-strip-tail keep"' in html and '<b class="warn">вкл</b>' in html   # a phone keeps it
     ad = _ad()
     ad["engine"].update(last_tick=NOW - H, clock_wait=True)
@@ -701,9 +701,9 @@ def test_zones_follow_the_goal():
     assert run("[5, 6, 15, 16].map(function (v) { return amsHumZone(v, amsZones({target_rh: 5})); })") == \
         ["ok", "warn", "warn", "bad"]
     assert _text(run("amsLegendHtml(amsZones({target_rh: 5}))")) == \
-        "сухо ≤\u00a05\u00a0% (цель автосушки)норма ≤\u00a015\u00a0%влажношла сушка"
+        "сухо ≤\u00a05% (цель автосушки)норма ≤\u00a015%влажношла сушка"
     fixed = _text(run("amsLegendHtml(amsZones(null))"))
-    assert "цель" not in fixed and fixed.startswith("сухо ≤\u00a025\u00a0%норма ≤\u00a040\u00a0%")
+    assert "цель" not in fixed and fixed.startswith("сухо ≤\u00a025%норма ≤\u00a040%")
     # the chart from 0: room over the data in steps of 5, «влажно» in sight, never over 100
     assert run("[amsHumTop([3, 7, 9], amsZones({target_rh: 5})), amsHumTop([], amsZones({target_rh: 5})),"
                " amsHumTop([31], amsZones({target_rh: 5})), amsHumTop([99], amsZones(null))]") == [20, 20, 35, 100]

@@ -52,13 +52,29 @@
 
 ### История и автоматика {#history-automation}
 
-Эти три переменные тоже есть в `.env.example`.
-
 | Переменная | По умолчанию | Что делает | Где читается |
 | --- | --- | --- | --- |
 | `HISTORY_RETENTION_DAYS` | `90` | Сколько дней хранить историю состояний (хронология, статистика), записи уведомлений принтеров и историю AMS. | [app/services/state_store.py:21](https://github.com/mihey-web/printer-fleet-dashboard/blob/313ccaec83e4a3a05e632db1127df39faeed967e/app/services/state_store.py#L21), [app/services/notification_tracker.py:37](https://github.com/mihey-web/printer-fleet-dashboard/blob/313ccaec83e4a3a05e632db1127df39faeed967e/app/services/notification_tracker.py#L37), [app/services/ams_store.py:21](https://github.com/mihey-web/printer-fleet-dashboard/blob/313ccaec83e4a3a05e632db1127df39faeed967e/app/services/ams_store.py#L21) |
 | `JOBS_RETENTION_DAYS` | `730` | Сколько дней хранить завершённые печати в журнале (не меньше 1). | [app/services/job_journal.py:939](https://github.com/mihey-web/printer-fleet-dashboard/blob/313ccaec83e4a3a05e632db1127df39faeed967e/app/services/job_journal.py#L939) |
 | `FORGE_TZ_OFFSET_MIN` | `180` | Часовой пояс фермы для окна запуска автосушки, в минутах от UTC (`180` = UTC+3, Москва). Например, `120` для UTC+2, `300` для UTC+5. | [app/services/ams_autodry_engine.py:55](https://github.com/mihey-web/printer-fleet-dashboard/blob/313ccaec83e4a3a05e632db1127df39faeed967e/app/services/ams_autodry_engine.py#L55) |
+
+### Папка данных {#data-dir}
+
+| Переменная | По умолчанию | Что делает | Где читается |
+| --- | --- | --- | --- |
+| `FORGE_DATA_DIR` | папка проекта, рядом с `main.py` | Папка с тремя базами и `data/` (см. [Где панель хранит данные](install/index.md#где-панель-хранит-данные)). Можно задать и `DATA_DIR` в `config.py`; переменная окружения важнее. Относительный путь считается от папки проекта. Смена ничего не переносит: остановите панель, перенесите файлы, запустите снова и передайте ту же папку ночному резервному копированию в `--src`. В Docker оставьте как есть. | [app/services/data_dir.py](https://github.com/mihey-web/printer-fleet-dashboard/blob/main/app/services/data_dir.py) |
+
+### Общий пул файлов {#file-pool}
+
+Файлы печати, загруженные в панель, лежат в `data/file_pool/`. Те же имена без `FORGE_` можно задать
+в `config.py`; переменная окружения важнее. Значение, которое не целое число или меньше допустимого,
+заменяется значением по умолчанию с предупреждением в журнале.
+
+| Переменная | По умолчанию | Что делает | Где читается |
+| --- | --- | --- | --- |
+| `FORGE_FILE_POOL_MAX_GB` | `8` | Сколько гигабайт занимают все загруженные файлы вместе (все модели). | [app/services/file_pool.py](https://github.com/mihey-web/printer-fleet-dashboard/blob/main/app/services/file_pool.py) |
+| `FORGE_FILE_POOL_FILE_MAX_MB` | `512` | Самый большой файл, который можно загрузить, в мегабайтах. | [app/services/file_pool.py](https://github.com/mihey-web/printer-fleet-dashboard/blob/main/app/services/file_pool.py) |
+| `FORGE_FILE_POOL_KEEP_FREE_MB` | `1024` | Сколько мегабайт оставлять свободными на диске панели (там же лежат базы): загрузка останавливается раньше, чем место кончится. `0` — без запаса. | [app/services/file_pool.py](https://github.com/mihey-web/printer-fleet-dashboard/blob/main/app/services/file_pool.py) |
 
 ## Настройки на веб-странице
 
@@ -72,11 +88,21 @@
 | Коды ошибок для автопропуска | [«Админ → Автоматика»](interface/admin.md#auto-skip-errors) |
 | Скрытые уведомления | кнопки «Скрыть» / «Вернуть» у уведомлений принтера |
 | Пользователи | [«Админ → Доступ»](security.md#users-and-roles) (хранятся в `users.db`) |
+| Скрывать заводские образцы файлов | [«Админ → Система → Общие»](interface/admin.md#general) |
 | Telegram: токен, чат, интервал, события, шаблоны | [«Админ → Система»](telegram.md) |
 | Прокси для Telegram и интервал их проверки | [«Админ → Система»](telegram.md#proxy) |
 
-Изменения Telegram и прокси применяются сразу. Изменения списка принтеров требуют **«Применить и
-перезапустить»**.
+Изменения Telegram, прокси и общих настроек применяются сразу. Изменения списка принтеров требуют
+**«Применить и перезапустить»**.
 
-Настройки в **👤 «Этот браузер»** (тема, масштаб текста, уведомления браузера) хранятся только в
-этом браузере.
+Настройки в **👤 «Этот браузер»** (язык, тема, масштаб текста, уведомления браузера) хранятся
+только в этом браузере.
+
+## Настройки без страницы {#settings-without-a-page}
+
+У одной сохранённой настройки нет переключателя на странице. Администратор меняет её через API
+настроек — `PUT /api/admin/settings` с телом в JSON; применяется без перезапуска.
+
+| Настройка | По умолчанию | Что делает |
+| --- | --- | --- |
+| `auto_light_states` | `["paused", "error", "cancelled"]` | Состояния, при переходе в которые у принтера включается свет (см. [Свет при остановке принтера](interface/printers.md#lamp-on-stop)). Можно: `paused`, `error`, `cancelled`, `finished`. `[]` — выключить. Пример тела: `{"auto_light_states": ["paused", "error"]}`. |

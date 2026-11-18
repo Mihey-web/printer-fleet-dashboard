@@ -169,7 +169,7 @@ def test_the_periods():
     periods = run("HIST_PERIODS")
     assert [(p["id"], p["label"], p["days"]) for p in periods] == [
         ("24h", "24 ч", 1), ("7d", "7 дн", 7), ("30d", "30 дн", 30), ("90d", "90 дн", 90)]
-    assert run("[HIST_DEFAULT_PERIOD, HIST_CHRONO_DAYS, HIST_SUBS]") == ["24h", 7, ["jobs", "chrono", "stats", "actions"]]
+    assert run("[HIST_DEFAULT_PERIOD, HIST_CHRONO_DAYS, HIST_SUBS]") == ["24h", 7, ["jobs", "chrono", "stats", "plastic", "actions"]]
     # the head's buttons are the periods and «Свой…», in this order
     head = HTML[HTML.index('id="histHead"'):HTML.index('data-hsub="jobs"')]
     btns = [(a["data-period"], re.sub(r"<[^>]+>", "", b)) for (t, a), b in zip(
@@ -562,7 +562,8 @@ def test_the_stats_load():
     # the shares' window: whole minutes, without the printer (histSummaryWindow; the run below)
     assert 'histFetchJson("/api/history/states-summary?fr=" + sw.fr + "&to=" + sw.to)' in load
     assert "var sw = histSummaryWindow(histFilter, now);" in load
-    assert "var q = jobsFilterQuery({ fr: w.fr, to: w.to, printer: histFilter.printer }, now, false);" in load
+    # QA 17.11 (hunt 2): «Печатей в день» cut in the browser's days (&tz=, histTzQuery)
+    assert "var q = jobsFilterQuery({ fr: w.fr, to: w.to, printer: histFilter.printer }, now, false) + histTzQuery();" in load
     # the loader says what it counts, a stale answer goes to waste, a re-open within 2 min asks nothing
     assert "els.loader.textContent = histLoadingText(histFilter);" in load
     assert load.count("gen !== histStats.gen") >= 2 and load.count("histStats.ssReq !== req") >= 3

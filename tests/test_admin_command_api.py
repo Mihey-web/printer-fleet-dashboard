@@ -52,9 +52,20 @@ def api(monkeypatch):
      {"ams": 128, "temp": 65, "hours": 12, "filament": "PETG"},
      "printer_command:dry_start:b1:ams=128,temp=65,hours=12,filament=PETG,st=confirmed"),
     ({"action": "dry_stop", "ams": 0}, {"ams": 0}, "printer_command:dry_stop:b1:ams=0,st=confirmed"),
+    # the jog (04.11): its axis and step reach send() and the audit
+    ({"action": "move", "axis": "z", "dist": -10}, {"axis": "z", "dist": -10},
+     "printer_command:move:b1:axis=z,dist=-10,st=confirmed"),
+    ({"action": "home"}, {}, "printer_command:home:b1:st=confirmed"),
+    ({"action": "extrude", "dist": -10}, {"dist": -10}, "printer_command:extrude:b1:dist=-10,st=confirmed"),
+    ({"action": "ams_rfid", "ams": 1, "slot": 2}, {"ams": 1, "slot": 2}, "printer_command:ams_rfid:b1:ams=1,slot=2,st=confirmed"),
+    ({"action": "ams_set", "ams": 0, "slot": 3, "material": "PETG", "color": "FF8800", "tmin": 220, "tmax": 260},
+     {"ams": 0, "slot": 3, "material": "PETG", "color": "FF8800", "tmin": 220, "tmax": 260},
+     "printer_command:ams_set:b1:ams=0,slot=3,material=PETG,color=FF8800,tmin=220,tmax=260,st=confirmed"),
     # other commands: no parameters in the audit line, only the outcome
     ({"action": "chamber", "temp": 50}, {"temp": 50}, "printer_command:chamber:b1:st=confirmed"),
-    # object skip is gone: obj_list is no request field any more (ignored)
+    ({"action": "skip_objects", "objects": [491, 502]}, {"objects": [491, 502]},
+     "printer_command:skip_objects:b1:objects=[491, 502],st=confirmed"),
+    # the old raw obj_list is no request field (ignored): skips go by the plate map's ids
     ({"action": "pause", "obj_list": [3, 7]}, {}, "printer_command:pause:b1:st=confirmed"),
 ])
 def test_command_fields_reach_send_and_the_audit(api, body, params, audit):
@@ -100,9 +111,20 @@ def test_unknown_action_reaches_send_and_is_refused(monkeypatch, api):
     monkeypatch.setattr(printer_commands, "send", _REAL_SEND)
     monkeypatch.setattr("app.services.printer_registry.get_printer",
                         lambda pid: {"id": pid, "kind": "bambu", "model": "P2S"})
-    r = api.client.post("/api/admin/printers/b1/command", json={"action": "skip_objects", "obj_list": [3]})
+    r = api.client.post("/api/admin/printers/b1/command", json={"action": "skip_parts", "objects": [3]})
     assert r.status_code == 400
-    assert r.json() == {"detail": "Неизвестная команда: skip_objects", "status": "refused"}
+    assert r.json() == {"detail": "Неизвестная команда: skip_parts", "status": "refused"}
+
+
+def test_skip_without_live_job_is_refused_by_the_real_send(monkeypatch, api):
+    # skip_objects is back (16.11) with the job's plate map: ids are checked against the running job
+    monkeypatch.setattr(printer_commands, "send", _REAL_SEND)
+    monkeypatch.setattr("app.services.printer_registry.get_printer",
+                        lambda pid: {"id": pid, "kind": "bambu", "model": "P2S"})
+    monkeypatch.setattr(printer_commands, "live_status", lambda pid, prn=None: None)
+    r = api.client.post("/api/admin/printers/b1/command", json={"action": "skip_objects", "objects": [3]})
+    assert r.status_code == 400
+    assert r.json() == {"detail": printer_commands.MSG_NO_TELEMETRY, "status": "refused"}
 
 
 def test_creality_command_end_to_end_is_sent_and_audited(api, monkeypatch):

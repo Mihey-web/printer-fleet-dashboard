@@ -33,17 +33,24 @@ server. You then open the dashboard in a browser on any device.
 
 ## Where the dashboard keeps its data
 
-Everything is stored in files next to the program, in the project folder:
+Everything is stored in files next to the program, in the project folder (another folder can be set
+with [`FORGE_DATA_DIR`](../configuration.md#data-dir)):
 
 | File / folder | What is inside |
 | --- | --- |
 | `printer_history.db` | The printer list, settings (Telegram, proxies, automation), state history, print journal |
 | `users.db` | User accounts, the action log, the key that signs login sessions |
 | `ams_history.db` | AMS humidity and temperature history |
+| `data/job_previews/` | Job previews and job cards (print settings, the plate map) the print journal refers to |
+| `data/file_pool/` | The shared file pool: print files uploaded to the dashboard (up to 8 GB, see [Shared file pool](../configuration.md#file-pool)) |
 | `data/hms/` | Bambu's downloaded error texts and buttons (downloaded again if missing) |
 
-Back up the three `.db` files to keep your farm's setup and history. On Linux there is a ready
-nightly backup job — see [Linux / Raspberry Pi](linux.md#nightly-database-backup-optional).
+Back up the three `.db` files and the `data/job_previews/` folder to keep your farm's setup and
+history: without that folder the history's jobs lose their previews and cards. Back up
+`data/file_pool/` unless the uploaded files are kept somewhere else; `data/hms/` needs no backup.
+On Linux there is a ready nightly backup — see
+[Linux / Raspberry Pi](linux.md#nightly-database-backup-optional); it copies the three `.db` files,
+`config.py` and `data/job_previews/`, not `data/file_pool/` or `data/hms/`.
 
 ## After installing
 

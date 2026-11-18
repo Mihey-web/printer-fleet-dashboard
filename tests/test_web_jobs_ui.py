@@ -31,7 +31,7 @@ H = 3600
 NAME = "Деталь A.gcode"
 EVIL = '<img src=x onerror=alert(1)>"q".3mf'
 # IA §7 (plan step 9, deliberately changed): «Длительность (план, Δ)» is one column, «Оценка» is gone
-COLS = ["Принтер", "Начало", "Длительность (план, Δ)", "Результат", "Паузы", "Слои", "Задание"]
+COLS = ["Принтер", "Начало", "Длительность (план, Δ)", "Результат", "Паузы", "Слои", "Задание", "Расход (расч.)"]
 DUR = "Длительность (план, Δ)"
 
 
@@ -360,7 +360,8 @@ def test_duration_text():
     assert call("jobDurText", open_job(), NOW) == "2ч"
     assert call("jobDurText", open_job(), NOW + 1800) == "2ч 30м"
     assert call("jobDurText", job(actual_sec=None), NOW) == "—"
-    assert call("jobDurText", job(actual_sec=30, start_exact=0), NOW) == "—"
+    # under a minute is said (timeFmt, QA 17.11: «—» read as «not known»), with its «~»
+    assert call("jobDurText", job(actual_sec=30, start_exact=0), NOW) == "~< 1м"
 
 
 # --- plan and fact ----------------------------------------------------------------------------
@@ -428,7 +429,7 @@ def test_pauses_cell():
                                   offline_n=2, offline_sec=1500))
     assert p == {"text": "2 · 14м", "tip": "0300_8007, Пауза (пользователь), без связи ×2, 25м"}
     assert call("jobPausesCell", job()) == {"text": "—", "tip": ""}
-    assert call("jobPausesCell", job(pauses=1, paused_sec=20)) == {"text": "1", "tip": ""}
+    assert call("jobPausesCell", job(pauses=1, paused_sec=20)) == {"text": "1 · < 1м", "tip": ""}
 
 
 # --- stats sections ----------------------------------------------------------------------------
@@ -671,7 +672,7 @@ def test_details_of_a_row():
                   "без связи ×2, 25м", "⚡ пропадало питание ×1"]
     assert '<span class="job-tag ok">автопропуск нажал ✓ 07:00</span>' in xp
     end = [text(r) for r in re.findall(r'<div class="r[^"]*">(.*?)</div>', secs[1][1])]
-    assert end == ["0300_4000 Ошибка подогрева стола на 47% · 11:12", "план 5ч — оценка слайсера"]
+    assert end == ["Расчётный расход: — (на всё задание)", "0300_4000 Ошибка подогрева стола на 47% · 11:12", "план 5ч — оценка слайсера"]
     what = [text(r) for r in re.findall(r'<div class="r[^"]*">(.*?)</div>', secs[2][1])]
     assert what == ["Деталь A.gcode", "слои 300/300"]
     # a server without pause_list (the Pi before this step): the codes, without times
@@ -748,24 +749,25 @@ def _element(html: str, tag: str, **attrs) -> str:
     raise AssertionError("<%s %s> not found" % (tag, attrs))
 
 
-def test_history_has_its_four_sub_tabs():
+def test_history_has_its_five_sub_tabs():
     # IA §7, plan step 8 (deliberately changed): Печати (the default) · Хронология · Статистика ·
-    # Действия (admins: hidden until the role says so), in the head, a section each
+    # Пластик (17.11.2026, the owner asked) · Действия (admins: hidden until the role says so), in the head, a section each
     sub = _element(HTML, "div", id="historySub")
     btns = [a for t, a in tags(sub) if t == "button"]
-    assert [b["data-sub"] for b in btns] == ["jobs", "chrono", "stats", "actions"]
-    assert [b.get("class") for b in btns] == ["active", None, None, None]
-    assert [b["aria-pressed"] for b in btns] == ["true", "false", "false", "false"]
-    assert "hidden" in btns[3] and all("hidden" not in b for b in btns[:3])
+    assert [b["data-sub"] for b in btns] == ["jobs", "chrono", "stats", "plastic", "actions"]
+    assert [b.get("class") for b in btns] == ["active", None, None, None, None]
+    assert [b["aria-pressed"] for b in btns] == ["true", "false", "false", "false", "false"]
+    assert "hidden" in btns[4] and all("hidden" not in b for b in btns[:4])
     assert [re.sub(r"<[^>]+>", "", x) for x in re.findall(r"<button[^>]*>(.*?)</button>", sub)] == [
-        "Печати", "Хронология", "Статистика", "Действия"]
+        "Печати", "Хронология", "Статистика", "Пластик", "Действия"]
     assert "Таймлайн" not in HTML
     panel = HTML[HTML.index('data-panel="history"'):HTML.index('data-panel="ams"')]   # «Окно» is gone (plan step 7)
     hsub = {a["data-hsub"]: a for t, a in tags(panel) if "data-hsub" in a}
-    assert set(hsub) == {"jobs", "chrono", "stats", "actions"}
-    assert "hidden" not in hsub["jobs"] and all("hidden" in hsub[k] for k in ("chrono", "stats", "actions"))
+    assert set(hsub) == {"jobs", "chrono", "stats", "plastic", "actions"}
+    assert "hidden" not in hsub["jobs"] and all("hidden" in hsub[k] for k in ("chrono", "stats", "plastic", "actions"))
     assert panel.index('id="histHead"') < panel.index('id="historySub"') < panel.index('data-hsub="jobs"') \
-        < panel.index('data-hsub="chrono"') < panel.index('data-hsub="stats"') < panel.index('data-hsub="actions"')
+        < panel.index('data-hsub="chrono"') < panel.index('data-hsub="stats"') < panel.index('data-hsub="plastic"')
+    assert panel.index('data-hsub="plastic"') < panel.index('data-hsub="actions"')
 
 
 def test_jobs_filters_cover_the_api():
@@ -884,8 +886,9 @@ def test_phone_layout_turns_rows_into_two_lines():
     blocks = re.findall(r"@media \(max-width: 1100px\) \{(.*?)\n    \}", CSS, re.S)
     jobs = next((b for b in blocks if ".jobs-table" in b), None)
     assert jobs, "no @media (max-width: 1100px) block for .jobs-table"
-    assert '"printer when name state" "dur dur dur pauses"' in jobs
-    assert '.jobs-table tr.job-row.job-open { grid-template-areas: "printer when name name" "dur dur dur pauses" "state state state state"; }' in jobs
+    # QA 17.11: the grams have their place in the second line (they made a 4th line of their own)
+    assert '"printer when name state" "dur dur mat pauses"' in jobs
+    assert '.jobs-table tr.job-row.job-open { grid-template-areas: "printer when name name" "dur dur mat pauses" "state state state state"; }' in jobs
     for col in ("printer", "state", "when", "dur", "pauses", "name"):
         assert re.search(r"td\.job-%s \{ grid-area: %s;" % (col, col), jobs), col
     assert ".jobs-table td.job-layers { display: none; }" in jobs and ".jobs-table .job-model { display: none; }" in jobs
@@ -944,3 +947,73 @@ def test_every_rendered_class_has_a_style():
     assert not classes & {"job-good", "job-defect", "job-verdict", "dash-kpi"}
     for cls in sorted(classes):
         assert re.search(r"\.%s(?![\w-])[^{}]*\{" % re.escape(cls), CSS), cls
+
+
+# --- «Пластик» (История, 17.11.2026) ----------------------------------------------------------------
+
+PLASTIC = {"total": {"grams": 25373.4, "no_weight": 3},
+           "per_day": [{"day": "2026-11-13", "jobs": 13, "grams": 0.0, "no_weight": 13, "weighed": 0},
+                       {"day": "2026-11-15", "jobs": 70, "grams": 7968.0, "no_weight": 39, "weighed": 31},
+                       {"day": "2026-11-16", "jobs": 57, "grams": 13389.4, "no_weight": 3, "weighed": 54},
+                       {"day": "2026-11-17", "jobs": 0, "grams": 0.0, "no_weight": 0, "weighed": 0},
+                       {"day": "2026-11-18", "jobs": 14, "grams": 4016.0, "no_weight": 0, "weighed": 14}],
+           "printers": [{"printer_id": "p1", "label": "H2", "model": "H2S", "grams": 900.5, "no_weight": 0},
+                        {"printer_id": "p2", "label": "K1", "model": "k1c", "model_name": "K1C", "grams": 2700,
+                         "no_weight": 2},
+                        {"printer_id": "p3", "label": "E5", "model": "ender5max", "grams": 0, "no_weight": 0}]}
+
+
+def test_plastic_text():
+    assert [call("plasticText", g) for g in (0, 42.4, 950, 1000, 13389.4, 4016)] == [
+        "0 г", "42 г", "950 г", "1 кг", "13,4 кг", "4,02 кг"]
+    assert call("plasticText", 4016, True) == "4 кг"           # the short form over a column
+
+
+def test_plastic_kpis():
+    html = call("plasticKpiHtml", PLASTIC, "2026-11-18")
+    tiles = re.findall(r'<div class="hist-kpi static"[^>]*><span>([^<]*)</span><b>([^<]*)</b></div>', html)
+    # the average: 16.11 (54 of 57 prints with a weight) and the idle 17.11 (a real 0); not 13.11 (no
+    # weight), not 15.11 (31 of 70 only: the panel began recording the weight on 14.11), not today
+    assert tiles == [("За период", "25,4 кг"), ("В среднем в сутки", "6,69 кг"), ("Сегодня", "4,02 кг"),
+                     ("Печатей без веса", "3")]
+    nothing = {"total": {"grams": 0, "no_weight": 0}, "per_day": []}
+    assert re.findall(r"<b>([^<]*)</b>", call("plasticKpiHtml", nothing, "2026-11-18")) == ["—", "—"]
+
+
+def test_plastic_day_bars():
+    html = call("plasticDayBarsHtml", PLASTIC, "2026-11-18")
+    cols = re.findall(r'<div class="jobs-day( plastic-today| plastic-part)?" data-tip="([^"]*)"><span class="plastic-val">([^<]*)</span>'
+                      r'<span class="jobs-day-bar plastic-bar"><i class="plastic-fill" style="height:([\d.]+)%"></i></span>', html)
+    assert cols == [
+        ("", "13.11: — · без веса: 13", "", "0.0"),
+        (" plastic-part", "15.11: 7,97 кг · без веса: 39", "8 кг", "59.5"),      # a weight for 31 of 70 only
+        ("", "16.11: 13,4 кг · без веса: 3", "13,4 кг", "100.0"),
+        ("", "17.11: —", "", "0.0"),
+        (" plastic-today", "18.11: 4,02 кг · день ещё идёт", "4 кг", "30.0"),
+    ]
+    # more than 8 days: no value over the columns, the tips keep them
+    month = dict(PLASTIC, per_day=[{"day": "2026-10-%02d" % d, "grams": 1000.0 * d, "no_weight": 0} for d in range(1, 31)])
+    month_html = call("plasticDayBarsHtml", month, "")
+    assert re.findall(r'<span class="plastic-val">([^<]*)</span>', month_html) == [""] * 30
+    assert "plastic-few" not in month_html and "plastic-few" in html     # a week or less: dates under the columns
+    unknown = dict(PLASTIC, per_day=[{"day": "2026-11-10", "grams": 0, "no_weight": 4}])
+    assert "записывает с версии 2.2.0" in call("plasticDayBarsHtml", unknown, "")
+    assert call("plasticDayBarsHtml", dict(PLASTIC, per_day=[]), "") == '<div class="dash-stats-empty">Печатей за период нет</div>'
+
+
+def test_plastic_by_printer():
+    html = call("plasticPrintersHtml", PLASTIC)
+    rows = re.findall(r'<tr><td>([^<]*) <span class="job-model">([^<]*)</span></td><td class="plastic-num">([^<]*)</td>'
+                      r'<td><span class="plastic-share"><i style="width:([\d.]+)%"></i></span>(\d+)%</td>'
+                      r'<td class="plastic-num">([^<]*)</td></tr>', html)
+    # the most plastic first; the human model name when the server gives one; a printer without plastic is left out
+    # the bar against the biggest printer, the number its share of the total
+    assert rows == [("K1", "K1C", "2,7 кг", "100.0", "75", "2"), ("H2", "H2S", "901 г", "33.4", "25", "")]
+    assert call("plasticPrintersHtml", {"printers": [{"label": "E5", "grams": 0, "no_weight": 0}]}) == ""
+
+
+def test_plastic_tab_loads_the_stats_with_the_maintenance_prints():
+    load = _js_function("loadPlastic")
+    assert '"/api/history/jobs/stats?" + q' in load and '"&include_maint=true" + histTzQuery()' in load
+    assert "if (gen !== plastic.gen) return;" in load
+    assert 'else if (historySub === "plastic") loadPlastic();' in JS

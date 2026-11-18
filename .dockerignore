@@ -11,6 +11,7 @@ __pycache__
 *.db
 *.db-journal
 *.db-wal
+data/
 .env
 *.log
 *.pem

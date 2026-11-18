@@ -424,6 +424,8 @@ def test_a_new_version_rebuilds_what_the_history_still_shows(store, monkeypatch)
                (T0 + 5, pa2["id"]))
     db.execute("UPDATE print_jobs SET verdict = 'good', verdict_by = 'admin', verdict_at = ? WHERE id = ?",
                (T0 + 6, pa1["id"]))
+    db.execute("UPDATE print_jobs SET preview_key = ?, project_key = ? WHERE id = ?",   # seen live, not in the history
+               ("a" * 64, "b" * 64, pa2["id"]))
     live = dict(pc1, source="live", started_at=pc1["started_at"] - 30, updated_at=T0)   # the tracker saw it too
     del live["id"]
     live_id = jj.insert_job(db, live, T0)
@@ -444,7 +446,8 @@ def test_a_new_version_rebuilds_what_the_history_still_shows(store, monkeypatch)
     (new_pa2,) = [r for r in after.values() if r["id"] not in before]
     assert (new_pa2["printer_id"], new_pa2["started_at"], new_pa2["result"]) == ("pa", pa2["started_at"], "finished")
     assert (new_pa2["verdict"], new_pa2["verdict_by"], new_pa2["verdict_at"]) == ("bad", "admin", T0 + 5)
-    assert (stats["replaced"], stats["inserted"], stats["skipped"], stats["verdicts"]) == (2, 1, 2, 1)
+    assert (new_pa2["preview_key"], new_pa2["project_key"]) == ("a" * 64, "b" * 64)   # its preview and job card stay
+    assert (stats["replaced"], stats["inserted"], stats["skipped"], stats["verdicts"], stats["previews"]) == (2, 1, 2, 1, 1)
 
 
 def test_rebuilt_prints_never_duplicate_live_ones(store):

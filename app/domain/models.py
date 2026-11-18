@@ -1,6 +1,6 @@
 from dataclasses import dataclass, asdict, field
 from enum import Enum
-from typing import Optional, Dict, Any, List
+from typing import Optional, Dict, Any, List, Union
 from time import time
 
 
@@ -38,6 +38,11 @@ class PrinterStatus:
     state: PrinterState
     progress_pct: Optional[float] = None
     job_name: Optional[str] = None
+    preview_key: Optional[str] = None
+    project_key: Optional[str] = None
+    # the job's parts skipped mid-print: Bambu ids (MQTT s_obj), Creality names (excluded_objects)
+    skipped_objects: Optional[List[Union[int, str]]] = None
+    planned_filament_g: Optional[float] = None  # slicer estimate for the entire job, not actual usage
     eta_seconds: Optional[int] = None
     print_time_seconds: Optional[int] = None
     nozzle_temp: Optional[float] = None
@@ -60,7 +65,11 @@ class PrinterStatus:
     last_successful_fetch: float = 0.0
     debug: Dict[str, Any] = field(default_factory=dict)
     ams: Optional[Dict[str, Any]] = None
+    cfs: Optional[list] = None
+    feeder_settings: Optional[Dict[str, bool]] = None
+    chamber_limit: Optional[int] = None
     fans: Optional[Dict[str, Any]] = None
+    airduct: Optional[Dict[str, Any]] = None   # Bambu P2S/H2/X2: {"mode": 0|1, "modes": [0, 1]}
     fw_update: Optional[bool] = None
     light_on: Optional[bool] = None
     # Bambu only (None elsewhere). A running filament change:
@@ -80,6 +89,7 @@ class PrinterStatus:
     job_started_at: Optional[float] = None
     ctl_ready: Optional[bool] = None   # Klipper: klippy host "ready" (commands accepted); None elsewhere / unknown
     light_ctl: Optional[bool] = None   # Klipper: a light output_pin was found; None until looked up / elsewhere
+    klipper_api: Optional[bool] = None  # Creality: Moonraker answers on :7125 (K2 Plus); None until probed / elsewhere
     # What the printer reports as wrong or worth knowing, worst first
     # (app/services/notifications.py); last_error stays the one-line form.
     notifications: List[Dict[str, Any]] = field(default_factory=list)

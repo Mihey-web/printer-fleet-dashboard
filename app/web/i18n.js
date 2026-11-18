@@ -655,7 +655,8 @@
     if (form && !document.getElementById("mainShell") && !document.getElementById("langRow")) {
       var st = document.createElement("style");
       st.textContent = ".i18n-login{display:flex;justify-content:center;gap:4px;margin-top:14px}" +
-        ".i18n-login button{width:auto;margin:0;padding:4px 10px;border:1px solid transparent;border-radius:8px;" +
+        // min-height: a 40 px tap zone on a phone (QA 17.11: it was 25 px)
+        ".i18n-login button{width:auto;min-height:40px;margin:0;padding:4px 12px;border:1px solid transparent;border-radius:8px;" +
         "background:none;color:var(--text-muted);font:inherit;font-size:.75rem;font-weight:500;letter-spacing:0;cursor:pointer}" +
         ".i18n-login button:hover{color:var(--text)}" +
         ".i18n-login button.active{color:var(--text);border-color:var(--line-strong)}";

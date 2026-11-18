@@ -293,10 +293,21 @@ class ProxyChecker:
     Thread-safe: ``best_proxy`` can be read from any thread.
     """
 
+    DEFAULT_INTERVAL = 600
+
+    @classmethod
+    def _interval(cls, seconds) -> int:
+        """A usable check interval: a number of seconds >= 0, else the default. A
+        null saved before the settings check refused it made the loop's sleep
+        raise and stopped the checker for good (QA 17.11 F6)."""
+        if isinstance(seconds, bool) or not isinstance(seconds, (int, float)) or not seconds >= 0:
+            return cls.DEFAULT_INTERVAL
+        return seconds
+
     def __init__(self, proxies: list[str], check_interval: int = 600):
         self._proxies = list(proxies)
         register_proxies(self._proxies)
-        self._check_interval = check_interval
+        self._check_interval = self._interval(check_interval)
         self._lock = threading.Lock()
         self._best_proxy: Optional[str] = None
         self._latencies: dict[str, Optional[float]] = {}
@@ -338,7 +349,7 @@ class ProxyChecker:
 
     def set_interval(self, seconds: int):
         with self._lock:
-            self._check_interval = seconds
+            self._check_interval = self._interval(seconds)
 
     def wait_ready(self, timeout: float = 30.0):
         self._ready_event.wait(timeout)

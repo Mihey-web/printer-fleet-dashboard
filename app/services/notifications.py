@@ -52,8 +52,35 @@ NO_TABLE_HINT = "Таблица действий Bambu ещё не загруж�
 UNKNOWN_HINT = "Bambu не публикует описание этого кода — поищите его по ссылке «Подробнее»."
 KLIPPER_SHUTDOWN_HINT = "Проверьте USB-кабель и питание платы, затем перезапустите прошивку (FIRMWARE_RESTART)."
 KLIPPER_DISCONNECTED_HINT = "Перезапустите службу klipper на хосте."
-CREALITY_HINT = ("Подтвердить ошибку из «Кузницы» нельзя: у Creality по WebSocket нет такой команды. "
-                 "Сбросьте на экране принтера, расшифровку смотрите в таблице кодов Creality.")
+# Klipper's own shutdown reasons in plain words (QA 17.11: the raw «Timer too close» alone said
+# nothing); the raw message stays in the record's text. First match wins, else the generic hint.
+KLIPPER_SHUTDOWN_REASONS = (
+    ("timer too close", "Плата не успела выполнить команду вовремя: хост перегружен или связь с платой тормозит. Перезапустите прошивку (FIRMWARE_RESTART); если повторяется — проверьте USB-кабель и нагрузку хоста."),
+    ("rescheduled timer in the past", "Плата не успела выполнить команду вовремя: хост перегружен или связь с платой тормозит. Перезапустите прошивку (FIRMWARE_RESTART); если повторяется — проверьте USB-кабель и нагрузку хоста."),
+    ("missed scheduling", "Плата не успела выполнить команду вовремя: хост перегружен или связь с платой тормозит. Перезапустите прошивку (FIRMWARE_RESTART); если повторяется — проверьте USB-кабель и нагрузку хоста."),
+    ("lost communication with mcu", "Потеряна связь с платой. Проверьте USB-кабель и питание платы, затем перезапустите прошивку (FIRMWARE_RESTART)."),
+    ("not heating at expected rate", "Нагреватель греется медленнее, чем должен: проверьте нагреватель, датчик температуры и обдув, затем перезапустите прошивку (FIRMWARE_RESTART)."),
+    ("adc out of range", "Датчик температуры показывает невозможное значение — обрыв или замыкание. Проверьте его разъём, затем перезапустите прошивку (FIRMWARE_RESTART)."),
+    ("m112", "Аварийная остановка по команде (M112). Устраните причину и перезапустите прошивку (FIRMWARE_RESTART)."),
+)
+
+
+def klipper_shutdown_hint(message: Optional[str]) -> str:
+    low = str(message or "").lower()
+    for needle, hint in KLIPPER_SHUTDOWN_REASONS:
+        if needle in low:
+            return hint
+    return KLIPPER_SHUTDOWN_HINT
+CREALITY_HINT = ("«Сбросить ошибку» убирает её с принтера, как кнопка на его собственной веб-странице: "
+                 "печать она не продолжает и не останавливает. Сначала устраните причину.")
+# A Creality with Klipper's API (K2 Plus): what «Продолжить печать» does, from its RESUME macro
+# (RESUME_EXTERNAL_PROCESS → RESUME_EXTERNAL → RESUME_BASE, read live 16.11.2026).
+CREALITY_KLIPPER_HINT = ("«Продолжить печать» — то же, что ▷: принтер нагреет сопло до прежней температуры, "
+                         "выдавит около 80 мм прутка у места очистки, почистит сопло и продолжит. "
+                         "Сначала посмотрите на деталь по камере или на месте.")
+# Creality's error numbers the panel can name: the number of Creality's published table
+# (K1C / K1 Max / K2 Plus error code table: the 4 digits identify the code, the letters the module).
+CREALITY_CODES = {101: "камера (ИИ-контроль) заметила брак печати и поставила печать на паузу (AC0101)"}
 _FEED_HINT = "Сначала вставьте пруток в тот же слот, потом «Продолжить»."
 _CUT_TIP_HINT = "Обрежьте кончик прутка ровно и вставьте заново, потом «Готово — продолжить» (AMS повторит подачу)."
 HINTS = {
@@ -288,7 +315,7 @@ def build_klipper(data: Optional[Dict[str, Any]]) -> List[Dict[str, Any]]:
     out: List[Dict[str, Any]] = []
     if host == "shutdown":
         text = "Klipper остановлен (shutdown)" + (": " + message if message else "")
-        out.append(_plain("klipper:shutdown", "klipper", "webhooks: shutdown", "fatal", text, KLIPPER_SHUTDOWN_HINT,
+        out.append(_plain("klipper:shutdown", "klipper", "webhooks: shutdown", "fatal", text, klipper_shutdown_hint(message),
                           notification_actions.klipper_actions(host)))
     elif host == "error":
         text = "Ошибка Klipper" + (": " + message if message else "")
@@ -304,7 +331,22 @@ def build_klipper(data: Optional[Dict[str, Any]]) -> List[Dict[str, Any]]:
         if host not in KLIPPER_DOWN or (print_message and print_message != message):
             out.append(_plain("klipper:print_error", "klipper", "print_stats: error", "fatal",
                               print_message or "Ошибка печати Klipper"))
+    for n in out:
+        n["mute_key"] = mute_key(n)
     return sort_and_cap(out)
+
+
+def mute_key(n: Dict[str, Any]) -> str:
+    """What «Скрыть» keeps for a record (notification_mutes): its key, and for a
+    Klipper record the reason too. Its key names only the state (klipper:shutdown),
+    so a mute of «Lost communication with MCU» hid a later heater shutdown as well
+    (17.11). "klipper:shutdown/1a2b3c4d": the API's key pattern takes it."""
+    key = str(n.get("key") or "")
+    if n.get("src") != "klipper":
+        return key
+    import hashlib
+    reason = hashlib.sha1(str(n.get("text") or "").encode("utf-8")).hexdigest()[:8]
+    return "%s/%s" % (key, reason)
 
 
 # --- Creality --------------------------------------------------------------------
@@ -313,7 +355,9 @@ def build_creality(data: Optional[Dict[str, Any]], state: Any) -> List[Dict[str,
     """A Creality printer's error (WS :9999 err = {errcode, key}; 0 = none).
     Its level follows the print: still printing = serious, paused = pause,
     standing (idle / finished / unknown / error) = fatal, and the normalizer
-    shows that printer as ERROR. Not live-verified: no err != 0 seen yet."""
+    shows that printer as ERROR. A code of CREALITY_CODES says what it is. A printer
+    with Klipper's API (data["klipper_api"], K2 Plus) on a pause gets «Продолжить
+    печать» (notification_actions.creality_actions) and the hint of what it does."""
     data = data or {}
     code = data.get("err_code")
     if not isinstance(code, int) or isinstance(code, bool) or code == 0:
@@ -326,8 +370,13 @@ def build_creality(data: Optional[Dict[str, Any]], state: Any) -> List[Dict[str,
         label, text = "errcode %d" % code, "Ошибка Creality %d" % code
     else:
         label, text = "errcode %d · key %s" % (code, key), "Ошибка Creality %d/%s" % (code, key)
+    if code in CREALITY_CODES:
+        text += ": " + CREALITY_CODES[code]
+    klipper = data.get("klipper_api") is True
+    actions = notification_actions.creality_actions(state, code, klipper)
+    resumes = any(a.get("key") == "cr_resume" for a in actions)
     return [_plain("creality:%d%s" % (code, "/" + key_s if key_s else ""), "creality", label, severity, text,
-                   CREALITY_HINT)]
+                   CREALITY_KLIPPER_HINT + " " + CREALITY_HINT if resumes else CREALITY_HINT, actions)]
 
 
 # Levels that make last_error of a WebSocket printer (Bambu keeps its own line).

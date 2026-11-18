@@ -444,7 +444,7 @@ def test_farm_list_needs_a_decision_then_the_rest():
     assert grp.count('<div class="nf-item ') == 1 and "HMS_0500_0100" not in grp   # the decision only, not the memory note
     assert "nf-btn" not in farm(_farm_printers(), True, "{admin: false}")
     assert ('<button type="button" class="nf-other" data-nf-more="farm-other" aria-expanded="false" data-fk="more-farm-other">'
-            '<span>Прочие · 2 на 2 принтерах</span><span class="nf-dim">долгие HMS, плановое</span>') in html
+            '<span>Прочие · 2 на 2 принтерах</span><span class="nf-dim">давние сообщения принтеров, плановое</span>') in html
     assert "nf-orow" not in html and "nf-sum" not in html and "nf-sevrow" not in html
     # unfolded: a line per printer, its badge and worst record; it leads to the card
     opened = farm(_farm_printers(), True)
@@ -645,9 +645,10 @@ def test_cancel_text_of_a_creality_row():
 
     def row(*frames):
         c = CrealityK1Client("host", "K1")
-        c.connected = True
+        c._client._ws = object()
+        c._client._ws_ready.set()
         for f in frames:
-            c.on_message(None, js(f))
+            c._parse_report(f)
         st = normalize_ws_dict("c1", "K1", PrinterKind.CREALITY, c.get_data(), device_type="k1c")
         return prn(*st.notifications, pid="c1", label="K1", kind="creality", model="k1c", state=st.state.value,
                    pct=st.progress_pct)
@@ -1211,6 +1212,14 @@ def test_hidden_strings_are_escaped():
         for attr in re.findall(r'(?:data-tip|aria-label|data-nf-open|data-nf-more|data-pid|data-key|class)="([^"]*)"', html):
             assert "<" not in attr and "'" not in attr
     assert "Вернуть" in out[0] and 'data-pid="c&quot;1"' in out[0]
+
+
+def test_a_creality_acts_only_with_klipper_api_and_print_control():
+    base = {"id": "k2", "kind": "creality", "online": True, "state": "paused", "grace_period_active": False,
+            "caps": {"resume": True}}
+    cases = [dict(base, klipper_api=True), dict(base), dict(base, klipper_api=False),
+             dict(base, klipper_api=True, caps={"resume": None}), dict(base, klipper_api=True, online=False)]
+    assert run("%s.map(nfCanAct)" % js(cases)) == [True, False, False, False, False]
 
 
 def test_the_api_flag_is_what_the_block_reads():

@@ -235,10 +235,10 @@ def test_list_and_counts_requests():
     q = run("actsQuery({group: '', who: '', svc: false}, %s, null, 0)" % json.dumps(W))
     assert q == "limit=50&offset=0&fr=%d&to=%d&exclude=token_refresh" % (T - 86401, T + 1)
     q = run("actsQuery({group: 'auto', who: 'auto-ignore', svc: false}, %s, 'p 1', 100)" % json.dumps(W))
-    assert q == ("limit=50&offset=100&fr=%d&to=%d&printer=p%%201&user=auto-ignore&prefix=autodry,auto_ignore"
+    assert q == ("limit=50&offset=100&fr=%d&to=%d&printer=p%%201&user=auto-ignore&prefix=autodry,auto_ignore,auto_light"
                  % (T - 86401, T + 1))
     q = run("actsQuery({group: 'cmd', who: '', svc: true}, %s, null, 0)" % json.dumps(W))
-    assert q.endswith("&prefix=printer_command,printer_bulk,token_refresh")
+    assert q.endswith("&prefix=printer_command,printer_bulk,printer_print,printer_file,token_refresh")
     assert run("actsQuery({group: '', who: '', svc: true}, %s, null, 0)" % json.dumps(W)).endswith("&to=%d" % (T + 1))
     assert run("actsCountsQuery(%s, 'bambu-3')" % json.dumps(W)) == "fr=%d&to=%d&printer=bambu-3" % (T - 86401, T + 1)
     url = run("actsCsvUrl({group: 'access', who: '', svc: false}, %s, null)" % json.dumps(W))
@@ -312,3 +312,17 @@ def test_styles():
     for need in (".acts-table tr.act-row { cursor: pointer; }", ".act-tag.ok {", ".acts-table .act-dev { display: none !important; }"):
         assert need in css, need
     assert "animation" not in css
+
+
+def test_print_start_reads_as_words():
+    # «Файлы на принтере» → «Печать» (app/api/printer_files_api.py): the file, the plate, the verdict
+    got = run("actText('printer_print:b1:file=Cap,plate=2,mapping=0/16,bed_leveling=True,st=refused')")
+    assert got["printer"] == "b1" and got["what"].startswith("Печать файла · Cap · стол 2 ")
+    assert run("actGroupOf('printer_print:b1:file=?,st=sent')") == "cmd"
+
+
+def test_file_pool_actions_read_as_words():
+    got = run("actText('file_pool_sync:bambu-X1C:files=40,printers=2')")
+    assert got["printer"] is None and got["what"] == "Синхронизация файлов · bambu-X1C · файлов 40 → принтеров 2"
+    assert run("actText('file_pool_upload:creality-k1c:size=4')")["what"].startswith("Файл загружен в общие")
+    assert run("actGroupOf('file_pool_delete:bambu-X1C')") == "park"

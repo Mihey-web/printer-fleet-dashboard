@@ -20,10 +20,11 @@ import json
 import math
 import os
 import pathlib
-import sqlite3
 import threading
 import time
 from typing import Any, Dict, List, Optional, Tuple
+
+from app.services import sqlite_db
 
 # (series name, current column, target column)
 SERIES = (("nozzle", "nozzle_temp", "target_nozzle_temp"),
@@ -48,7 +49,7 @@ def _rows(db_path: str, printer_id: str, fr: float, to: float) -> List[tuple]:
     SERIES order, oldest first; [] when there is no history to read."""
     if not os.path.exists(db_path):
         return []
-    conn = sqlite3.connect(pathlib.Path(db_path).absolute().as_uri() + "?mode=ro", uri=True, timeout=10)
+    conn = sqlite_db.connect(pathlib.Path(db_path).absolute().as_uri() + "?mode=ro", uri=True)
     try:
         have = {r[1] for r in conn.execute("PRAGMA table_info(printer_history)").fetchall()}
         if not have:

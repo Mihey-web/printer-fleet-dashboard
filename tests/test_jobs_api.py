@@ -258,7 +258,8 @@ def _stats(client, **params):
 def test_stats_on_a_fixed_journal(client, ids):
     data = _stats(client).json()
     assert (data["fr"], data["to"]) == (FR, TO)
-    assert data["total"] == {
+    # grams / no_weight («Пластик в день») have their own tests
+    assert {k: v for k, v in data["total"].items() if k not in ("grams", "no_weight")} == {
         "jobs": 14, "finished": 7, "cancelled": 1, "failed": 2, "power_loss": 1, "stopped": 1, "lost": 1,
         "open": 1,
         "success_pct": 58.3,          # 7 / 12: lost and open are not in the base
@@ -294,12 +295,11 @@ def test_stats_per_printer(client, ids):
 
 
 def test_stats_per_day_uses_local_days(client, ids):
-    days = _stats(client).json()["per_day"]
+    days = [{k: d[k] for k in ("day", "jobs", "finished", "bad")} for d in _stats(client).json()["per_day"]]
     assert days == [
         {"day": "2026-10-10", "jobs": 8, "finished": 5, "bad": 3},   # P ended at 00:30 local
         {"day": "2026-10-11", "jobs": 3, "finished": 0, "bad": 3},
         {"day": "2026-10-12", "jobs": 3, "finished": 2, "bad": 0},   # K is open: its start day, not bad
-        {"day": "2026-10-13", "jobs": 0, "finished": 0, "bad": 0},   # an empty day of the window is listed
     ]
 
 
@@ -374,7 +374,7 @@ def test_csv_format(boss, ids):
     assert (by_key["E"]["Код"], by_key["E"]["Описание"], by_key["E"]["Пауза, мин"]) == (
         "0300_4000", "Ошибка подогрева стола", "5")
     # no «Годно / Брак» column (the owner, 29.10): M and N have a verdict in the journal, the export leaves it out
-    assert "Оценка" not in head and len(head) == 14 and all(len(r) == 14 for r in rows[1:])
+    assert "Оценка" not in head and len(head) == 15 and all(len(r) == 15 for r in rows[1:])
     assert not {"Годно", "Брак"} & {c for r in rows[1:] for c in r}
     assert by_key["G"]["Результат"] == "Питание"
     # the results in IA §10's words, the web page's list says the same (tests/test_web_jobs_ui.py)
@@ -388,7 +388,7 @@ def test_csv_in_the_panels_language(boss, ids):
     ru = list(csv.reader(io.StringIO(_csv(boss).content.decode("utf-8-sig")), delimiter=";"))
     en = list(csv.reader(io.StringIO(_csv(boss, lang="en").content.decode("utf-8-sig")), delimiter=";"))
     assert en[0] == ["Printer", "Model", "Job", "Start", "End", "Plan, min", "Actual, min", "Pauses",
-                     "Paused, min", "Offline, min", "Result", "Code", "Description", "Layers"]
+                     "Paused, min", "Offline, min", "Result", "Code", "Description", "Layers", "Estimated filament, g"]
     assert len(en) == len(ru)
     words = {"Успешно": "Successful", "Отменено": "Cancelled", "Ошибка": "Error", "Питание": "Power loss",
              "Остановлено": "Stopped", "Нет связи": "No connection", "Идёт": "Running"}
@@ -541,7 +541,7 @@ def test_missing_db_reads_as_an_empty_journal(boss, db, tmp_path):
     stats = _stats(client).json()
     assert stats["total"]["jobs"] == 0 and stats["total"]["success_pct"] is None
     assert stats["printers"] == stats["failure_codes"] == stats["pause_reasons"] == []
-    assert len(stats["per_day"]) == 4
+    assert len(stats["per_day"]) == 3      # a window ending at midnight does not list the next day
     assert _csv(client).content.decode("utf-8-sig").count("\r\n") == 1
     assert not (tmp_path / "ph.db").exists()   # reading never creates the file
 
@@ -707,3 +707,34 @@ def test_set_verdict_statuses(db, ids):
     assert jj.set_verdict(db, ids["K"], "good", "u") == "open"
     assert jj.set_verdict(db, max(ids.values()) + 1, None, "u") == "missing"
     assert jj.set_verdict(db + ".none", 1, "good", "u") == "missing"
+
+def test_preview_file_is_private_and_validated(client, monkeypatch, tmp_path):
+    from app.services import job_previews
+    monkeypatch.setattr(job_previews, 'DIRECTORY', tmp_path)
+    key = 'a' * 64
+    (tmp_path / (key + '.png')).write_bytes(b'png-fixture')
+    url = '/api/job-previews/' + key + '.png'
+    r = client.get(url)
+    assert r.status_code == 200 and r.content == b'png-fixture'
+    assert r.headers['cache-control'].startswith('private')
+    assert client.get('/api/job-previews/invalid.png').status_code == 404
+    client.cookies.clear()
+    assert client.get(url).status_code == 401
+
+def test_project_summary_is_private_and_converts_legacy_files(client, monkeypatch, tmp_path):
+    import json
+    from app.services import job_previews
+    monkeypatch.setattr(job_previews, 'DIRECTORY', tmp_path)
+    summary = {'title': 'Кубик', 'grams': 12.5}
+    key = job_previews.save_project(summary)
+    r = client.get('/api/job-projects/' + key + '.json')
+    assert r.status_code == 200 and r.json() == summary
+    assert r.headers['cache-control'].startswith('private')
+    legacy = {'plate': 1, 'unavailable': [], 'files': {'slice_info.config': {'config': {'plate': [{
+        'metadata': [{'key': 'index', 'value': '1'}, {'key': 'weight', 'value': '7'}]}]}}}}
+    (tmp_path / ('b' * 64 + '.json')).write_text(json.dumps(legacy), encoding='utf-8')
+    assert client.get('/api/job-projects/' + 'b' * 64 + '.json').json() == {'grams': 7.0}
+    assert client.get('/api/job-projects/' + 'c' * 64 + '.json').status_code == 404
+    assert client.get('/api/job-projects/invalid.json').status_code == 404
+    client.cookies.clear()
+    assert client.get('/api/job-projects/' + key + '.json').status_code == 401

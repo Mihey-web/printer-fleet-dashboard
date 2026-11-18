@@ -30,6 +30,34 @@ STALE_S = 30.0
 MSG_KLIPPY_DISCONNECTED = "Klippy отключился от Moonraker"
 
 
+# Status values as Moonraker passes klippy's on (a thermistor without a reading is null): one
+# that cannot be read is skipped (None), never the sections after it.
+def _number(value):
+    try:
+        n = float(value)
+    except (TypeError, ValueError):
+        return None
+    return n if math.isfinite(n) else None
+
+
+def _rounded(value, scale=1):
+    """Temperatures and fractions as percent, rounded as the web rounds Bambu's (half up)."""
+    n = _number(value)
+    return None if n is None else int(math.floor(n * scale + 0.5))
+
+
+def _whole(value, scale=1):
+    """Durations, counters, percent done: the whole part (0.57 * 100 is 56.99999...)."""
+    n = _number(value)
+    return None if n is None else int(math.floor(n * scale + 1e-9))
+
+
+def _put(target, key, value):
+    """A parsed value; one that could not be read (None) keeps the last good one."""
+    if value is not None:
+        target[key] = value
+
+
 # Words of a pin name that make it a light, by preference (pick_light_pin).
 _LIGHT_WORDS = {"light": 1, "lights": 1, "caselight": 1, "led": 2, "leds": 2, "lamp": 3, "lamps": 3}
 _CAMEL_WORD = re.compile(r"[A-Z]+(?![a-z])|[A-Z]?[a-z]+")
@@ -500,6 +528,11 @@ class KlipperClient:
             return r
         return {"success": False, "replied": False, "detail": "Неподдерживаемая команда: %s" % action}
 
+    def run_gcode(self, script, timeout=REPLY_TIMEOUT):
+        """A G-code script (printer_commands: home / move) with Moonraker's reply
+        as the verdict: {"success", "replied", "detail"}."""
+        return self._rpc("printer.gcode.script", {"script": script}, timeout=timeout)
+
     def parse_status(self, status):
         try:
             with self._lock:
@@ -509,41 +542,40 @@ class KlipperClient:
                     if 'state' in ps:
                         self.data['state'] = ps['state']
                     if 'print_duration' in ps:
-                        self.data['print_time'] = int(ps['print_duration'])
-                    if 'filename' in ps and ps['filename']:
-                        self.data['filename'] = ps['filename']
+                        _put(self.data, 'print_time', _whole(ps['print_duration']))
+                    if 'filename' in ps:                      # "": no file loaded (a reset)
+                        self.data['filename'] = ps['filename'] or None
                     # The print's error text: "" clears it. Not data['message']: that
                     # was a job-name fallback (safe_job_name), so an error became the name.
                     if 'message' in ps:
                         self.data['print_message'] = str(ps['message'] or '')
                     if 'total_duration' in ps:
-                        self.data['total_duration'] = float(ps['total_duration'])
+                        _put(self.data, 'total_duration', _number(ps['total_duration']))
                     if 'filament_used' in ps:
-                        self.data['filament_used_mm'] = float(ps['filament_used'])
+                        _put(self.data, 'filament_used_mm', _number(ps['filament_used']))
                     info = ps.get('info')
                     if isinstance(info, dict):
-                        current_layer = info.get('current_layer')
-                        total_layer = info.get('total_layer')
-                        if current_layer is not None:
-                            self.data['current_layer'] = int(current_layer)
-                        if total_layer is not None:
-                            self.data['total_layers'] = int(total_layer)
+                        # null = cleared: print_stats.reset() for a new file (a slicer without
+                        # SET_PRINT_STATS_INFO never sets them again); absent = unchanged
+                        for key, out in (('current_layer', 'current_layer'), ('total_layer', 'total_layers')):
+                            if key in info:
+                                self.data[out] = _whole(info[key])
 
                 if 'display_status' in status:
                     ds = status['display_status']
-                    if 'progress' in ds and ds['progress'] is not None:
-                        self.data['progress'] = int(float(ds['progress']) * 100)
+                    if 'progress' in ds:
+                        _put(self.data, 'progress', _whole(ds['progress'], 100))
                     if 'message' in ds:                       # M117 text
                         self.data['display_message'] = str(ds['message']) if ds['message'] else None
 
                 if 'virtual_sdcard' in status:
                     vs = status['virtual_sdcard']
-                    if 'progress' in vs and vs['progress'] is not None:
-                        self.data['progress'] = int(float(vs['progress']) * 100)
+                    if 'progress' in vs:
+                        _put(self.data, 'progress', _whole(vs['progress'], 100))
                     if 'file_path' in vs and vs['file_path']:
                         self.data['filename'] = str(vs['file_path']).replace('\\', '/').split('/')[-1]
-                    if 'file_size' in vs and vs['file_size'] is not None:
-                        self.data.setdefault('debug', {})['file_size_bytes'] = int(vs['file_size'])
+                    if 'file_size' in vs:
+                        _put(self.data.setdefault('debug', {}), 'file_size_bytes', _whole(vs['file_size']))
 
                 debug = self.data.setdefault('debug', {})
                 debug['status_sections'] = sorted(status.keys())
@@ -558,37 +590,37 @@ class KlipperClient:
                 if 'extruder' in status:
                     ext = status['extruder']
                     if 'temperature' in ext:
-                        self.data['nozzle_temp'] = int(float(ext['temperature']))
+                        _put(self.data, 'nozzle_temp', _rounded(ext['temperature']))
                     if 'target' in ext:
-                        self.data['target_nozzle_temp'] = int(float(ext['target']))
+                        _put(self.data, 'target_nozzle_temp', _rounded(ext['target']))
                     if 'pressure_advance' in ext:
-                        self.data.setdefault('debug', {})['pressure_advance'] = float(ext['pressure_advance'])
+                        _put(self.data.setdefault('debug', {}), 'pressure_advance', _number(ext['pressure_advance']))
 
 
                 if 'heater_bed' in status:
                     bed = status['heater_bed']
                     if 'temperature' in bed:
-                        self.data['bed_temp'] = int(float(bed['temperature']))
+                        _put(self.data, 'bed_temp', _rounded(bed['temperature']))
                     if 'target' in bed:
-                        self.data['target_bed_temp'] = int(float(bed['target']))
+                        _put(self.data, 'target_bed_temp', _rounded(bed['target']))
 
                 if 'fan' in status:
                     fan = status['fan']
-                    if 'speed' in fan and fan['speed'] is not None:
-                        self.data['fan_speed_pct'] = int(float(fan['speed']) * 100)
+                    if 'speed' in fan:
+                        _put(self.data, 'fan_speed_pct', _rounded(fan['speed'], 100))
 
                 if 'toolhead' in status:
                     th = status['toolhead']
                     debug_th = self.data.setdefault('debug', {})
                     if 'stalls' in th:
-                        debug_th['toolhead_stalls'] = int(th['stalls'])
+                        _put(debug_th, 'toolhead_stalls', _whole(th['stalls']))
                     if 'homed_axes' in th:
                         debug_th['homed_axes'] = str(th['homed_axes'])
 
                 if 'gcode_move' in status:
                     gm = status['gcode_move']
-                    if 'speed_factor' in gm and gm['speed_factor'] is not None:
-                        self.data['feedrate_pct'] = int(float(gm['speed_factor']) * 100)
+                    if 'speed_factor' in gm:
+                        _put(self.data, 'feedrate_pct', _rounded(gm['speed_factor'], 100))
 
                 if 'webhooks' in status:
                     wh = status['webhooks']
@@ -623,11 +655,11 @@ class KlipperClient:
                     ss = status['system_stats']
                     debug_ss = self.data.setdefault('debug', {})
                     if 'sysload' in ss:
-                        debug_ss['sysload'] = float(ss['sysload'])
+                        _put(debug_ss, 'sysload', _number(ss['sysload']))
                     if 'memavail' in ss:
-                        debug_ss['memavail'] = float(ss['memavail'])
+                        _put(debug_ss, 'memavail', _number(ss['memavail']))
                     if 'cputime' in ss:
-                        debug_ss['cputime'] = float(ss['cputime'])
+                        _put(debug_ss, 'cputime', _number(ss['cputime']))
 
                 # Moonraker doesn't expose remaining_time directly; estimate it from
                 # print_duration and progress (constant-rate assumption). Falls back
@@ -767,36 +799,3 @@ class KlipperClient:
         self._stop_reconnect.set()
         if self.ws:
             self.ws.close()
-
-
-def translate_klipper_state(state):
-    """Translate Klipper state to Russian"""
-    states = {
-        'standby': 'ОЖИДАНИЕ',
-        'printing': 'ПЕЧАТЬ',
-        'paused': 'ПАУЗА',
-        'complete': 'ГОТОВО',
-        'cancelled': 'ОТМЕНЕНО',
-        'error': 'ОШИБКА',
-        'unknown': 'НЕИЗВЕСТНО',
-    }
-    try:
-        return states.get(state.lower(), state.upper())
-    except Exception:
-        return str(state)
-
-
-def format_remaining_minutes(minutes):
-    try:
-        m = int(minutes or 0)
-    except Exception:
-        m = 0
-    if m < 60:
-        return f"{m} мин"
-    h = m // 60
-    r = m % 60
-    if r == 0:
-        return f"{h} ч"
-    return f"{h} ч {r} мин"
-
-

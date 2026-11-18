@@ -22,6 +22,22 @@ def _reset_vendor_log_rate_limits():
     yield
 
 
+@pytest.fixture(autouse=True)
+def _no_moonraker(monkeypatch):
+    """No test reaches a real :7125: every Creality printer answers «no Klipper API»
+    unless the test sets moonraker's cache or its HTTP opener itself."""
+    from app.clients import moonraker
+
+    def refuse(*args, **kwargs):
+        raise OSError("moonraker disabled in tests")
+
+    moonraker.forget()
+    monkeypatch.setattr(moonraker, "_open", refuse)
+    monkeypatch.setattr(moonraker, "_probe_later", lambda host: moonraker.probe(host))
+    yield
+    moonraker.forget()
+
+
 @pytest.fixture
 def fake_paho(monkeypatch):
     """Route the vendored lib's paho.mqtt.client.Client to bambu_testkit.FakePaho."""

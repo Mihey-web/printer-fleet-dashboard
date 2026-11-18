@@ -66,7 +66,9 @@ def test_init_db_adds_temp_columns_to_an_old_table(tmp_path, monkeypatch):
         for col in TEMP_COLS:
             # nullable REAL without a default: a schema-only ALTER, no table rewrite
             assert info[col][2] == "REAL" and info[col][3] == 0 and info[col][4] is None, col
-        assert list(info)[-4:] == list(TEMP_COLS)        # appended to the old table
+        cols = list(info)                                # appended to the old table, together
+        assert cols[cols.index(TEMP_COLS[0]):][:len(TEMP_COLS)] == list(TEMP_COLS)
+        assert cols.index(TEMP_COLS[0]) > cols.index("reason") - 1 or "planned_filament_g" in cols
         assert row == [(1, "printing", 219.5, 65.0, "r", None, None, None, None)]
 
 

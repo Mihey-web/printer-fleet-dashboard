@@ -1,7 +1,12 @@
 # AMS screen
 
-The AMS screen shows every AMS unit of every Bambu printer: humidity, temperature and drying. If no
-printer has an AMS, the screen says «Нет принтеров с AMS.» ("No printers with AMS").
+The AMS screen shows every AMS unit of every Bambu printer: humidity, temperature and drying. A
+Creality CFS unit is listed too, titled «<printer> · CFS N», with its humidity and temperature charts
+and no drying. If no printer has an AMS, the screen says «Нет принтеров с AMS.» ("No printers with
+AMS").
+
+The spool commands of an AMS or a CFS (re-reading a tag, setting a spool by hand) are on the
+printer's card — see [Printers screen → Spools](printers.md#spools).
 
 ## The auto-drying strip
 

@@ -225,3 +225,20 @@ def sdcard(device: Any, raw: Dict[str, Any]) -> Optional[str]:
     if status == "missing" and fun2 is not None and fun2 >> FUN2_EMMC_BIT & 1:
         return None
     return status
+
+
+def feeder_settings(device, raw):
+    """Only expose switches after a real report, never library defaults."""
+    if not raw.get("home_flag_seen"):
+        return None
+    home = getattr(device, "home_flag", None)
+    out = {}
+    value = getattr(home, "ams_auto_switch_filament", None)
+    if isinstance(value, bool):
+        out["auto_refill"] = value
+    value = getattr(home, "ams_calibrate_remaining", None)
+    options = raw.get("ams_options", {})
+    if (isinstance(value, bool) and feature(device, Features.AMS_FILAMENT_REMAINING) is True
+            and all(isinstance(options.get(k), bool) for k in ("insert_flag", "power_on_flag"))):
+        out["estimate_remaining"] = value
+    return out or None

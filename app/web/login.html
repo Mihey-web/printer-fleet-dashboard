@@ -193,6 +193,29 @@
     </form>
   </div>
   <script>
+    // Into the app at the screen asked for (a PWA shortcut, a bookmark: /#/ams). This page
+    // is served at «/» itself, so «/» + the same hash is this very address: replace() to it
+    // only moves the hash, the login form stays and every press of «Войти» looks dead until
+    // a manual reload. The app keeps «#/…» in the address, so a return after the session
+    // ran out always lands here: the same address is reloaded, another one is replaced.
+    function enter() {
+      if (location.pathname === '/' && !location.search) location.reload();
+      else location.replace('/' + location.hash);
+    }
+
+    // The server answers in English (app/api/auth.py): its known answers in this page's
+    // own words, which /i18n.js then shows in the chosen language; another text as it is.
+    var ANSWERS = {
+      'Invalid username or password': 'Неверный логин или пароль',
+      'Too many login attempts. Try again later.': 'Слишком много попыток входа — попробуйте позже',
+      'Username and password required': 'Введите логин и пароль'
+    };
+    function refusal(status, detail) {
+      if (typeof detail === 'string' && ANSWERS.hasOwnProperty(detail)) return ANSWERS[detail];
+      if (status === 429) return ANSWERS['Too many login attempts. Try again later.'];
+      return typeof detail === 'string' && detail ? detail : 'Ошибка входа';
+    }
+
     document.getElementById('f').addEventListener('submit', function (ev) {
       ev.preventDefault();
       var btn = document.getElementById('b');
@@ -207,21 +230,20 @@
           password: document.getElementById('p').value,
         }),
       }).then(function (res) {
-        return res.json().then(function (data) { return { ok: res.ok, data: data }; });
+        return res.json().then(function (data) { return { ok: res.ok, status: res.status, data: data }; });
       }).then(function (r) {
-        // the screen asked for (a PWA shortcut, a bookmark: /#/ams) opens after the sign-in
         if (r.ok && location.protocol === 'http:') {
           // Over plain http the browser drops a Secure cookie (COOKIE_SECURE=1) without
           // a word: the sign-in "succeeds" and the form comes back. Check the session.
           return fetch('/api/auth/me', { credentials: 'same-origin' }).then(function (me) {
-            if (me.ok) { window.location.replace('/' + location.hash); return; }
+            if (me.ok) { enter(); return; }
             err.textContent = 'Вход принят, но браузер отклонил cookie: откройте панель по HTTPS или задайте COOKIE_SECURE=0 в локальной сети.';
             btn.disabled = false;
           });
         }
-        if (r.ok) { window.location.replace('/' + location.hash); }
+        if (r.ok) { enter(); }
         else {
-          err.textContent = r.data.detail || 'Ошибка входа';
+          err.textContent = refusal(r.status, r.data && r.data.detail);
           btn.disabled = false;
         }
       }).catch(function () {
@@ -243,7 +265,7 @@
         sessionStorage.setItem(key, String(now));
       } catch (e) { return; }
       fetch('/api/auth/refresh', { method: 'POST', credentials: 'same-origin' }).then(function (res) {
-        if (res.ok) window.location.replace('/' + location.hash);
+        if (res.ok) enter();
       }).catch(function () {});
     })();
   </script>

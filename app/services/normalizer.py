@@ -4,8 +4,9 @@ import math
 from typing import Any, Dict, Optional
 
 from app.collectors.bambu_raw import CANCEL_CODES
+from app.services.creality_features import chamber_limit
 from app.domain.models import PrinterKind, PrinterStatus, PrinterState, now_ts
-from app.services import ams_drying, bambu_extras, hms_catalog, notification_tracker, notifications
+from app.services import bambu_models, print_material, project_summary, creality_features, creality_parts, ams_drying, bambu_extras, hms_catalog, notification_tracker, notifications
 from app.services.utils import map_state, as_float, as_int, safe_job_name
 # Hard import: a broken vendored tree must fail loudly, not silently drop the fans.
 from app.vendor.pybambu.const import FansEnum, Features
@@ -52,11 +53,6 @@ def _in_chamber_range(value: Optional[float]) -> bool:
     return value is not None and 0 < value < _CHAMBER_MAX
 
 
-# Models with a chamber temperature sensor (the lib's Features.CHAMBER_TEMPERATURE:
-# H2 / P2 / X1 / X1E / X2), by model name prefix.
-_CHAMBER_SENSOR_PREFIXES = ("H2", "P2", "X1", "X2")
-
-
 def _has_chamber_sensor(device: Any, device_type: Optional[str]) -> bool:
     """The lib's Features.CHAMBER_TEMPERATURE (a model-only flag); while the lib
     cannot answer (firmware version unknown) the same model-family test on the
@@ -65,7 +61,7 @@ def _has_chamber_sensor(device: Any, device_type: Optional[str]) -> bool:
     if flag is not None:
         return flag
     model = _read(getattr(device, "info", None), "device_type") or device_type or ""
-    return str(model).upper().startswith(_CHAMBER_SENSOR_PREFIXES)
+    return bambu_models.has(model, "chamber_sensor")
 
 
 def _hms_wiki(code: Any, wiki: Any) -> Optional[str]:
@@ -180,6 +176,9 @@ def _nozzle_range(tray: Any) -> Optional[list]:
     return [lo, hi]
 
 
+# The AMS humidity index: levels 1..5.
+HUMIDITY_LEVELS = 5
+
 # PrinterStatus.ams["tray_now"]: nothing loaded / an external spool (either of
 # the H2D's two). Not the ams_id numbering of star / snow, where 255 is the
 # (main) external spool.
@@ -210,6 +209,13 @@ def _tray_now(ams_obj: Any, units: list) -> Optional[int]:
             return base + t if 0 <= t < n else None
         base += n
     return None
+
+
+def _humidity_level(index: Any) -> Optional[int]:
+    """The AMS humidity level 1 (dry) .. 5 (wet), as the panel reads it. The printer's index
+    runs the other way, 5 = driest (live: index 5 at 5-9 % RH, 4 at 13 %); 0 = never reported."""
+    value = as_int(index)
+    return HUMIDITY_LEVELS + 1 - value if value is not None and 1 <= value <= HUMIDITY_LEVELS else None
 
 
 def _dry_info(entry: Dict[str, Any], unit: Any, raw: Dict[str, Any], feeding: bool) -> Optional[Dict[str, Any]]:
@@ -258,8 +264,11 @@ def _build_ams(ams_obj: Any, raw: Optional[Dict[str, Any]] = None, printing: boo
             mat_type = getattr(tray, "type", None)
             mat_type = mat_type if isinstance(mat_type, str) else ""
             name = getattr(tray, "name", None)
-            # "?" = spool loaded, material not set: the 1.0.1 meaning was an
-            # empty type (empty only if the colour is empty too) and no name.
+            # "?" = spool loaded, material not set (a spool without RFID, nothing
+            # chosen for it): the lib read the tray's state bits as loaded. The
+            # slot is taken, its type and name unknown; load and re-read the tag
+            # work on it (the spool that needs it most).
+            unknown_spool = _UNKNOWN_TRAY in (mat_type, name)
             if mat_type == _UNKNOWN_TRAY:
                 mat_type = ""
             if name == _UNKNOWN_TRAY:
@@ -269,10 +278,10 @@ def _build_ams(ams_obj: Any, raw: Optional[Dict[str, Any]] = None, printing: boo
             # leftover colour, so keying emptiness only on colour left it rendered
             # as a black-filament chip.
             is_empty_marker = mat_type.strip().lower() == "empty"
-            empty = is_empty_marker or (color[:8] in ("", "00000000") and not mat_type)
+            empty = not unknown_spool and (is_empty_marker or (color[:8] in ("", "00000000") and not mat_type))
             slots.append({
                 "type": None if empty else (mat_type or None),
-                "color": None if empty else color[:6],
+                "color": None if empty or (unknown_spool and color[:8] in ("", "00000000")) else color[:6],
                 "name": None if empty else name,
                 "remain_pct": as_int(getattr(tray, "remain", None)),
                 "empty": empty,
@@ -282,12 +291,13 @@ def _build_ams(ams_obj: Any, raw: Optional[Dict[str, Any]] = None, printing: boo
             # The physical unit id (dict key). History is keyed by it, never by
             # the position in the filtered `units` list.
             "index": unit_id,
-            "humidity": as_int(getattr(unit, "humidity_index", None)),
+            "humidity": _humidity_level(getattr(unit, "humidity_index", None)),
             # humidity = % from humidity_raw (AMS 2 Pro / HT), remaining_drying_time
-            # = minutes left; the lib defaults both to 0 when never reported.
+            # = minutes left, temperature: the lib defaults them to 0 when never
+            # reported (or out of its range: an AMS powering on sends bogus ones).
             "humidity_pct": as_int(getattr(unit, "humidity", None)) or None,
             "dry_time": as_int(getattr(unit, "remaining_drying_time", None)) or None,
-            "temp": as_float(getattr(unit, "temperature", None)),
+            "temp": as_float(getattr(unit, "temperature", None)) or None,
             "slots": slots,
         }
         entry["dry"] = _dry_info(entry, unit, raw, feeding_unit == unit_id)
@@ -408,6 +418,7 @@ def normalize_bambu(printer_id: str, label: str, result: Any, device_type: Optio
     target_bed_temp = as_float(getattr(temp_obj, "target_bed_temp", None)) if temp_obj else None
 
     info_obj = getattr(result, "info", None)
+    airduct = _airduct(info_obj)
     wifi_signal = as_int(getattr(info_obj, "wifi_signal", None)) if info_obj else None
     firmware_version = getattr(info_obj, "sw_ver", None) if info_obj else None
     # new_version_state: 1 = update available, 2 = up to date, 0/absent = unknown
@@ -567,21 +578,7 @@ def normalize_bambu(printer_id: str, label: str, result: Any, device_type: Optio
     raw_remaining_time = as_int(getattr(pj, "remaining_time", None))
     eta_seconds = raw_remaining_time * 60 if raw_remaining_time is not None else None
 
-    # PrintJob has no ``print_time`` attribute; derive elapsed seconds from
-    # start_time if it's available (the lib stamps it, UTC-aware, when it sees
-    # the printer go from idle to busy; None after a restart mid-print).
-    print_time_seconds = None
-    start_time = getattr(pj, "start_time", None)
-    if start_time is not None:
-        try:
-            from datetime import datetime, timezone
-            now = datetime.now(start_time.tzinfo) if getattr(start_time, "tzinfo", None) else datetime.now()
-            elapsed = (now - start_time).total_seconds()
-            if elapsed > 0:
-                print_time_seconds = int(elapsed)
-        except Exception as e:
-            logger.debug("[%s] print_time_seconds calc failed: %s", label, e)
-            print_time_seconds = None
+    print_time_seconds = _bambu_print_time(pj, raw, state, label)
 
     ams_obj = getattr(result, "ams", None)
     ams = _build_ams(ams_obj, raw, state in (PrinterState.PRINTING, PrinterState.PAUSED))
@@ -595,7 +592,11 @@ def normalize_bambu(printer_id: str, label: str, result: Any, device_type: Optio
         online=True,
         state=state,
         progress_pct=progress_pct,
-        job_name=safe_job_name(ext),
+        job_name=_bambu_job_name(ext, result),
+        planned_filament_g=print_material.bambu_grams(result),
+        preview_key=print_material.bambu_preview(result),
+        project_key=print_material.bambu_project(result),
+        skipped_objects=_skipped_objects(pj),
         eta_seconds=eta_seconds,
         print_time_seconds=print_time_seconds,
         nozzle_temp=nozzle_temp,
@@ -618,7 +619,9 @@ def normalize_bambu(printer_id: str, label: str, result: Any, device_type: Optio
         last_error=last_error,
         debug=debug if kind_debug_enabled(state) else {},
         ams=ams,
+        feeder_settings=bambu_extras.feeder_settings(result, raw) if ams else None,
         fans=fans,
+        airduct=airduct,
         fw_update=fw_update,
         light_on=light_on,
         filament_change=bambu_extras.filament_change(raw),
@@ -635,6 +638,71 @@ def normalize_bambu(printer_id: str, label: str, result: Any, device_type: Optio
         notifications=notifs,
     )
 
+
+
+# The raw report's start of the job (exact) vs the lib's (rounded down to the minute): the same
+# idle -> busy transition when they are this close.
+_START_MATCH_S = 120
+
+
+def _bambu_print_time(pj: Any, raw: Dict[str, Any], state: PrinterState, label: str) -> Optional[int]:
+    """Seconds the job has printed. PrintJob has no ``print_time``: the lib stamps start_time on
+    an idle -> busy transition (UTC-aware, rounded down to the minute; None after a restart
+    mid-print) and never clears it. From the start (the raw report's exact one when it is the
+    same) to now while the job runs; to the lib's end_time (when no time was left) once
+    FINISHED; None otherwise (an idle printer's last job, a failed one): not a growing clock."""
+    start_time = getattr(pj, "start_time", None)
+    if start_time is None:
+        return None
+    try:
+        from datetime import datetime
+        now = (datetime.now(start_time.tzinfo) if getattr(start_time, "tzinfo", None) else datetime.now()).timestamp()
+        start = start_time.timestamp()
+        exact = as_float(raw.get("job_started_at"))
+        if exact is not None and 0 <= exact - start < _START_MATCH_S:
+            start = exact
+        if state in (PrinterState.PRINTING, PrinterState.PAUSED):
+            end = now
+        elif state == PrinterState.FINISHED and getattr(pj, "end_time", None) is not None:
+            end = min(pj.end_time.timestamp(), now)
+        else:
+            return None
+        return int(max(end - start, 0))      # the two clocks differ in resolution: never -0.001
+    except Exception as e:
+        logger.debug("[%s] print_time_seconds calc failed: %s", label, e)
+        return None
+
+
+def _bambu_job_name(ext, device):
+    """The firmware's name, unless it is a placeholder and the 3MF names the parts."""
+    name = safe_job_name(ext)
+    if project_summary.generic_name(name):
+        return print_material.bambu_title(device) or name
+    return name
+
+
+# pybambu's names for the printer's air duct modes (device.airduct.modeList); 2 (laser) is not ours.
+AIRDUCT_IDS = {"cooling": 0, "heating": 1}
+
+
+def _airduct(info):
+    """{"mode", "modes"} of a printer that reports switchable air duct modes, else None."""
+    modes = sorted({AIRDUCT_IDS[m] for m in getattr(info, "airduct_modes_available", None) or [] if m in AIRDUCT_IDS})
+    mode = as_int(getattr(info, "airduct_mode", None))
+    if len(modes) < 2 or mode not in modes:
+        return None
+    return {"mode": mode, "modes": modes}
+
+
+def _skipped_objects(pj):
+    # pybambu's PrintJob.get_skipped_objects is a property (MQTT s_obj), not a method
+    ids = getattr(pj, "get_skipped_objects", None) if pj is not None else None
+    return sorted({int(i) for i in ids if str(i).isdigit()}) if isinstance(ids, list) else None
+
+
+def _stored_key(key):
+    from app.services.job_previews import valid_key
+    return key if valid_key(key) else None
 
 
 def normalize_ws_dict(printer_id: str, label: str, kind: PrinterKind, data: Dict[str, Any], device_type: Optional[str] = None) -> PrinterStatus:
@@ -793,6 +861,10 @@ def normalize_ws_dict(printer_id: str, label: str, kind: PrinterKind, data: Dict
         state=state,
         progress_pct=progress_pct,
         job_name=safe_job_name(data),
+        planned_filament_g=print_material.grams(data.get("planned_filament_g")),
+        preview_key=_stored_key(data.get("preview_key")),
+        project_key=_stored_key(data.get("project_key")),
+        skipped_objects=creality_parts.skipped(data) if kind == PrinterKind.CREALITY else None,
         eta_seconds=eta_seconds,
         print_time_seconds=print_time_seconds,
         nozzle_temp=nozzle_temp,
@@ -815,8 +887,14 @@ def normalize_ws_dict(printer_id: str, label: str, kind: PrinterKind, data: Dict
         debug=data.get("debug", {}) if kind_debug_enabled(state) else {},
         fans=fans,
         light_on=light_on,
+        cfs=data.get("cfs") if kind == PrinterKind.CREALITY else None,
+        feeder_settings=creality_features.feeder_settings(data) if kind == PrinterKind.CREALITY else None,
+        chamber_limit=chamber_limit(device_type, data) if kind == PrinterKind.CREALITY else None,
+        target_chamber_temp=as_float(data.get("target_box_temp")) if chamber_limit(device_type, data) else None,
         ctl_ready=ctl_ready,
         light_ctl=light_ctl,
+        klipper_api=(data.get("klipper_api") if isinstance(data.get("klipper_api"), bool) else None)
+        if kind == PrinterKind.CREALITY else None,
         notifications=notifs,
     )
 

@@ -125,8 +125,8 @@ def test_every_screen_shows_an_existing_panel():
     assert {c["view"] for c in screens.values()} == PANELS
     # the subs: the history switch's own names, nothing more — Печати · Хронология · Статистика ·
     # Действия (plan step 8, deliberately changed: the panel's names are the addresses' now)
-    assert set(screens["history"]["subs"].values()) == HISTORY_SUBS == {"jobs", "chrono", "stats", "actions"}
-    assert screens["history"]["subs"] == {s: s for s in ("jobs", "chrono", "stats", "actions")}
+    assert set(screens["history"]["subs"].values()) == HISTORY_SUBS == {"jobs", "chrono", "stats", "plastic", "actions"}
+    assert screens["history"]["subs"] == {s: s for s in ("jobs", "chrono", "stats", "plastic", "actions")}
     assert screens["history"]["adminSubs"] == ["actions"]
     # «Сводка» is gone with its panel (plan step 8)
     assert "dashboard" not in screens and "dashboard" not in PANELS and "dashboard" not in TABS

@@ -18,9 +18,11 @@ import uuid
 from threading import Lock
 from typing import Any, Dict, List, Optional, Tuple
 
+from app.services import data_dir, sqlite_db
+
 logger = logging.getLogger(__name__)
 
-DB_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "printer_history.db")
+DB_PATH = data_dir.HISTORY_DB
 
 KINDS = ("bambu", "creality", "klipper", "mks")
 
@@ -195,7 +197,7 @@ def set_maintenance(printer_id: str, on: bool, note: Optional[str] = None, by: O
 
 
 def _connect(db_path: Optional[str] = None) -> sqlite3.Connection:
-    conn = sqlite3.connect(db_path or DB_PATH, timeout=10)
+    conn = sqlite_db.connect(db_path or DB_PATH)
     conn.row_factory = sqlite3.Row
     return conn
 

@@ -38,13 +38,13 @@ Open the dashboard address in a browser (`http://127.0.0.1:8000` on the same com
 address of your server). The login page shows the fields **Login** («Логин») and **Password**
 («Пароль») and the button **Sign in** («Войти»).
 
-Error messages on the login page come from the server and are in English:
+The login page shows its errors in the panel's language:
 
 | Message | Meaning |
 | --- | --- |
-| `Invalid username or password` | Wrong login or password. |
-| `Too many login attempts. Try again later.` | Too many wrong attempts within 15 minutes: 5 from one address (wait), or more than 10 for one login (each attempt then waits up to 30 s; the right password still gets in). |
-| `Username and password required` | A field is empty. |
+| «Invalid username or password» («Неверный логин или пароль») | Wrong login or password. |
+| «Too many sign-in attempts — try again later» («Слишком много попыток входа — попробуйте позже») | Too many wrong attempts within 15 minutes: 5 from one address (wait), or more than 10 for one login (each attempt then waits up to 30 s; the right password still gets in). |
+| «Enter the username and password» («Введите логин и пароль») | A field is empty. |
 
 If the page reloads and asks for the password again after a correct login, or says «Вход принят,
 но браузер отклонил cookie…» («Sign-in accepted, but the browser rejected the cookie…»), the

@@ -1,9 +1,11 @@
 # Kuznitsa — one-command self-hosting.
 #
 # First run, and after every `git pull` (create the SQLite files so Docker
-# bind-mounts them as files, not directories; touch keeps an existing file):
+# bind-mounts them as files, not directories; touch keeps an existing file;
+# data/ holds the job previews and cards and the shared file pool):
 #
 #   touch printer_history.db users.db ams_history.db
+#   mkdir -p data
 #   docker compose up -d --build
 #   docker compose logs -f          # grab the first-run admin password
 #
@@ -42,3 +44,6 @@ services:
       - ./users.db:/app/users.db
       # AMS humidity history: auto-drying decides on it.
       - ./ams_history.db:/app/ams_history.db
+      # Job previews and job cards the print history refers to (data/job_previews),
+      # the shared file pool (data/file_pool), Bambu's error texts (data/hms).
+      - ./data:/app/data

@@ -178,6 +178,10 @@ ALLOWED = {
     # table instead of "Код ошибки печати: 0x07008002".
     ("x1c_paused_runout", "last_error"): lambda v: (isinstance(v, str) and v.startswith("Ошибка печати 0700_8002: ")
                                                     and CYRILLIC.search(v) is not None),
+    # The humidity level reads 1 (dry) .. 5 (wet), as the panel shows it: the printer's
+    # index (5 = driest, 1.0.1 passed it on as is) the other way round.
+    ("x1c_printing", "ams.units[0].humidity"): 2,
+    ("p2s_ctc_ams2pro", "ams.units[0].humidity"): 4,
     # Empty slots report remain -1 (unknown) instead of 0; the UI hides it for empty slots.
     ("x1c_printing", "ams.units[0].slots[2].remain_pct"): -1,
     ("x1c_printing", "ams.units[0].slots[3].remain_pct"): -1,

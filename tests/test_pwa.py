@@ -190,10 +190,12 @@ def test_login_refresh_is_one_shot_with_a_loop_guard():
     assert "sessionStorage" in script and "try" in script
     assert "15000" in script
     assert re.search(r"fetch\('/api/auth/refresh', \{ method: 'POST', credentials: 'same-origin' \}\)", script)
-    # the screen asked for survives the sign-in (plan step 15: a PWA shortcut /#/ams, deliberately changed)
+    # the screen asked for survives the sign-in (plan step 15: a PWA shortcut /#/ams, deliberately changed);
+    # every way in goes through enter(): this very address (/#/ams) is reloaded, not replace()d to
     assert "location.replace('/' + location.hash)" in script and "location.replace('/')" not in script
-    # once per load: no timers, no reload
-    assert "setInterval" not in script and "setTimeout" not in script and "reload" not in script
+    assert script.count("location.reload()") == 1 and "if (res.ok) enter();" in script
+    # once per load: no timers
+    assert "setInterval" not in script and "setTimeout" not in script
 
 
 # --- manifest ----------------------------------------------------------------------

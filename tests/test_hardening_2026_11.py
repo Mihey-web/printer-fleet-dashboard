@@ -227,8 +227,9 @@ var els = {};
 function el(id) { return els[id] || (els[id] = { id: id, value: '', textContent: '', disabled: false,
   listeners: {}, addEventListener: function (t, f) { this.listeners[t] = f; } }); }
 globalThis.document = { getElementById: el };
-var replaced = [];
-globalThis.location = { protocol: %(protocol)s, hash: '', replace: function (u) { replaced.push(u); } };
+var replaced = [], reloads = 0;
+globalThis.location = { protocol: %(protocol)s, pathname: '/', search: %(search)s, hash: %(hash)s,
+  replace: function (u) { replaced.push(u); }, reload: function () { reloads++; } };
 globalThis.window = { location: globalThis.location };
 globalThis.sessionStorage = { getItem: function () { return String(Date.now()); }, setItem: function () {} };
 var calls = [];
@@ -242,17 +243,19 @@ globalThis.fetch = function (url) {
 el('u').value = 'admin'; el('p').value = 'pw';
 el('f').listeners.submit({ preventDefault: function () {} });
 setTimeout(function () {
-  console.log(JSON.stringify({ calls: calls, replaced: replaced, err: el('e').textContent, disabled: el('b').disabled }));
+  console.log(JSON.stringify({ calls: calls, replaced: replaced, reloads: reloads, err: el('e').textContent,
+                               disabled: el('b').disabled }));
 }, 50);
 """
 
 
-def _run_login_page(protocol, answers):
+def _run_login_page(protocol, answers, search="", hash=""):
     node = shutil.which("node")
     if node is None:
         pytest.skip("node is not installed")
     script = re.findall(r"<script>(.*?)</script>", LOGIN, re.S)[-1]
-    src = _LOGIN_HARNESS % {"protocol": json.dumps(protocol), "answers": json.dumps(answers), "script": script}
+    src = _LOGIN_HARNESS % {"protocol": json.dumps(protocol), "answers": json.dumps(answers), "script": script,
+                            "search": json.dumps(search), "hash": json.dumps(hash)}
     out = subprocess.run([node, "-"], input=src, capture_output=True, text=True, timeout=60, encoding="utf-8")
     assert out.returncode == 0, out.stderr
     return json.loads(out.stdout)
@@ -265,7 +268,7 @@ def test_login_page_explains_a_rejected_cookie_over_http():
     r = _run_login_page("http:", {"/api/auth/login": LOGIN_OK,
                                   "/api/auth/me": {"ok": False, "status": 401, "body": {}}})
     assert r["calls"] == ["/api/auth/login", "/api/auth/me"]
-    assert r["replaced"] == []
+    assert r["replaced"] == [] and r["reloads"] == 0
     assert r["err"] == HINT
     assert r["disabled"] is False
 
@@ -273,18 +276,33 @@ def test_login_page_explains_a_rejected_cookie_over_http():
 def test_login_page_goes_on_when_the_session_is_there():
     r = _run_login_page("http:", {"/api/auth/login": LOGIN_OK,
                                   "/api/auth/me": {"ok": True, "status": 200, "body": {}}})
-    assert r["replaced"] == ["/"] and r["err"] == ""
+    assert r["reloads"] == 1 and r["replaced"] == [] and r["err"] == ""
 
 
 def test_login_page_over_https_does_not_ask_twice():
     r = _run_login_page("https:", {"/api/auth/login": LOGIN_OK})
-    assert r["calls"] == ["/api/auth/login"] and r["replaced"] == ["/"]
+    assert r["calls"] == ["/api/auth/login"] and r["reloads"] == 1
+
+
+def test_login_page_at_a_screen_address_reloads_it():
+    # the app keeps «#/…» in the address, so the login page comes back at /#/ams; replace('/#/ams')
+    # there only moved the hash: the form stayed and «Войти» looked dead until a manual reload
+    for protocol, answers in (("https:", {"/api/auth/login": LOGIN_OK}),
+                              ("http:", {"/api/auth/login": LOGIN_OK,
+                                         "/api/auth/me": {"ok": True, "status": 200, "body": {}}})):
+        r = _run_login_page(protocol, answers, hash="#/ams")
+        assert r["reloads"] == 1 and r["replaced"] == [], protocol
+
+
+def test_login_page_with_a_query_goes_to_the_screen():
+    r = _run_login_page("https:", {"/api/auth/login": LOGIN_OK}, search="?nosw", hash="#/ams")
+    assert r["replaced"] == ["/#/ams"] and r["reloads"] == 0
 
 
 def test_login_page_wrong_password_unchanged():
     r = _run_login_page("http:", {"/api/auth/login": {"ok": False, "status": 401,
                                                       "body": {"detail": "Invalid username or password"}}})
-    assert r["calls"] == ["/api/auth/login"] and r["err"] == "Invalid username or password"
+    assert r["calls"] == ["/api/auth/login"] and r["err"] == "Неверный логин или пароль"   # the server's English, shown in Russian
 
 
 def test_cookie_hint_is_in_the_english_dictionary():

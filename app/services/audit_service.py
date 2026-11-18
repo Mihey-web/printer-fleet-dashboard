@@ -5,8 +5,9 @@ from typing import Dict, Iterable, List, Optional, Sequence, Tuple
 from threading import Lock
 
 from app.domain.user_models import AuditEntry
+from app.services import data_dir, sqlite_db
 
-USERS_DB = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "users.db")
+USERS_DB = data_dir.USERS_DB  # the same file as app.api.auth.USERS_DB
 
 
 class AuditService:
@@ -15,7 +16,7 @@ class AuditService:
         self._init_db()
 
     def _init_db(self):
-        conn = sqlite3.connect(USERS_DB, timeout=10)
+        conn = sqlite_db.connect(USERS_DB)
         conn.execute("PRAGMA journal_mode=WAL")
         conn.execute("""
             CREATE TABLE IF NOT EXISTS audit_log (
@@ -48,7 +49,7 @@ class AuditService:
         # header on every request.
         user_agent = (user_agent or "")[:512]
         with self._lock:
-            conn = sqlite3.connect(USERS_DB, timeout=10)
+            conn = sqlite_db.connect(USERS_DB)
             conn.execute("""
                 INSERT INTO audit_log (user_id, action, ip_address, user_agent, created_at)
                 VALUES (?, ?, ?, ?, ?)
@@ -99,7 +100,7 @@ class AuditService:
                  printer: Optional[str] = None,
                  fr: Optional[float] = None,
                  to: Optional[float] = None) -> List[AuditEntry]:
-        conn = sqlite3.connect(USERS_DB, timeout=10)
+        conn = sqlite_db.connect(USERS_DB)
         conn.row_factory = sqlite3.Row
         where_clause, params = self._where(user_id, action, prefixes, exclude, printer, fr, to)
         rows = conn.execute(f"""
@@ -122,7 +123,7 @@ class AuditService:
         printer: [{"user", "key", "n"}], the largest first, at most `limit` (failed logins
         carry whatever name was typed, so the users are not a closed set)."""
         where_clause, params = self._where(printer=printer, fr=fr, to=to)
-        conn = sqlite3.connect(USERS_DB, timeout=10)
+        conn = sqlite_db.connect(USERS_DB)
         try:
             rows = conn.execute(f"""
                 SELECT user_id,
@@ -140,7 +141,7 @@ class AuditService:
         return [{"user": r[0], "key": r[1], "n": r[2]} for r in rows]
 
     def count_failed_attempts(self, ip_address: str, window_sec: int = 900) -> int:
-        conn = sqlite3.connect(USERS_DB, timeout=10)
+        conn = sqlite_db.connect(USERS_DB)
         row = conn.execute("""
             SELECT COUNT(*) as cnt FROM audit_log
             WHERE action = 'login_fail' AND ip_address = ?
@@ -159,7 +160,7 @@ class AuditService:
         """
         if not username:
             return 0
-        conn = sqlite3.connect(USERS_DB, timeout=10)
+        conn = sqlite_db.connect(USERS_DB)
         try:
             row = conn.execute("""
                 SELECT COUNT(*) as cnt FROM audit_log

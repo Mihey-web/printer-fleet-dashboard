@@ -62,15 +62,15 @@ def _node(src: str):
     node = shutil.which("node")
     if node is None:
         pytest.skip("node is not installed")
-    out = subprocess.run([node, "-e", src], capture_output=True, text=True, timeout=60, encoding="utf-8")
+    out = subprocess.run([node, "-"], input=src, capture_output=True, text=True, timeout=60, encoding="utf-8")
     assert out.returncode == 0, out.stderr
     return json.loads(out.stdout)
 
 
 def _lib(*extra: str) -> str:
     """The helper block with what it uses, plus the `extra` app.js functions."""
-    src = "\n".join(_function(n) for n in ("safeText", "icon", "amsUnitName", "amsFmtMin"))
-    return src + "\n" + _block() + "".join("\n" + _js_function(n) for n in extra)
+    src = "\n".join(_function(n) for n in ("safeText", "icon", "amsUnitName", "amsFmtMin", "timeFmt"))
+    return src + "\nfunction isAdmin() { return true; }\nfunction isOffline(p) { return p.online === false; }\n" + _block() + "".join("\n" + _js_function(n) for n in extra)
 
 
 def run(expr: str, *extra: str):
@@ -100,10 +100,10 @@ def _dry(**kw):
 
 def test_dry_status_text():
     assert run("dryStatusText(%s)" % json.dumps({"dry": DRYING, "dry_time": 712})) == \
-        "Сушка · осушение · 55 °C · PETG · осталось 11:52"
+        "Сушка · осушение · 55° · PETG · осталось 11ч 52м"
     off = _dry(status="off", phase=None, active=False, remaining_min=None, temp=None, filament=None)
     assert run("dryStatusText(%s)" % json.dumps({"dry": off})) == "Сушка выключена"
-    assert run("dryStatusText({dry: null, dry_time: 90})") == "Сушка · осталось 1:30"
+    assert run("dryStatusText({dry: null, dry_time: 90})") == "Сушка · осталось 1ч 30м"
     assert run("dryStatusText({dry: null, dry_time: null})") == "Сушка выключена"
     # a device string is escaped
     evil = _dry(filament="<img src=x>")
@@ -199,7 +199,7 @@ def test_ams_popover_without_commands():
     assert html.count('<div class="pc-pop-note">Сушка выключена</div>') == 1           # the unit with a dryer
     drying = _printer()
     drying["ams"]["units"][0].update(dry=DRYING, dry_time=712)
-    assert '<div class="pc-pop-note">Сушка · осушение · 55 °C · PETG · осталось 11:52</div>' in run(
+    assert '<div class="pc-pop-note">Сушка · осушение · 55° · PETG · осталось 11ч 52м</div>' in run(
         "amsViewPopHtml(%s)" % json.dumps(drying))
     assert 'class="pc-pop-slot on"' not in run("amsViewPopHtml(%s)" % json.dumps(_printer(filament_loaded=False)))
     assert run("amsViewPopHtml(%s)" % json.dumps(_printer(ams=None))) == ""
@@ -216,6 +216,28 @@ def test_ams_chip_opens_its_popover_for_everyone():
     css = (ROOT / "app" / "web" / "styles.css").read_text(encoding="utf-8")
     for sel in (".pc-pop-slot {", ".pc-pop-slot.on {", ".pc-pop-slot.empty {", ".pc-chip.pc-chartable { cursor: pointer; }"):
         assert sel in css, sel
+
+
+def test_cfs_chip_opens_its_popover_like_the_ams_chip():
+    """The Creality CFS chip: an admin's live card opens the commands, anyone else's the same
+    popover read-only (cfsPopHtml); the card remembers the open popover as it does for the AMS."""
+    p = {"id": "c1", "kind": "creality", "state": "idle", "online": True, "grace_period_active": False,
+         "cfs": [{"id": 1, "external": False, "humidity": 30, "temp": 25, "slots": [
+             {"id": 0, "empty": False, "type": "PLA", "color": "#ff0000", "percent": 80, "selected": True}]}]}
+    lib = _lib("amsChip", "cfsSlot", "cfsChip").replace(
+        "function isAdmin() { return true; }", "var ADMIN = true; function isAdmin() { return ADMIN; }")
+    def chip(printer, admin=True):
+        return _node(lib + "\nADMIN = %s;\nconsole.log(JSON.stringify(cfsChip(%s)));" % (
+            "true" if admin else "false", json.dumps(printer)))
+    editable = '<span class="pc-chip pc-ams pc-editable" data-edit="cfs">'
+    viewable = '<span class="pc-chip pc-ams pc-chartable" data-chart="cfs">'
+    assert chip(p).startswith(editable)
+    assert chip(p, admin=False).startswith(viewable)
+    assert chip(dict(p, online=False)).startswith(viewable)
+    assert chip(dict(p, grace_period_active=True)).startswith(viewable)
+    ctl = JS[JS.index("(function initPrinterControls() {"):]
+    opener = ctl[ctl.index('} else if (kind === "cfs") {'):ctl.index('} else if (kind === "ams" || kind === "ext") {')]
+    assert "if (pc) {" in opener and 'cardUiOf(pid).pop = "cfs";' in opener and "cfsPopHtml(pc)" in opener
 
 
 def test_ams_popover_while_printing():
@@ -267,7 +289,7 @@ def test_ams_popover_drying_controls():
     p["ams"]["units"][0]["dry"] = DRYING
     html = _pop(p)
     assert 'data-dry-stop="0"' in html and "data-dry-open" not in html
-    assert "Сушка · осушение · 55 °C · PETG · осталось 11:52" in html
+    assert "Сушка · осушение · 55° · PETG · осталось 11ч 52м" in html
     blocked = _printer()
     blocked["ams"]["units"][0]["dry"]["blockers"] = [{"code": 2, "text": "AMS занят <b>"}]
     html = _pop(blocked)
@@ -336,7 +358,7 @@ def test_ams_tab_drying_line():
     p = _printer()
     drying = _tab_unit(dry=DRYING, dry_time=712)
     html = _tab(drying, p, True)
-    assert 'class="ams-dry"' in html and "осталось 11:52" in html
+    assert 'class="ams-dry"' in html and "осталось 11ч 52м" in html
     assert 'data-ams-dry-stop data-pid="b1" data-ams="0"' in html
     assert "data-ams-dry-stop" not in _tab(drying, p, False)              # viewer: status only
     # not drying: «Сушить…» for an admin, nothing for a viewer
@@ -351,7 +373,7 @@ def test_ams_tab_drying_line():
     assert "Сушка недоступна" in _tab(blocked, p, False)
     # a unit without a drying block (older firmware): drying from dry_time, no controls
     legacy = _tab_unit(dry=None, dry_time=90)
-    assert "осталось 1:30" in _tab(legacy, p, True) and "data-ams-dry" not in _tab(legacy, p, True)
+    assert "осталось 1ч 30м" in _tab(legacy, p, True) and "data-ams-dry" not in _tab(legacy, p, True)
     assert _tab(_tab_unit(dry=None), p, True) == ""
 
 
@@ -380,8 +402,8 @@ def test_card_chip_shows_the_drying_time_left():
     p = _printer()
     p["ams"]["units"][0].update(dry=_dry(remaining_min=719), dry_time=719, temp=47.9)
     [(tip, text)] = _chip_temp(p)
-    assert text == '<svg class="pc-ic" aria-hidden="true"><use href="#i-hourglass"></use></svg>11:59'
-    assert tip == "Сушка · осушение · 55 °C · PETG · осталось 11:59 · в AMS 48°"
+    assert text == '<svg class="pc-ic" aria-hidden="true"><use href="#i-hourglass"></use></svg>11ч 59м'
+    assert tip == "Сушка · осушение · 55° · PETG · осталось 11ч 59м · в AMS 48°"
     # not drying, two units (this fixture): the temperature is in the humidity's tooltip — slots,
     # humidity and two temperatures ran past the card's edge (H2S with AMS 2 Pro + AMS HT)
     p["ams"]["units"][0].update(dry=_dry(status="off", active=False, remaining_min=None), dry_time=None, temp=31.4)
@@ -599,12 +621,12 @@ def test_ams_tab_one_drying_line_with_the_auto_dry():
     drying = _tab_unit(dry=DRYING, dry_time=712)
     # who dries, t° and the material, the time left in one format, Stop for an admin
     html = _tab_auto(drying, p, True, _auto("dry", series=2, origin="auto"))
-    assert _plain(html) == "🔥авто · прогон 2 · 55 °C PETG · ещё 11:52Стоп"
+    assert _plain(html) == "🔥авто · прогон 2 · 55° PETG · ещё 11ч 52мСтоп"
     assert "data-ams-dry-stop" in html and "data-ams-dry-stop" not in _tab_auto(drying, p, False, _auto("dry", series=2, origin="auto"))
-    assert "вручную · 55 °C PETG" in _plain(_tab_auto(drying, p, True, _auto("dry", series=1, origin="manual")))
+    assert "вручную · 55° PETG" in _plain(_tab_auto(drying, p, True, _auto("dry", series=1, origin="manual")))
     foreign = _plain(_tab_auto(drying, p, True, _auto("foreign")))
-    assert foreign.startswith("🔥чужая сушка · 55 °C PETG · ещё 11:52 — не трогаем")
-    assert "🔥сушка · 55 °C PETG" in _plain(_tab_auto(drying, p, True, _auto("starting")))
+    assert foreign.startswith("🔥чужая сушка · 55° PETG · ещё 11ч 52м — не трогаем")
+    assert "🔥сушка · 55° PETG" in _plain(_tab_auto(drying, p, True, _auto("starting")))
     # idle: the auto-dry's word, for a viewer too, «Сушить…» only for an admin who may start it
     idle = _tab_unit()
     html = _tab_auto(idle, p, True, _auto("wait"))
@@ -621,7 +643,7 @@ def test_ams_tab_one_drying_line_with_the_auto_dry():
     # an offline unit (no drying block at all) still says what the auto-dry sees
     assert _plain(_tab_auto(_tab_unit(dry=None), p, True, _auto("offline", "принтер офлайн", "off"))) == "принтер офлайн"
     # a unit the auto-dry does not see: the old line, unchanged (test_ams_tab_drying_line)
-    assert _tab_auto(_tab_unit(), p, False, None) == "" and "осталось 11:52" in _tab_auto(drying, p, True, None)
+    assert _tab_auto(_tab_unit(), p, False, None) == "" and "осталось 11ч 52м" in _tab_auto(drying, p, True, None)
 
 
 def test_ams_tab_blocks_by_printer_name():
@@ -640,6 +662,21 @@ def test_ams_card_head_and_its_one_line():
     # plan step 14: the block's own «Остановить сушку?» (amsAsk) and its command answer (amsReply)
     assert "amsTabDryHtml(u, p, can, auto, amsAsk === key)" in shell and "auto = { card: al.card, cls: al.cls, status: adu.status };" in shell
     assert "'<div class=\"reply-slot\" data-ams-reply=\"' + key + '\">' + cmdLineHtml(amsReply[key], 'data-reply-x') + '</div>'" in shell
-    assert "'Влажность, %' + (z.goal ? ' · зелёное — цель ≤\u00a0' + z.ok + '\u00a0%' : '')" in shell
+    assert "'Влажность, %' + (z.goal ? ' · зелёное — цель ≤\u00a0' + z.ok + '%' : '')" in shell
     assert "Температура, °C · полосы — сушка" in shell
     assert "data-ad-row" not in _js_function("amsInit")
+
+
+def test_feeder_settings_show_real_values_and_only_supported_switches():
+    html = run('feederSettingsHtml({kind:"creality",feeder_settings:{auto_refill:true}})')
+    assert 'aria-checked="true"' in html
+    assert 'data-enabled="false"' in html
+    assert 'estimate_remaining' not in html
+    html = run('feederSettingsHtml({kind:"bambu",caps:{ams:false},feeder_settings:{auto_refill:false,estimate_remaining:true}})')
+    assert html.count('role="switch"') == 2
+    assert html.count(' disabled') == 2
+
+
+def test_settings_navigation_visible_only_with_reported_settings():
+    assert run('feederSettingsButton({kind:"creality"})') == ''
+    assert 'data-feeder-open' in run('feederSettingsButton({kind:"creality",feeder_settings:{auto_refill:false}})')

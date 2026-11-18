@@ -383,7 +383,9 @@ def test_klipper_shutdown_is_fatal_with_the_first_line_and_a_firmware_restart():
     assert _brief(items) == [("klipper:shutdown", "klipper", "webhooks: shutdown", "fatal",
                               "Klipper остановлен (shutdown): Lost communication with MCU 'mcu'")]
     n = items[0]
-    assert n["hint"] == nf.KLIPPER_SHUTDOWN_HINT and n["wiki"] is None and n["unknown"] is False
+    # the reason in plain words (QA 17.11): a lost MCU link says so, with the same firmware restart
+    assert n["hint"] == nf.klipper_shutdown_hint(_SHUTDOWN_MSG) and n["hint"].startswith("Потеряна связь с платой")
+    assert n["wiki"] is None and n["unknown"] is False
     assert [(a["key"], a["style"], a["confirm"] is not None) for a in n["actions"]] == [("fw_restart", "danger", True)]
     assert (n["blocking"], n["routine"], n["since"]) == (False, False, None)
     # no message yet (notify_klippy_shutdown comes before printer.info answers)
@@ -436,7 +438,18 @@ def test_klipper_host_state_falls_back_to_the_webhooks_debug_field():
 def test_creality_error_level_follows_the_print(state, severity):
     items = nf.build_creality({"err_code": 2, "err_key": 5}, state)
     assert _brief(items) == [("creality:2/5", "creality", "errcode 2 · key 5", severity, "Ошибка Creality 2/5")]
-    assert (items[0]["hint"], items[0]["actions"], items[0]["wiki"]) == (nf.CREALITY_HINT, [], None)
+    assert (items[0]["hint"], items[0]["wiki"]) == (nf.CREALITY_HINT, None)
+    # errcode 2: the K1C's web page restarts the firmware for it (16.11.2026)
+    assert [a["key"] for a in items[0]["actions"]] == ["cr_restart"]
+    assert items[0]["actions"][0]["style"] == "danger" and items[0]["actions"][0]["confirm"]
+
+
+def test_creality_error_buttons_clear_or_restart_and_resume_with_klipper():
+    keys = lambda items: [a["key"] for a in items[0]["actions"]]
+    assert keys(nf.build_creality({"err_code": 101, "err_key": 101}, PrinterState.PRINTING)) == ["cr_clear"]
+    assert keys(nf.build_creality({"err_code": 101, "err_key": 101, "klipper_api": True}, PrinterState.PAUSED)) == [
+        "cr_resume", "cr_clear"]
+    assert keys(nf.build_creality({"err_code": 200}, PrinterState.IDLE)) == ["cr_restart"]
 
 
 def test_creality_without_an_error_or_with_an_odd_key():

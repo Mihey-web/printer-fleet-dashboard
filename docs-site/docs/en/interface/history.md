@@ -1,7 +1,7 @@
 # History screen («История»)
 
-History has four sub-tabs: **Prints** («Печати»), **Timeline** («Хронология»), **Statistics**
-(«Статистика») and, for administrators, **Actions** («Действия»).
+History has five sub-tabs: **Prints** («Печати»), **Timeline** («Хронология»), **Statistics**
+(«Статистика»), **Filament** («Пластик») and, for administrators, **Actions** («Действия»).
 
 ## Filters for every sub-tab
 
@@ -16,11 +16,16 @@ One head is shared by all sub-tabs and stays when you switch between them:
 On a phone the filters fold into a summary line such as «24 ч · все принтеры»; tap it to change
 them.
 
-## Prints («Печати») — the print journal
+## Prints («Печати») — the print journal {#prints}
 
 One row per print. Columns: **Printer** («Принтер»), **Start** («Начало»), **Duration (plan, Δ)**
 («Длительность (план, Δ)» — actual time against the slicer's estimate), **Result** («Результат»),
-**Pauses** («Паузы»), **Layers** («Слои»), **Job** («Задание»).
+**Pauses** («Паузы»), **Layers** («Слои»), **Job** («Задание»), **Filament (est.)** («Расход
+(расч.)» — the slicer's weight for the whole job, not what was really used; «—» when unknown).
+
+A job with a slicer picture shows it in the **Job** column; click it to open the
+[job card](printers.md#job-card), kept with the print. The CSV export has the weight too
+(«Расчётный расход, г»).
 
 The result chips above the table show the totals and filter the list: All («Все»), Succeeded
 («Успешно»), Cancelled («Отменено»), Error («Ошибка»), Power («Питание» — power loss), No
@@ -47,9 +52,50 @@ Maintenance time is drawn as a hatched «обслуживание» segment.
   **Load** («Загрузка»), **Actual / plan** («Факт / план»).
 - **By printer** («По принтерам»): time shares of each state, printing time, prints, success rate,
   actual vs plan and the most frequent reason.
-- **Prints per day** («Печатей в день»).
+- **Prints per day** («Печатей в день») — days cut at midnight in your browser's time zone.
 - **Frequent reasons** («Частые причины») — switch between **Errors** («Ошибки») and **Pauses**
   («Паузы»).
+
+## Filament («Пластик») {#plastic}
+
+How much plastic the farm used over the head's period — for all printers or the chosen one. Both
+roles see it.
+
+![History → Filament — used per day and by printer](https://raw.githubusercontent.com/mihey-web/printer-fleet-dashboard/main/docs/screenshots/plastic.png)
+
+- **The tiles:** **For the period** («За период») — the total; **Average per day** («В среднем в
+  сутки»); **Today** («Сегодня») — so far, when the period includes today; **Prints without a
+  weight** («Печатей без веса») — prints the dashboard has no slicer weight for, left out of the
+  totals (shown only when there are some). Weights are in grams, from 1 kg on in kilograms.
+- **Usage per day** («Расход по дням») — a column per day. With a week or less on screen, each
+  column has its value on top and its date under it. Hover (or tap) a column for its weight and how
+  many of its prints had no weight. Today and the days where not every print has a weight are
+  drawn lighter.
+- **By printer** («По принтерам») — the printers that used the most first: **Printer**
+  («Принтер»), **Filament** («Пластик»), **Share** («Доля» — its percent of the total, with a bar
+  measured against the printer that used the most) and **No weight** («Без веса» — its prints
+  without a weight).
+
+### How it is counted {#plastic-counting}
+
+- **The weight of a print** is the slicer's planned weight for the whole job, read from the job's
+  file (see [where the job card comes from](printers.md#where-the-job-card-comes-from)); for the
+  Ender-5 Max it is worked out from the filament length. Klipper and MKS printers give no weight,
+  so their prints are always «без веса».
+- **A finished print** counts in full. A **cancelled**, failed or stopped one counts the share it
+  printed (its last progress), and a print still running counts its progress so far. A print
+  stopped at 0 % used nothing: 0 g.
+- **Over midnight:** a print's weight is spread evenly over the hours it ran, so a print that ran
+  across midnight is split between the two days.
+- **Days** are cut at midnight in your browser's time zone.
+- **Average per day** uses only the days where at least 90 % of the prints have a weight, from the
+  first day with a weight on, and never today (it is not over). A day without any prints counts as
+  0 g.
+- Prints in maintenance mode are included: their plastic was used all the same.
+- **Weight is recorded only for prints since the feature appeared.** Prints recorded before you
+  installed version 2.2.0 have no weight (the note under the tab names 14.11.2026, the day the
+  feature appeared). For a period with no weight at all the chart says «Вес пластика панель
+  записывает с 14.11.2026 — за этот период его нет».
 
 ## Actions («Действия», administrators) {#actions-administrators}
 

@@ -175,7 +175,7 @@ def test_users_wiring_has_no_native_dialogs():
     send = _js_function("admUserSend")
     assert "'/api/admin/users/' + encodeURIComponent(id)" in send and "admUsersUi.err[id] =" in send
     init = users[users.index("(function initAdminUsers() {"):]
-    for need in ("act === 'pw-save'", "pass.length < 8", "admUserSend(id, 'PUT', { password: pass }, 'Пароль обновлён');",
+    for need in ("act === 'pw-save'", "var pwBad = admPwError(pass);", "admUserSend(id, 'PUT', { password: pass }, 'Пароль обновлён');",
                  "admUserSend(id, 'PUT', { role: admUsersUi.role.role }, 'Роль обновлена');",
                  "admUserSend(id, 'DELETE', null, 'Пользователь удалён');", "select.adm-role", "e.key === 'Escape'"):
         assert need in init, need
